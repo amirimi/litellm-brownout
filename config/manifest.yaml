@@ -1,25 +1,25 @@
 version: "2026-08-26.1"
 
 teams:
-  advisorchat:
-    policy_epoch: "advisorchat-2026-08-26.1"
+  team-a:
+    policy_epoch: "team-a-v1"
     envelope_usd: 500.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
     on_counter_unavailable: block
     routes:
-      advisorchat-qa:
-        fallback: advisorchat-qa-degraded
+      chat-qa:
+        fallback: chat-qa-degraded
         degrade_at: 90
 
-  devagent:
-    policy_epoch: "devagent-2026-08-26.1"
+  team-b:
+    policy_epoch: "team-b-v1"
     envelope_usd: 2000.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
     on_counter_unavailable: block
     routes:
-      devagent-review:
+      code-review:
         fallback: null
         degrade_at: null
 

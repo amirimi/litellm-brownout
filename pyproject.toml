@@ -3,7 +3,7 @@ requires = ["uv_build >= 0.12.5, <0.13.0"]
 build-backend = "uv_build"
 
 [project]
-name = "budget-policy"
+name = "litellm-brownout"
 version = "1.0.0"
 description = "Tiered team budget enforcement and graceful downgrade for a LiteLLM gateway"
 license = "MIT"

@@ -14,9 +14,9 @@ litellm_settings:
   drop_params: true
 
 model_list:
-  - model_name: advisorchat-qa
+  - model_name: chat-qa
     litellm_params:
-      mock_response: "MOCK advisorchat-qa (primary)"
+      mock_response: "MOCK chat-qa (primary)"
       model: openai/mock-primary
       api_key: os.environ/OPENAI_API_KEY
       input_cost_per_token: 0.000003
@@ -28,9 +28,9 @@ model_list:
       max_output_tokens: 4000
       supported_environments: ["development", "staging"]
 
-  - model_name: advisorchat-qa
+  - model_name: chat-qa
     litellm_params:
-      mock_response: "MOCK advisorchat-qa (primary, second deployment)"
+      mock_response: "MOCK chat-qa (primary, second deployment)"
       model: openai/mock-primary
       api_key: os.environ/OPENAI_API_KEY
       input_cost_per_token: 0.000003
@@ -42,9 +42,9 @@ model_list:
       max_output_tokens: 4000
       supported_environments: ["development", "staging"]
 
-  - model_name: advisorchat-qa-degraded
+  - model_name: chat-qa-degraded
     litellm_params:
-      mock_response: "MOCK advisorchat-qa (degraded)"
+      mock_response: "MOCK chat-qa (degraded)"
       model: openai/mock-degraded
       api_key: os.environ/OPENAI_API_KEY
       input_cost_per_token: 0.00000025
@@ -54,9 +54,9 @@ model_list:
       max_output_tokens: 4000
       supported_environments: ["development", "staging"]
 
-  - model_name: devagent-review
+  - model_name: code-review
     litellm_params:
-      mock_response: "MOCK devagent-review"
+      mock_response: "MOCK code-review"
       model: openai/mock-primary
       api_key: os.environ/OPENAI_API_KEY
       input_cost_per_token: 0.000003

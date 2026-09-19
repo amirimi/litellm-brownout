@@ -5,17 +5,17 @@ data_class_order:
   - customer_pii
 
 models:
-  advisorchat-qa:
+  chat-qa:
     input_cost_per_token: 0.000003
     output_cost_per_token: 0.000015
     data_class: customer_pii
 
-  advisorchat-qa-degraded:
+  chat-qa-degraded:
     input_cost_per_token: 0.00000025
     output_cost_per_token: 0.00000125
     data_class: customer_pii
 
-  devagent-review:
+  code-review:
     input_cost_per_token: 0.000003
     output_cost_per_token: 0.000015
     data_class: internal
