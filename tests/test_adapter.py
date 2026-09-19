@@ -147,11 +147,12 @@ async def test_holds_from_other_in_flight_requests_still_count(team):
 
 
 async def test_a_resized_reservation_is_removed_at_the_size_it_now_holds(team):
-    """A reservation near the ceiling is resized down, not rejected.
+    """A reservation near the ceiling is resized down when fail-closed is off.
 
     ``_apply_over_budget_reservation_policy`` shrinks the hold to the budget
     that remains and admits, so the entry records a smaller figure than the
-    worst case first estimated. Removing the original estimate would understate
+    worst case first estimated. With ``fail_closed_budget_enforcement`` on,
+    LiteLLM 1.101.0 refuses that request instead, and this hook never sees it. Removing the original estimate would understate
     the team. Here $980 of settled spend leaves $20, the $50 estimate is resized
     to it, and the counter reads $1000.
     """
@@ -179,7 +180,7 @@ async def test_an_adjusted_entry_is_read_at_its_adjusted_size(team):
     ``reserved_cost`` alone would be wrong by the adjustment. This pre-call hook
     never observes that state, because an admission-time resize normalises the
     entry back to ``applied_adjustment = 0``
-    (``budget_reservation.py:849-851``) and reconciliation happens after the
+    (``budget_reservation.py:979-981``) and reconciliation happens after the
     response. Summing both fields makes the helper correct by construction
     rather than correct by that timing argument.
     """

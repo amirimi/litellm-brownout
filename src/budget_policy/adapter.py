@@ -5,7 +5,7 @@ Loads as a dotted callback path in ``config.yaml`` against the stock
 policy input, applies the outcome to the request body, and discloses what it did
 to the caller.
 
-Three things it deliberately does not do, because LiteLLM 1.97.0 already does
+Three things it deliberately does not do, because LiteLLM 1.101.0 already does
 them: reserve the worst-case cost, count spend atomically across replicas, and
 raise the 429 at 100% of the owner-approved team budget. The reservation lands
 during authentication, so the counter this hook reads already holds a charge for
@@ -692,7 +692,7 @@ def _refuse_caller_routing(data: dict) -> None:
 
     Only caller-supplied routing is refused. Fallbacks declared in
     ``router_settings`` live on the Router rather than in the request body
-    (``router.py:669``), so nothing LiteLLM offers natively is affected.
+    (``router.py:953``), so nothing LiteLLM offers natively is affected.
     """
     refused: Final = _caller_routing_keys(data)
     if not refused:

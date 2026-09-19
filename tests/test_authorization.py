@@ -73,7 +73,7 @@ async def test_a_key_inheriting_its_team_allowlist_may_be_degraded(team):
 
     Resolving that sentinel is what stops the key check from reading an
     inherited allowlist as a one-entry literal list and refusing every downgrade
-    (``auth_checks.py:3100``).
+    (``auth_checks.py:4059``).
     """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)

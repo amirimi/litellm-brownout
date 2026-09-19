@@ -11,7 +11,7 @@ rebuilds, so a second demo run starts from zero rather than from wherever the
 first one stopped.
 
 The wait is load-bearing. LiteLLM buffers spend per team and flushes it every
-`PROXY_BATCH_WRITE_AT` seconds (`constants.py:1506`, 10 by default). Deleting the
+`PROXY_BATCH_WRITE_AT` seconds (`constants.py:1693`, 10 by default). Deleting the
 team and recreating it under the same id inside that window lets the previous
 run's buffered spend land on the new row, and the next clean Redis miss reseeds
 the counter straight off it. Deleting first and creating after the flush window

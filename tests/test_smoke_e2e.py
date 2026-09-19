@@ -37,7 +37,7 @@ EVENT_SINK: Final = os.getenv("LAB_EVENT_SINK", "http://localhost:8088/events")
 LAB_TEAM_ID: Final = "budget-lab"
 LAB_ROUTE: Final = "budget-lab-primary"
 DEGRADED_ROUTE: Final = "budget-lab-degraded"
-MAX_TOKENS: Final = 200
+MAX_TOKENS: Final = 40
 MAX_REQUESTS: Final = 80
 REQUEST_TIMEOUT_SECONDS: Final = 30.0
 

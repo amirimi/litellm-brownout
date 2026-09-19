@@ -3,7 +3,7 @@
 A LiteLLM custom logger plugin that keeps each team's spend inside a budget its owner approved.
 It raises one event per declared warning tier, moves eligible routes to a validated cheaper model
 at a route-declared threshold, and tells the calling application in response headers which route
-served and why. LiteLLM 1.97.0 already reserves each request's worst-case cost at authentication,
+served and why. LiteLLM 1.101.0 already reserves each request's worst-case cost at authentication,
 counts spend atomically across replicas in Redis, reconciles to actual cost and refuses admission
 at 100%, so the plugin adds only what configuration cannot express. Those four things are tier
 events at arbitrary thresholds, route-declared degradation on a team total, validated fallback
@@ -14,7 +14,7 @@ LiteLLM seam around it.
 
 ## Installation
 
-The plugin runs inside the stock `docker.litellm.ai/berriai/litellm:v1.97.0` image as a mounted
+The plugin runs inside the stock `docker.litellm.ai/berriai/litellm:v1.101.0` image as a mounted
 package and one dotted callback path. Mount the package, point two environment variables at the
 manifest and the price catalog, name the handler in `litellm_settings.callbacks`, then create each
 governed team in LiteLLM with a `max_budget` equal to its manifest envelope.
@@ -24,7 +24,7 @@ governed team in LiteLLM with a `max_budget` equal to its manifest envelope.
 ```yaml
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:v1.97.0
+    image: docker.litellm.ai/berriai/litellm:v1.101.0
     environment:
       PYTHONPATH: /app/plugins
       BUDGET_POLICY_PRICES: /app/config/prices.yaml
@@ -38,7 +38,7 @@ services:
 The plugin imports `httpx`, `pyyaml`, `fastapi` and `litellm`, all present in the image. Three of
 its LiteLLM imports are private helpers (`_can_object_call_model`,
 `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), so the version
-pin is load-bearing. `pyproject.toml` pins `litellm[proxy]==1.97.0`. The repository documents and
+pin is load-bearing. `pyproject.toml` pins `litellm[proxy]==1.101.0`. The repository documents and
 tests the mount. Installing the built wheel into a custom image is untested.
 
 | Variable | Default | Purpose |
@@ -88,7 +88,7 @@ model_list:
 
 | Setting | Why it is there |
 |---|---|
-| `fail_closed_budget_enforcement: true` | A reservation that cannot be written, or a spend figure that cannot be read, refuses the request instead of admitting it ([`proxy/spend_tracking/budget_reservation.py:216`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/spend_tracking/budget_reservation.py#L216), [`proxy/proxy_server.py:2219`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/proxy_server.py#L2219)) |
+| `fail_closed_budget_enforcement: true` | A reservation that cannot be written, a spend figure that cannot be read, or a worst-case estimate larger than the headroom that remains, refuses the request instead of admitting it ([`proxy/spend_tracking/budget_reservation.py:259`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L259), [`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)) |
 | `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's tier claim reuses the same Redis, so one crossing is one event across every replica. Without Redis the claim falls back to a per-replica set and logs that once |
 | `callbacks` | The dotted path to the handler instance `adapter.py` builds at import |
 | `input_cost_per_token`, `output_cost_per_token` on each deployment | What LiteLLM reserves against. `tests/test_config_contract.py` requires them to equal the catalog entry for the same model group |
@@ -314,22 +314,22 @@ read from the pinned source in `.venv/lib/python3.12/site-packages/litellm`.
 
 | Native, configured rather than rebuilt | Where |
 |---|---|
-| Worst-case cost reserved during authentication, before any callback runs | [`proxy/auth/user_api_key_auth.py:2421`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/auth/user_api_key_auth.py#L2421) |
-| The reservation increments the counter with Redis `INCRBYFLOAT` | [`proxy/proxy_server.py:2848`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/proxy_server.py#L2848), [`caching/redis_cache.py:953`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/caching/redis_cache.py#L953) |
-| Counters for Key, Team and User, only when `max_budget > 0` | [`proxy/spend_tracking/budget_reservation.py:341-398`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/spend_tracking/budget_reservation.py#L341-L398) |
-| An exhausted budget raises `BudgetExceededError` with `status_code = 429` at auth | [`proxy/spend_tracking/budget_reservation.py:133`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/spend_tracking/budget_reservation.py#L133), [`exceptions.py:972`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/exceptions.py#L972) |
-| Partial headroom resizes the reservation instead of blocking | [`proxy/spend_tracking/budget_reservation.py:124-131`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/spend_tracking/budget_reservation.py#L124-L131) |
-| Spend reconciled to real cost after the response completes | [`proxy/spend_tracking/budget_reservation.py:256`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/spend_tracking/budget_reservation.py#L256) |
-| `budget_duration: "7d"` anchors the window to Monday at the configured reset time | [`litellm_core_utils/duration_parser.py:246-249`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/litellm_core_utils/duration_parser.py#L246-L249) |
-| Model-level guardrails merge into the request just before the pre-call hook | [`proxy/common_request_processing.py:1423`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/common_request_processing.py#L1423) |
-| Outage failover across deployments of one route, by `order` and cooldown | [`router.py:10810`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/router.py#L10810) calling `_get_order_filtered_deployments` |
+| Worst-case cost reserved during authentication, before any callback runs | [`proxy/auth/user_api_key_auth.py:2667`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/auth/user_api_key_auth.py#L2667) |
+| The reservation increments the counter with Redis `INCRBYFLOAT` | [`proxy/proxy_server.py:3283`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L3283), [`caching/redis_cache.py:1195`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/caching/redis_cache.py#L1195) |
+| Counters for Key, Team and User, only when `max_budget > 0` | [`proxy/spend_tracking/budget_reservation.py:417-474`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L417-L474) |
+| An exhausted budget raises `BudgetExceededError` with `status_code = 429` at auth | [`proxy/spend_tracking/budget_reservation.py:161`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L161), [`exceptions.py:440`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/exceptions.py#L440) |
+| Partial headroom resizes the reservation instead of blocking, unless `fail_closed_budget_enforcement` is on, in which case an estimate that does not fit is refused | [`proxy/spend_tracking/budget_reservation.py:138-154`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L138-L154) |
+| Spend reconciled to real cost after the response completes | [`proxy/spend_tracking/budget_reservation.py:305`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L305) |
+| `budget_duration: "7d"` anchors the window to Monday at the configured reset time | [`litellm_core_utils/duration_parser.py:246-249`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/litellm_core_utils/duration_parser.py#L246-L249) |
+| Model-level guardrails merge into the request just before the pre-call hook | [`proxy/common_request_processing.py:2002`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/common_request_processing.py#L2002) |
+| Outage failover across deployments of one route, by `order` and cooldown | [`router.py:12456`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/router.py#L12456) calling `_get_order_filtered_deployments` |
 
 | Built here | Why configuration could not express it |
 |---|---|
-| Tier events at 75%, 90% and any route-declared threshold | The native alerter is hardcoded to 85% and 95% ([`integrations/SlackAlerting/slack_alerting.py:605-610`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/integrations/SlackAlerting/slack_alerting.py#L605-L610)), and no `alerting` key is declared |
-| Route-declared degradation on a team total | `budget_fallbacks` fires on per-model `model_max_budget`, never on a team total ([`proxy/hooks/model_max_budget_limiter.py:90`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/hooks/model_max_budget_limiter.py#L90)) |
+| Tier events at 75%, 90% and any route-declared threshold | The native alerter is hardcoded to 85% and 95% ([`integrations/SlackAlerting/slack_alerting.py:648-653`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/integrations/SlackAlerting/slack_alerting.py#L648-L653)), and no `alerting` key is declared |
+| Route-declared degradation on a team total | `budget_fallbacks` fires on per-model `model_max_budget`, never on a team total ([`proxy/hooks/model_max_budget_limiter.py:300`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/hooks/model_max_budget_limiter.py#L300)) |
 | Validated fallback selection | Nothing native checks that a target is cheaper, priced, and cleared for the primary's data class |
-| A catalog that raises on an unknown model | LiteLLM returns `None` for an unpriced model and skips reservation entirely ([`proxy/spend_tracking/budget_reservation.py:193`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/spend_tracking/budget_reservation.py#L193)) |
+| A catalog that raises on an unknown model | LiteLLM returns `None` for an unpriced model and skips reservation entirely ([`proxy/spend_tracking/budget_reservation.py:236`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236)) |
 | Caller disclosure | No native header carries the served route or the route it degraded from |
 | Guardrail re-merge after a rewrite | The merge runs at stage 3 keyed on the requested model, so a stage 4 rewrite would drop the target's guardrails |
 | Versioned, cross-replica deduplication | Each claim carries team, policy epoch, window and threshold, so an approved policy change re-arms its transitions |
@@ -342,21 +342,22 @@ Three pieces of work remain.
   try/except that swallows, and runs it on success only, so a request blocked at the native ceiling
   carries no platform header and its signal lives in the 429 body. A response middleware seam
   would close this.
-- Route `max_tokens` is not clamped before dispatch. LiteLLM shrinks the last reservation to the
-  headroom that remains rather than refusing it, so a window can close one request above its
-  envelope, and the request after that finds no headroom and takes the 429. A clamp is what would
-  bound that overshoot.
+- Route `max_tokens` is not clamped before dispatch. With `fail_closed_budget_enforcement` off,
+  LiteLLM shrinks the last reservation to the headroom that remains rather than refusing it, so a
+  window can close one request above its envelope. With it on, the request whose worst case does
+  not fit is refused, so the window closes early instead. A clamp is what would bound both.
 - The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
   suite and has yet to be driven through a live gateway.
 
-Four limits a deployment inherits as the plugin stands.
+Five limits a deployment inherits as the plugin stands.
 
 | Limit | What it means for a deployment |
 |---|---|
 | Entitlement reads the direct key and team model lists | A target reachable only through an access group, a team alias, or project or member scope reads as unselectable, so the primary is served. Those scopes need LiteLLM's full resolved-model path |
-| Only the budget amount is re-checked per request | The authenticated object carries `team_max_budget` and no duration or reset instant ([`proxy/_types.py:2559`](https://github.com/BerriAI/litellm/blob/v1.97.0/litellm/proxy/_types.py#L2559)), so a drifted window is caught where the team is rendered. The manifest parses `budget_duration` at load, because one derivation raises on a bad value and the other quietly returns the next midnight |
+| Only the budget amount is re-checked per request | The authenticated object carries `team_max_budget` and no duration or reset instant ([`proxy/_types.py:2879`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/_types.py#L2879)), so a drifted window is caught where the team is rendered. The manifest parses `budget_duration` at load, because one derivation raises on a bad value and the other quietly returns the next midnight |
 | Data classes are compared as an ordering | The whole rule for two classes. Provider, region, retention, purpose and audit requirement can each be more restrictive without the combination being permitted, and a production deployment needs a matrix over those dimensions |
 | Money is a `float` | It matches the counter LiteLLM increments with `INCRBYFLOAT`. Nothing here is the system of record for spend |
+| The reservation is sized on the requested route, never the served one | Reservation runs at authentication and the rewrite runs after it, so a degraded request still needs the primary's worst case to fit the headroom. With `fail_closed_budget_enforcement` on, admission therefore stops at the envelope minus the requested route's worst case, and a degrade tier above that ratio never fires. Keep `max_tokens` small relative to the envelope, as the lab does |
 
 ## Running the tests
 
@@ -398,13 +399,14 @@ KEY=$(uv run python lab/setup_lab.py | grep -oE 'sk-[A-Za-z0-9_-]+' | head -1)
 for i in $(seq 1 70); do
   curl -s -D - -o /dev/null -X POST http://localhost:4000/v1/chat/completions \
     -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-    -d '{"model":"budget-lab-primary","messages":[{"role":"user","content":"hi"}],"max_tokens":200}' \
+    -d '{"model":"budget-lab-primary","messages":[{"role":"user","content":"hi"}],"max_tokens":40}' \
   | grep -i '^HTTP/\|^x-platform'
 done
 curl -s localhost:8088/events | jq -c '.events[] | select(.event=="budget_tier_crossed")'
 ```
 
-Request 37 is the first downgrade and request 61 takes LiteLLM's native 429.
+Request 37 is the first downgrade, request 51 is the first to carry tier 90, and request 57 takes
+LiteLLM's native 429 with $0.966 settled against a $0.0408 estimate.
 
 ```
 HTTP/1.1 200 OK
