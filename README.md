@@ -124,11 +124,11 @@ drifted `budget_duration` has to be caught wherever the team is rendered.
 ### Team manifest
 
 ```yaml
-version: "2026-08-26.1"
+version: "v1"
 
 teams:
   team-a:
-    policy_epoch: "team-a-2026-08-26.1"
+    policy_epoch: "team-a-v1"
     envelope_usd: 500.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
@@ -159,7 +159,7 @@ teams:
 ### Price catalog
 
 ```yaml
-version: "2026-08-25.1"
+version: "v1"
 
 data_class_order:
   - internal
@@ -256,7 +256,7 @@ concurrent and best-effort, and a failed sink cannot fail the request.
 
 ```json
 {"event": "budget_tier_crossed", "owner": "team", "team_id": "team-a",
- "policy_epoch": "team-a-2026-08-26.1", "window": "2026-09-21T00:00:00+00:00",
+ "policy_epoch": "team-a-v1", "window": "2026-09-21T00:00:00+00:00",
  "tier": 75, "route": "route-chat", "served_route": "route-chat-degraded",
  "decision": "degrade", "reason": "degrade_tier_reached",
  "spend_usd": 376.2, "envelope_usd": 500.0}
@@ -264,7 +264,7 @@ concurrent and best-effort, and a failed sink cannot fail the request.
 {"event": "budget_policy_incident", "owner": "platform",
  "reason": "budget_ceiling_drift", "window": "2026-09-21T00:00:00+00:00",
  "team_id": "team-a", "envelope_usd": 500.0, "team_max_budget_usd": 5000.0,
- "manifest_version": "2026-08-26.1"}
+ "manifest_version": "v1"}
 ```
 
 Incident reasons are `unpriced_model`, `team_not_in_manifest`, `budget_ceiling_drift`,

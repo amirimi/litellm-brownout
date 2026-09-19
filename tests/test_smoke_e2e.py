@@ -185,7 +185,7 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(lab_key: str) -> No
         f"expected one 75 and one 90 event, saw {tiers} over {observed.requests} requests"
     )
     assert events[0]["route"] == LAB_ROUTE
-    assert events[0]["policy_epoch"] == "budget-lab-2026-08-25.1"
+    assert events[0]["policy_epoch"] == "budget-lab-v1"
     assert events[0]["envelope_usd"] == 1.0
     assert events[0]["spend_usd"] >= 0.75
     assert events[1]["spend_usd"] >= 0.90

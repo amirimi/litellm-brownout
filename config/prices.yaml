@@ -1,4 +1,4 @@
-version: "2026-08-25.1"
+version: "v1"
 
 data_class_order:
   - internal

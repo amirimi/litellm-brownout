@@ -1,4 +1,4 @@
-version: "2026-08-26.1"
+version: "v1"
 
 teams:
   team-a:
@@ -24,7 +24,7 @@ teams:
         degrade_at: null
 
   budget-lab:
-    policy_epoch: "budget-lab-2026-08-25.1"
+    policy_epoch: "budget-lab-v1"
     envelope_usd: 1.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
