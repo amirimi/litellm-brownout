@@ -1,4 +1,4 @@
-# LiteLLM budget policy
+# LiteLLM brownout
 
 A LiteLLM custom logger plugin that keeps each team's spend inside a budget its owner approved.
 It raises one event per declared warning tier, moves eligible routes to a validated cheaper model
