@@ -1,0 +1,38 @@
+version: "2026-08-26.1"
+
+teams:
+  advisorchat:
+    policy_epoch: "advisorchat-2026-08-26.1"
+    envelope_usd: 500.0
+    budget_duration: "7d"
+    warn_tiers: [75, 90]
+    on_counter_unavailable: block
+    routes:
+      advisorchat-qa:
+        fallback: advisorchat-qa-degraded
+        degrade_at: 90
+
+  devagent:
+    policy_epoch: "devagent-2026-08-26.1"
+    envelope_usd: 2000.0
+    budget_duration: "7d"
+    warn_tiers: [75, 90]
+    on_counter_unavailable: block
+    routes:
+      devagent-review:
+        fallback: null
+        degrade_at: null
+
+  budget-lab:
+    policy_epoch: "budget-lab-2026-08-25.1"
+    envelope_usd: 1.0
+    budget_duration: "7d"
+    warn_tiers: [75, 90]
+    on_counter_unavailable: block
+    routes:
+      budget-lab-primary:
+        fallback: budget-lab-degraded
+        degrade_at: 75
+      budget-lab-strict:
+        fallback: null
+        degrade_at: null

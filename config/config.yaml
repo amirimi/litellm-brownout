@@ -1,0 +1,103 @@
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  fail_closed_budget_enforcement: true
+  coordination_redis:
+    host: os.environ/REDIS_HOST
+    port: 6379
+    password: os.environ/REDIS_PASSWORD
+
+litellm_settings:
+  callbacks: ["budget_policy.adapter.handler"]
+  success_callback: ["langfuse", "datadog_metrics"]
+  failure_callback: ["langfuse", "datadog_metrics"]
+  cache: false
+  drop_params: true
+
+model_list:
+  - model_name: advisorchat-qa
+    litellm_params:
+      mock_response: "MOCK advisorchat-qa (primary)"
+      model: openai/mock-primary
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+      rpm: 60
+      order: 1
+    model_info:
+      data_class: customer_pii
+      max_output_tokens: 4000
+      supported_environments: ["development", "staging"]
+
+  - model_name: advisorchat-qa
+    litellm_params:
+      mock_response: "MOCK advisorchat-qa (primary, second deployment)"
+      model: openai/mock-primary
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+      rpm: 60
+      order: 2
+    model_info:
+      data_class: customer_pii
+      max_output_tokens: 4000
+      supported_environments: ["development", "staging"]
+
+  - model_name: advisorchat-qa-degraded
+    litellm_params:
+      mock_response: "MOCK advisorchat-qa (degraded)"
+      model: openai/mock-degraded
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.00000025
+      output_cost_per_token: 0.00000125
+    model_info:
+      data_class: customer_pii
+      max_output_tokens: 4000
+      supported_environments: ["development", "staging"]
+
+  - model_name: devagent-review
+    litellm_params:
+      mock_response: "MOCK devagent-review"
+      model: openai/mock-primary
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+    model_info:
+      data_class: internal
+      max_output_tokens: 4000
+      supported_environments: ["development", "staging", "production"]
+
+  - model_name: budget-lab-primary
+    litellm_params:
+      mock_response: "MOCK budget-lab-primary. Padded so a synthetic completion carries enough output tokens to move a small envelope in a handful of calls, which is what makes the tier sequence observable without spending provider money."
+      model: openai/mock-primary
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.0001
+      output_cost_per_token: 0.001
+      rpm: 600
+    model_info:
+      data_class: internal
+      max_output_tokens: 200
+
+  - model_name: budget-lab-degraded
+    litellm_params:
+      mock_response: "MOCK budget-lab-degraded. Half the per-token price of the primary lab route, so a downgrade is observable in the spend counter and not only in the response headers."
+      model: openai/mock-degraded
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.00005
+      output_cost_per_token: 0.0005
+      rpm: 600
+    model_info:
+      data_class: internal
+      max_output_tokens: 200
+
+  - model_name: budget-lab-strict
+    litellm_params:
+      mock_response: "MOCK budget-lab-strict. Declares no degradation target, so it warns and then blocks without ever changing the served route."
+      model: openai/mock-primary
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.0001
+      output_cost_per_token: 0.001
+      rpm: 600
+    model_info:
+      data_class: internal
+      max_output_tokens: 200

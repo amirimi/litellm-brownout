@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: format, lint, types, unit and configuration contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pytest -m "not e2e"
+
+  end-to-end:
+    name: composed gateway sequence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: cp .env.example .env
+      - run: docker compose up -d --wait
+      - name: run the sequence
+        run: set -a && . ./.env && set +a && uv run pytest -m e2e
+        env:
+          LAB_REQUIRE_STACK: "1"
+      - if: always()
+        run: docker compose logs litellm
+      - if: always()
+        run: docker compose down -v
