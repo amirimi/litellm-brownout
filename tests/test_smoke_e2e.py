@@ -3,7 +3,8 @@
 One scripted sequence on mock routes, so it spends no provider money and still
 drives real reservations, a real Redis counter and the real native ceiling. It
 observes the 75% and 90% warnings, a route-declared downgrade below the hard
-ceiling, and the 429 raised by LiteLLM at 100% of the owner-approved budget.
+ceiling, the 429 raised by LiteLLM at 100% of the owner-approved budget, and a
+counter that never passed the envelope on the way there.
 
 Skipped unless the stack is up. Bring it up with:
 
@@ -37,6 +38,7 @@ EVENT_SINK: Final = os.getenv("LAB_EVENT_SINK", "http://localhost:8088/events")
 LAB_TEAM_ID: Final = "budget-lab"
 LAB_ROUTE: Final = "budget-lab-primary"
 DEGRADED_ROUTE: Final = "budget-lab-degraded"
+LAB_ENVELOPE_USD: Final = 1.0
 MAX_TOKENS: Final = 40
 MAX_REQUESTS: Final = 80
 REQUEST_TIMEOUT_SECONDS: Final = 30.0
@@ -186,7 +188,7 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(lab_key: str) -> No
     )
     assert events[0]["route"] == LAB_ROUTE
     assert events[0]["policy_epoch"] == "budget-lab-v1"
-    assert events[0]["envelope_usd"] == 1.0
+    assert events[0]["envelope_usd"] == LAB_ENVELOPE_USD
     assert events[0]["spend_usd"] >= 0.75
     assert events[1]["spend_usd"] >= 0.90
     assert all(event["owner"] == "team" for event in events)
@@ -202,6 +204,13 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(lab_key: str) -> No
         f"never reached the native ceiling in {observed.requests} requests"
     )
     assert "budget" in observed.blocked_body.lower()
+
+    counter = lab_spend_counter(LAB_TEAM_ID)
+    assert counter <= LAB_ENVELOPE_USD, (
+        f"the window closed with the counter at ${counter:.4f} against a "
+        f"${LAB_ENVELOPE_USD:.2f} envelope, so a hold was admitted that did not fit. "
+        "The lab config sets fail_closed_budget_enforcement, which refuses such a hold"
+    )
 
 
 @requires_stack

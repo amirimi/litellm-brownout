@@ -53,6 +53,50 @@ def test_native_budget_alerting_is_not_a_second_tier_event_owner():
     assert "alerting" not in gateway_config["general_settings"]
 
 
+def test_the_gateway_refuses_a_worst_case_that_does_not_fit():
+    """The hard boundary is one gateway flag, and the plugin never reads it.
+
+    ``fail_closed_budget_enforcement`` makes LiteLLM refuse a worst case larger
+    than the remaining headroom instead of shrinking the hold to fit
+    (``budget_reservation.py:141``), and ``disable_budget_reservation`` would
+    remove the hold from every budget on the gateway
+    (``user_api_key_auth.py:2708``). Both are read from ``general_settings``
+    alone, after the plugin has already loaded, so review time is the only place
+    a drift can be caught.
+    """
+    with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
+        gateway_config: dict[str, Any] = yaml.safe_load(handle)
+
+    general_settings = gateway_config["general_settings"]
+    assert general_settings.get("fail_closed_budget_enforcement") is True, (
+        "without fail_closed_budget_enforcement the last hold shrinks to the headroom "
+        "and a window can close one request above its envelope"
+    )
+    assert "disable_budget_reservation" not in general_settings, (
+        "disable_budget_reservation turns admission into a plain counter read that "
+        "concurrent requests can all pass on the same figure"
+    )
+
+
+def test_every_deployment_declares_its_output_ceiling():
+    """The worst-case hold reserves ``min(max_tokens, max_output_tokens or 16384)``.
+
+    The router fills ``max_output_tokens`` from LiteLLM's cost map for a model the
+    map knows (``router.py:10528-10535``). The lab's mock models are unknown to
+    it, so a deployment that omits the field reserves 16384 output tokens per
+    request (``budget_reservation.py:1434``), which is most of a lab envelope.
+    """
+    with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
+        gateway_config: dict[str, Any] = yaml.safe_load(handle)
+
+    for deployment in gateway_config["model_list"]:
+        ceiling = deployment["model_info"].get("max_output_tokens")
+        assert isinstance(ceiling, int) and ceiling > 0, (
+            f"deployment {deployment['model_name']} declares no max_output_tokens, so "
+            "LiteLLM reserves 16384 output tokens for every request on it"
+        )
+
+
 def test_every_manifest_route_and_fallback_is_priced(
     manifest: Manifest, catalog: PriceCatalog
 ):
