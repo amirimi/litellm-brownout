@@ -88,16 +88,18 @@ model_list:
 
 | Setting | Why it is there |
 |---|---|
-| `fail_closed_budget_enforcement: true` | A reservation that cannot be written, a spend figure that cannot be read, or a worst-case estimate larger than the headroom that remains, refuses the request instead of admitting it ([`proxy/spend_tracking/budget_reservation.py:259`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L259), [`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)) |
+| `fail_closed_budget_enforcement: true` | Decides the envelope boundary for the whole gateway, read from `general_settings` alone ([`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)). On, a worst case that does not fit the remaining headroom is refused whole at authentication ([`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)), and so is a reservation that cannot be written or a spend figure that cannot be verified ([`budget_reservation.py:259`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L259), [`proxy_server.py:2527`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2527)). Off, the hold shrinks to the headroom and the request ships at its full `max_tokens`, so a window can close one request above its envelope. Removing the key gives that soft boundary to every team. `disable_budget_reservation` is a third posture with no hold at all, described under [The envelope boundary](#the-envelope-boundary) |
 | `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's tier claim reuses the same Redis, so one crossing is one event across every replica. Without Redis the claim falls back to a per-replica set and logs that once |
 | `callbacks` | The dotted path to the handler instance `adapter.py` builds at import |
 | `input_cost_per_token`, `output_cost_per_token` on each deployment | What LiteLLM reserves against. `tests/test_config_contract.py` requires them to equal the catalog entry for the same model group |
 | `model_info.data_class` | Must equal the catalog's class for the group. The plugin reads the catalog, and the contract test keeps the two aligned |
 
-Two keys must stay absent. `general_settings.alerting` would make LiteLLM's hardcoded 85% and 95%
-alerter a second owner of tier events, and `router_settings.fallbacks` (or its context-window and
+Three keys must stay absent. `general_settings.alerting` would make LiteLLM's hardcoded 85% and
+95% alerter a second owner of tier events, `router_settings.fallbacks` (or its context-window and
 content-policy variants) would move a request to another model group after the disclosure header
-was decided. `tests/test_config_contract.py` fails on either.
+was decided, and `general_settings.disable_budget_reservation` would remove the hold from every
+budget on the gateway. `tests/test_config_contract.py` fails on any of the three, and on a missing
+`fail_closed_budget_enforcement`.
 
 ### Create the team
 
@@ -211,6 +213,42 @@ Redis `SET NX` on `budget_policy:tier:<team>:<epoch>:<window>:<tier>` with a TTL
 Correctness comes from the key. The window id is derived from LiteLLM's own `budget_reset_at`
 anchoring, so a reset re-arms every tier without a TTL guess.
 
+### The envelope boundary
+
+LiteLLM sizes a worst-case hold during authentication, `fail_closed_budget_enforcement` decides
+what happens when that hold does not fit, and every plugin hook runs after that decision. The
+plugin reports and degrades below the boundary and owns nothing at it.
+
+| Gateway posture | When the worst case exceeds the headroom | Settled spend at window close |
+|---|---|---|
+| `fail_closed_budget_enforcement: true` | Refused whole, 429 at authentication ([`budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)) | At or below the envelope, to the accuracy of the estimate below. Up to one worst case of headroom goes unspent |
+| Flag absent or `false` | The hold shrinks to the headroom and the request ships at its full `max_tokens` ([`budget_reservation.py:147`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L147)) | Up to one worst case minus the headroom above the envelope. The next request takes the 429 |
+| `disable_budget_reservation: true` | No hold is placed. Admission is a read of the counter that the response updates afterwards ([`user_api_key_auth.py:2708`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/auth/user_api_key_auth.py#L2708), [`auth_checks.py:5242`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/auth/auth_checks.py#L5242)) | Concurrent requests each pass on the same figure, so no single request bounds the overshoot |
+
+Set the flag when the envelope is a ceiling that must hold, and accept that the last fraction of
+headroom below one request's worst case goes unspent. Leave it out when spending the whole envelope
+matters more than a one-request overshoot, and accept that an unwritable hold or an unverifiable
+counter is then admitted rather than refused, for every team on the gateway. The third posture
+stays absent.
+
+The worst case is the counted input tokens at the input price plus
+`min(max_tokens, model_info.max_output_tokens or 16384)` at the output price, taken as the maximum
+over the group's deployments
+([`budget_reservation.py:1434-1462`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L1434-L1462)).
+Two things settle above that hold. A provider that emits past `max_output_tokens`, and a cost
+component the estimate does not price. The router fills `max_output_tokens` from LiteLLM's cost map
+for an underlying model the map knows
+([`router.py:10339`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/router.py#L10339),
+[`router.py:10528-10535`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/router.py#L10528-L10535)),
+so the field matters on a deployment the map does not know, such as the lab's mock models, where an
+absent field reserves 16384 output tokens.
+
+A per-team hard boundary is buildable in one direction. On a gateway with the flag off, the
+pre-call hook could refuse a request whose hold was shrunk, at the cost of duplicating LiteLLM's
+worst-case estimate and leaving every team with the flag-off failure rows. On a gateway with the
+flag on, the hook sees only requests that were already admitted whole, so it can loosen nothing.
+The flag is the whole mechanism today.
+
 ### Degradation posture and failure modes
 
 Every failure direction is closed. A request the plugin cannot govern is refused.
@@ -318,7 +356,7 @@ read from the pinned source in `.venv/lib/python3.12/site-packages/litellm`.
 | The reservation increments the counter with Redis `INCRBYFLOAT` | [`proxy/proxy_server.py:3283`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L3283), [`caching/redis_cache.py:1195`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/caching/redis_cache.py#L1195) |
 | Counters for Key, Team and User, only when `max_budget > 0` | [`proxy/spend_tracking/budget_reservation.py:417-474`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L417-L474) |
 | An exhausted budget raises `BudgetExceededError` with `status_code = 429` at auth | [`proxy/spend_tracking/budget_reservation.py:161`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L161), [`exceptions.py:440`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/exceptions.py#L440) |
-| Partial headroom resizes the reservation instead of blocking, unless `fail_closed_budget_enforcement` is on, in which case an estimate that does not fit is refused | [`proxy/spend_tracking/budget_reservation.py:138-154`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L138-L154) |
+| The hard boundary. With `fail_closed_budget_enforcement` on, a worst case that does not fit the remaining headroom is refused whole at authentication. With it off, the hold is resized to the headroom instead | [`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141), [`budget_reservation.py:147`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L147), [`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429) |
 | Spend reconciled to real cost after the response completes | [`proxy/spend_tracking/budget_reservation.py:305`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L305) |
 | `budget_duration: "7d"` anchors the window to Monday at the configured reset time | [`litellm_core_utils/duration_parser.py:246-249`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/litellm_core_utils/duration_parser.py#L246-L249) |
 | Model-level guardrails merge into the request just before the pre-call hook | [`proxy/common_request_processing.py:2002`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/common_request_processing.py#L2002) |
@@ -336,20 +374,16 @@ read from the pinned source in `.venv/lib/python3.12/site-packages/litellm`.
 
 ## Known limitations
 
-Three pieces of work remain.
+Two pieces of work remain.
 
 - Disclosure is not an invariant on blocked requests. LiteLLM wraps the response-headers hook in a
   try/except that swallows, and runs it on success only, so a request blocked at the native ceiling
   carries no platform header and its signal lives in the 429 body. A response middleware seam
   would close this.
-- Route `max_tokens` is not clamped before dispatch. With `fail_closed_budget_enforcement` off,
-  LiteLLM shrinks the last reservation to the headroom that remains rather than refusing it, so a
-  window can close one request above its envelope. With it on, the request whose worst case does
-  not fit is refused, so the window closes early instead. A clamp is what would bound both.
 - The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
   suite and has yet to be driven through a live gateway.
 
-Five limits a deployment inherits as the plugin stands.
+Six limits a deployment inherits as the plugin stands.
 
 | Limit | What it means for a deployment |
 |---|---|
@@ -358,13 +392,14 @@ Five limits a deployment inherits as the plugin stands.
 | Data classes are compared as an ordering | The whole rule for two classes. Provider, region, retention, purpose and audit requirement can each be more restrictive without the combination being permitted, and a production deployment needs a matrix over those dimensions |
 | Money is a `float` | It matches the counter LiteLLM increments with `INCRBYFLOAT`. Nothing here is the system of record for spend |
 | The reservation is sized on the requested route, never the served one | Reservation runs at authentication and the rewrite runs after it, so a degraded request still needs the primary's worst case to fit the headroom. With `fail_closed_budget_enforcement` on, admission therefore stops at the envelope minus the requested route's worst case, and a degrade tier above that ratio never fires. Keep `max_tokens` small relative to the envelope, as the lab does |
+| A request LiteLLM cannot estimate places no hold | `reserve_budget_for_request` returns before reserving when the worst-case estimate is `None` ([`budget_reservation.py:236-237`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236-L237)). That is a group the router and the cost map cannot price, an input the token counter cannot count on a model with no `max_input_tokens`, or an image route priced per pixel or by size ([`budget_reservation.py:1222-1228`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L1222-L1228)). The fail-closed flag is consulted only after the estimate, so it changes nothing on this path. Admission falls back to `_team_max_budget_check` ([`auth_checks.py:5242`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/auth/auth_checks.py#L5242)), a plain read of a counter the response updates afterwards ([`proxy_server.py:2713`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2713)), so concurrent requests each pass on the same figure. The catalog proves the plugin knows a price, and LiteLLM estimates from the deployment's own price fields, so `tests/test_config_contract.py` keeps the two equal for every deployment in the lab config. Non-chat call types pass through the plugin untouched, so an embeddings, audio or image route the estimate cannot price is admitted on the read alone |
 
 ## Running the tests
 
 ```bash
 cp .env.example .env          # set LITELLM_MASTER_KEY and the two passwords
 uv sync
-uv run pytest -m "not e2e"    # 109 tests, no Redis or gateway needed
+uv run pytest -m "not e2e"    # 111 tests, no Redis or gateway needed
 ```
 
 The decision function is pure, and the adapter's two impure edges, the spend counter and the tier
