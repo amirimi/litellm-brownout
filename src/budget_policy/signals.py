@@ -37,6 +37,8 @@ class MetricSink(Protocol):
 
     async def fallback_rejected(self, event: FallbackRejectedEvent) -> None: ...
 
+    async def route_degraded(self, event: RouteDegradedEvent) -> None: ...
+
     async def incident(self, event: IncidentEvent) -> None: ...
 
 
@@ -87,6 +89,39 @@ class Rejection(StrEnum):
 
     OUTSIDE_CALLER_ALLOWLIST = "outside_caller_allowlist"
     ENTITLEMENT_CHECK_UNAVAILABLE = "entitlement_check_unavailable"
+
+
+@dataclass(frozen=True)
+class RouteDegradedEvent:
+    """A route started serving its fallback in this window.
+
+    Claimed per team, policy epoch, window and route, independent of every tier
+    claim, so the app team calling the route hears about it even when another
+    route crossed the degrade tier first.
+    """
+
+    team_id: str
+    policy_epoch: str
+    window: str
+    route: str
+    served_route: str
+    tier: int
+    spend_usd: float
+    envelope_usd: float
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "event": "budget_route_degraded",
+            "owner": "team",
+            "team_id": self.team_id,
+            "policy_epoch": self.policy_epoch,
+            "window": self.window,
+            "route": self.route,
+            "served_route": self.served_route,
+            "tier": self.tier,
+            "spend_usd": round(self.spend_usd, 6),
+            "envelope_usd": self.envelope_usd,
+        }
 
 
 @dataclass(frozen=True)
@@ -226,6 +261,14 @@ class EventEmitter:
         metric_delivery = None
         if self._metric_sink is not None:
             metric_delivery = self._metric_sink.tier(event)
+        await self._deliver(payload, metric_delivery)
+
+    async def emit_route_degraded(self, event: RouteDegradedEvent) -> None:
+        payload = event.as_payload()
+        logger.warning("budget_policy %s", json.dumps(payload, sort_keys=True))
+        metric_delivery = None
+        if self._metric_sink is not None:
+            metric_delivery = self._metric_sink.route_degraded(event)
         await self._deliver(payload, metric_delivery)
 
     async def emit_fallback_rejected(self, event: FallbackRejectedEvent) -> None:

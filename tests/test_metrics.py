@@ -21,6 +21,7 @@ from budget_policy.metrics import (
     GAUGE,
     METRIC_FALLBACK_REJECTED,
     METRIC_INCIDENT,
+    METRIC_ROUTE_DEGRADED,
     METRIC_TIER_CROSSED,
     METRIC_UTILISATION,
     SUBMIT_TIMEOUT_SECONDS,
@@ -30,6 +31,7 @@ from budget_policy.signals import (
     FallbackRejectedEvent,
     IncidentEvent,
     Rejection,
+    RouteDegradedEvent,
     TierEvent,
 )
 
@@ -186,6 +188,41 @@ async def test_a_rejection_submission_carries_the_declared_series_and_dimensions
         "team:budget-lab",
         "route:budget-lab-primary",
         "rejection:outside_caller_allowlist",
+    }
+    flat = json.dumps(transport.requests)
+    for forbidden in FORBIDDEN:
+        assert forbidden not in flat, f"{forbidden!r} reached a Datadog series"
+
+
+async def test_a_degradation_submission_carries_the_declared_series_and_dimensions(
+    monkeypatch,
+):
+    """One count per route entering degradation, so an app team can alert on its route."""
+    transport = CapturingTransport()
+    sink = _sink_over(transport, monkeypatch)
+
+    await sink.route_degraded(
+        RouteDegradedEvent(
+            team_id="budget-lab",
+            policy_epoch="test-1",
+            window="2026-08-31T00:00:00+00:00",
+            route="budget-lab-primary",
+            served_route="budget-lab-degraded",
+            tier=90,
+            spend_usd=0.9049,
+            envelope_usd=1.0,
+        )
+    )
+
+    [degraded] = transport.series
+    assert degraded["metric"] == METRIC_ROUTE_DEGRADED
+    assert degraded["type"] == COUNT
+    assert set(degraded["tags"]) == {
+        "env:dev",
+        "service:budget-policy",
+        "team:budget-lab",
+        "route:budget-lab-primary",
+        "served_route:budget-lab-degraded",
     }
     flat = json.dumps(transport.requests)
     for forbidden in FORBIDDEN:

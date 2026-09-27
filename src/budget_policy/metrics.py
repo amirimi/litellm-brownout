@@ -18,7 +18,12 @@ from typing import Any, Final
 
 import httpx
 
-from .signals import FallbackRejectedEvent, IncidentEvent, TierEvent
+from .signals import (
+    FallbackRejectedEvent,
+    IncidentEvent,
+    RouteDegradedEvent,
+    TierEvent,
+)
 
 logger: Final = logging.getLogger("budget_policy")
 
@@ -28,6 +33,7 @@ GAUGE: Final = 3
 
 METRIC_TIER_CROSSED: Final = "budget_policy.tier_crossed"
 METRIC_UTILISATION: Final = "budget_policy.envelope_utilisation"
+METRIC_ROUTE_DEGRADED: Final = "budget_policy.route_degraded"
 METRIC_FALLBACK_REJECTED: Final = "budget_policy.fallback_rejected"
 METRIC_INCIDENT: Final = "budget_policy.incident"
 
@@ -63,6 +69,14 @@ class DatadogMetricSink:
                 ),
             ]
         )
+
+    async def route_degraded(self, event: RouteDegradedEvent) -> None:
+        tags: Final = self._base_tags + (
+            f"team:{event.team_id}",
+            f"route:{event.route}",
+            f"served_route:{event.served_route}",
+        )
+        await self._submit([_series(METRIC_ROUTE_DEGRADED, COUNT, 1.0, tags)])
 
     async def fallback_rejected(self, event: FallbackRejectedEvent) -> None:
         tags: Final = self._base_tags + (

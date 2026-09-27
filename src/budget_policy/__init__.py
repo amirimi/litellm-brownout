@@ -15,6 +15,7 @@ from .signals import (
     IncidentEvent,
     MetricSink,
     Rejection,
+    RouteDegradedEvent,
     TierEvent,
     TierSignalStore,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "PriceCatalog",
     "Reason",
     "Rejection",
+    "RouteDegradedEvent",
     "RoutePolicy",
     "TeamPolicy",
     "TierEvent",

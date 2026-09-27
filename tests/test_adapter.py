@@ -428,8 +428,12 @@ async def test_tier_claims_include_the_policy_epoch(team):
         call_type="acompletion",
     )
 
-    assert len(store.claimed) == 2
-    assert all(key.startswith("tier:budget-lab:test-1:") for key in store.claimed)
+    assert sorted(key.split(":")[0] for key in store.claimed) == [
+        "degraded",
+        "tier",
+        "tier",
+    ]
+    assert all(key.split(":")[1:3] == ["budget-lab", "test-1"] for key in store.claimed)
 
 
 async def test_a_team_absent_from_the_manifest_pages_the_platform(team):
@@ -835,3 +839,154 @@ async def test_a_dearer_fallback_approved_in_the_manifest_is_served(team):
 
     assert applied["model"] == "chat-qa"
     assert emitter.fallback_rejections == []
+
+
+async def test_a_route_that_starts_degrading_is_announced(team):
+    """The app team calling the route alerts on this, whoever owns the budget."""
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, make_auth(team), "budget-lab-primary")
+
+    assert [event.as_payload() for event in emitter.route_degradations] == [
+        {
+            "event": "budget_route_degraded",
+            "owner": "team",
+            "team_id": "budget-lab",
+            "policy_epoch": "test-1",
+            "window": emitter.tiers[0].window,
+            "route": "budget-lab-primary",
+            "served_route": "budget-lab-degraded",
+            "tier": 90,
+            "spend_usd": 950.0,
+            "envelope_usd": 1000.0,
+        }
+    ]
+
+
+async def test_a_degrading_route_is_announced_once_per_window(team):
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, make_auth(team), "budget-lab-primary")
+    await _request(handler, make_auth(team), "budget-lab-primary")
+
+    assert len(emitter.route_degradations) == 1
+
+
+async def test_each_degrading_route_is_announced_on_its_own(team):
+    """The claim carries the route, so one route's entry does not cover another's."""
+    chat = RoutePolicy(
+        route="chat-qa",
+        fallback="chat-qa-degraded",
+        degrade_at=90,
+        on_counter_unavailable=Posture.BLOCK,
+    )
+    team = TeamPolicy(
+        team_id=team.team_id,
+        policy_epoch=team.policy_epoch,
+        envelope_usd=team.envelope_usd,
+        budget_duration=team.budget_duration,
+        warn_tiers=team.warn_tiers,
+        default_posture=team.default_posture,
+        routes={**team.routes, chat.route: chat},
+    )
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, make_auth(team), "budget-lab-primary")
+    await _request(handler, make_auth(team), "chat-qa")
+
+    assert [
+        (event.route, event.served_route) for event in emitter.route_degradations
+    ] == [
+        ("budget-lab-primary", "budget-lab-degraded"),
+        ("chat-qa", "chat-qa-degraded"),
+    ]
+
+
+async def test_a_route_degrading_after_another_claimed_the_tier_is_announced(team):
+    """A tier claim belongs to the team, so it cannot stand in for a route's entry."""
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, make_auth(team), "budget-lab-strict")
+    await _request(handler, make_auth(team), "budget-lab-primary")
+
+    assert {event.route for event in emitter.tiers} == {"budget-lab-strict"}
+    assert [event.route for event in emitter.route_degradations] == [
+        "budget-lab-primary"
+    ]
+
+
+async def test_a_new_window_announces_the_degrading_route_again(team, monkeypatch):
+    windows = iter(
+        [datetime(2026, 9, 28, tzinfo=UTC), datetime(2026, 10, 5, tzinfo=UTC)]
+    )
+    monkeypatch.setattr(
+        "budget_policy.adapter.get_budget_reset_time",
+        lambda budget_duration: next(windows),
+    )
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, make_auth(team), "budget-lab-primary")
+    await _request(handler, make_auth(team), "budget-lab-primary")
+
+    assert [event.window for event in emitter.route_degradations] == [
+        "2026-09-28T00:00:00+00:00",
+        "2026-10-05T00:00:00+00:00",
+    ]
+
+
+async def test_no_degradation_is_announced_when_the_rewrite_does_not_complete(
+    team, monkeypatch
+):
+    """A claim spent on a rewrite that raised would hide the route's real entry."""
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    def failing_merge(data, llm_router, trust_client_model_info):
+        raise RuntimeError("guardrail merge failed")
+
+    monkeypatch.setattr(
+        "budget_policy.adapter._check_and_merge_model_level_guardrails", failing_merge
+    )
+
+    with pytest.raises(RuntimeError):
+        await _request(handler, make_auth(team), "budget-lab-primary")
+
+    assert emitter.route_degradations == []
+
+
+async def test_tier_and_degradation_events_are_delivered_together(team):
+    """A request that crosses tiers and degrades still pays one remote deadline."""
+
+    class CountingEmitter(RecordingEmitter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.in_flight = 0
+            self.peak = 0
+
+        async def _overlap(self) -> None:
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+            await asyncio.sleep(0)
+            self.in_flight -= 1
+
+        async def emit_tier(self, event):
+            await self._overlap()
+            await super().emit_tier(event)
+
+        async def emit_route_degraded(self, event):
+            await self._overlap()
+            await super().emit_route_degraded(event)
+
+    emitter = CountingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, make_auth(team), "budget-lab-primary")
+
+    assert [event.tier for event in emitter.tiers] == [75, 90]
+    assert len(emitter.route_degradations) == 1
+    assert emitter.peak == 3, "the degradation was delivered after the tier events"

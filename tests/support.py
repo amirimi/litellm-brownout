@@ -17,7 +17,12 @@ from litellm.proxy._types import UserAPIKeyAuth
 from budget_policy.adapter import BudgetPolicyHandler, TeamSpendReader
 from budget_policy.catalog import PriceCatalog
 from budget_policy.manifest import Manifest, TeamPolicy
-from budget_policy.signals import FallbackRejectedEvent, IncidentEvent, TierEvent
+from budget_policy.signals import (
+    FallbackRejectedEvent,
+    IncidentEvent,
+    RouteDegradedEvent,
+    TierEvent,
+)
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 CONFIG_DIR: Final = REPO_ROOT / "config"
@@ -95,12 +100,16 @@ class RecordingEmitter:
         self.tiers: list[TierEvent] = []
         self.incidents: list[IncidentEvent] = []
         self.fallback_rejections: list[FallbackRejectedEvent] = []
+        self.route_degradations: list[RouteDegradedEvent] = []
 
     async def emit_tier(self, event: TierEvent) -> None:
         self.tiers.append(event)
 
     async def emit_fallback_rejected(self, event: FallbackRejectedEvent) -> None:
         self.fallback_rejections.append(event)
+
+    async def emit_route_degraded(self, event: RouteDegradedEvent) -> None:
+        self.route_degradations.append(event)
 
     async def emit_incident(self, event: IncidentEvent) -> None:
         self.incidents.append(event)

@@ -47,6 +47,7 @@ from .signals import (
     FallbackRejectedEvent,
     IncidentEvent,
     Rejection,
+    RouteDegradedEvent,
     TierEvent,
     TierSignalStore,
 )
@@ -478,8 +479,9 @@ class BudgetPolicyHandler(CustomLogger):
         tier, because there is no spend figure to have crossed one.
 
         Every event claimed for one request goes out together. A request can
-        cross two tiers and be rejected, and delivering those one after another
-        would add a remote deadline per event to a single inference request.
+        cross two tiers and degrade or be rejected, and delivering those one
+        after another would add a remote deadline per event to a single
+        inference request.
         Gathering holds the added latency at one round of
         ``WEBHOOK_TIMEOUT_SECONDS`` and ``SUBMIT_TIMEOUT_SECONDS``.
         """
@@ -503,6 +505,11 @@ class BudgetPolicyHandler(CustomLogger):
         )
         if rejection is not None:
             deliveries.append(self._emitter.emit_fallback_rejected(rejection))
+        degradation: Final = await self._claim_degradation(
+            team=team, window_id=window_id, route=route, decision=decision
+        )
+        if degradation is not None:
+            deliveries.append(self._emitter.emit_route_degraded(degradation))
         await asyncio.gather(*deliveries)
 
     async def _report_unreadable_counter(
@@ -551,6 +558,35 @@ class BudgetPolicyHandler(CustomLogger):
                 )
             )
         return claimed
+
+    async def _claim_degradation(
+        self, team: TeamPolicy, window_id: str, route: str, decision: Decision
+    ) -> RouteDegradedEvent | None:
+        """One event per route entering degradation, once per team per window.
+
+        The claim is independent of every tier claim. A tier belongs to the team,
+        so another route can claim the degrade tier first, and a route's entry
+        into degradation would then reach nobody. The app team calling the route
+        alerts on this event's metric.
+        """
+        if decision.reason is not Reason.DEGRADE_TIER_REACHED:
+            return None
+        assert decision.tier is not None and decision.utilisation is not None
+        claim_key: Final = (
+            f"degraded:{team.team_id}:{team.policy_epoch}:{window_id}:{route}"
+        )
+        if not await self._store.claim(claim_key, _window_ttl(team.budget_duration)):
+            return None
+        return RouteDegradedEvent(
+            team_id=team.team_id,
+            policy_epoch=team.policy_epoch,
+            window=window_id,
+            route=route,
+            served_route=decision.served_route,
+            tier=decision.tier,
+            spend_usd=decision.utilisation * team.envelope_usd,
+            envelope_usd=team.envelope_usd,
+        )
 
     async def _claim_rejection(
         self,

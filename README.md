@@ -264,7 +264,7 @@ Every failure direction is closed. A request the plugin cannot govern is refused
 
 | Condition | Response |
 |---|---|
-| Route reaches its declared threshold | Serve the declared fallback with tier and degradation headers |
+| Route reaches its declared threshold | Serve the declared fallback with tier and degradation headers, and raise one `budget_route_degraded` event per route per window |
 | Team reaches 100% of its budget | Native 429 at reservation time. The plugin never sees that request |
 | Caller supplies `fallbacks`, `mock_testing_fallbacks`, any `x-platform-*` key or `degraded_from` in `metadata` or `litellm_metadata` | 400 `caller_routing_not_permitted` naming the refused keys |
 | Requested model has no committed price | 503 `unpriced_model` plus a platform incident |
@@ -297,8 +297,8 @@ Headers are set in the post-call hook on the success path.
 
 ### Events and metrics
 
-Every event is a structured log line on the `budget_policy` logger, tier and rejection events at
-warning and incidents at error. With `BUDGET_POLICY_WEBHOOK_URL` set, the same payload is POSTed
+Every event is a structured log line on the `budget_policy` logger, team-owned events at warning
+and incidents at error. With `BUDGET_POLICY_WEBHOOK_URL` set, the same payload is POSTed
 with a one-second timeout. With `DD_API_KEY` set, series go to the Datadog v2 API directly. Remote
 delivery is concurrent and best-effort, and a failed sink cannot fail the request. Events are
 published after the request is rewritten and before it is dispatched, so an event describes the
@@ -310,6 +310,11 @@ routing decision applied to the request and says nothing about the provider's re
  "tier": 75, "route": "route-chat", "served_route": "route-chat-degraded",
  "decision": "degrade", "reason": "degrade_tier_reached",
  "spend_usd": 376.2, "envelope_usd": 500.0}
+
+{"event": "budget_route_degraded", "owner": "team", "team_id": "team-a",
+ "policy_epoch": "team-a-v1", "window": "2026-09-21T00:00:00+00:00",
+ "route": "route-chat", "served_route": "route-chat-degraded", "tier": 90,
+ "spend_usd": 452.1, "envelope_usd": 500.0}
 
 {"event": "budget_fallback_rejected", "owner": "team", "team_id": "team-a",
  "policy_epoch": "team-a-v1", "window": "2026-09-21T00:00:00+00:00",
@@ -323,6 +328,14 @@ routing decision applied to the request and says nothing about the provider's re
  "manifest_version": "v1"}
 ```
 
+A route raises `budget_route_degraded` the first time it serves its fallback in a window, on its
+own claim, so a tier that another route crossed first cannot hide it. The team that calls the route
+alerts on the metric filtered to that route.
+
+```
+sum:budget_policy.route_degraded{route:route-chat}.as_count() > 0
+```
+
 A rejection is `outside_caller_allowlist` or `entitlement_check_unavailable`. Every other problem
 with a pairing stops the handler from loading.
 
@@ -334,6 +347,7 @@ window on their own claim key.
 |---|---|---|
 | `budget_policy.tier_crossed` | count | `env`, `service:budget-policy`, `team`, `tier`, `decision`, `reason`, `route` |
 | `budget_policy.envelope_utilisation` | gauge | `env`, `service:budget-policy`, `team` |
+| `budget_policy.route_degraded` | count | `env`, `service:budget-policy`, `team`, `route`, `served_route` |
 | `budget_policy.fallback_rejected` | count | `env`, `service:budget-policy`, `team`, `route`, `rejection` |
 | `budget_policy.incident` | count | `env`, `service:budget-policy`, `reason`, and `team` when the incident names one |
 
@@ -421,7 +435,7 @@ Six limits a deployment inherits as the plugin stands.
 ```bash
 cp .env.example .env          # set LITELLM_MASTER_KEY and the two passwords
 uv sync
-uv run pytest -m "not e2e"    # 123 tests, no Redis or gateway needed
+uv run pytest -m "not e2e"    # 131 tests, no Redis or gateway needed
 ```
 
 The decision function is pure, and the adapter's two impure edges, the spend counter and the tier

@@ -230,6 +230,24 @@ def test_the_component_sink_contains_only_its_declared_event_types(
     assert "budget_tier_crossed" in owners, (
         f"the sequence crossed two tiers and the sink recorded {observed}"
     )
-    assert owners <= {"budget_tier_crossed", "budget_policy_incident"}, (
-        f"an undeclared event type reached the component sink: {owners}"
-    )
+    assert owners <= {
+        "budget_tier_crossed",
+        "budget_route_degraded",
+        "budget_policy_incident",
+    }, f"an undeclared event type reached the component sink: {owners}"
+
+
+@requires_stack
+def test_the_downgrade_is_announced_once_for_the_route(lab_key: str) -> None:
+    """The app team calling the lab route can alert on its entry into degradation."""
+    payload = httpx.get(EVENT_SINK, timeout=10.0).json()
+    degraded = [
+        event
+        for event in payload["events"]
+        if event.get("event") == "budget_route_degraded"
+        and event.get("team_id") == LAB_TEAM_ID
+    ]
+
+    assert [
+        (event["route"], event["served_route"], event["tier"]) for event in degraded
+    ] == [(LAB_ROUTE, DEGRADED_ROUTE, 75)]
