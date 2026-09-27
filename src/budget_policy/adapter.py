@@ -19,22 +19,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC
 from enum import StrEnum
 from typing import Any, Final, Literal, assert_never
 
 from fastapi import HTTPException, status
 from litellm.caching.dual_cache import DualCache
 from litellm.integrations.custom_logger import CustomLogger
-from litellm.litellm_core_utils.duration_parser import (
-    duration_in_seconds,
-    get_next_standardized_reset_time,
-)
+from litellm.litellm_core_utils.duration_parser import duration_in_seconds
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.auth.auth_checks import (
     _can_object_call_model,
     _resolve_key_models_for_auth_check,
 )
+from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 
 from .catalog import CatalogError, FallbackRejected, PriceCatalog, UnpricedModel
@@ -765,13 +763,12 @@ def _ungoverned_team(team_id: str | None) -> HTTPException:
 def _window_id(budget_duration: str) -> str:
     """The identity of the current budget window.
 
-    Derived from the same anchoring LiteLLM uses to stamp ``budget_reset_at``,
-    so a reset changes this value and re-arms every tier without a TTL guess.
+    Asked of LiteLLM with the gateway's own ``timezone`` and ``budget_reset_time``,
+    the settings its reset job stamps ``budget_reset_at`` with, so a reset changes
+    this value and re-arms every tier without a TTL guess. Rendered in UTC so a
+    claim key keeps one form whatever timezone the gateway runs in.
     """
-    return get_next_standardized_reset_time(
-        duration=budget_duration,
-        current_time=datetime.now(UTC),
-    ).isoformat()
+    return get_budget_reset_time(budget_duration).astimezone(UTC).isoformat()
 
 
 def _window_ttl(budget_duration: str) -> int:

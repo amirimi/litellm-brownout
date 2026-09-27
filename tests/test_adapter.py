@@ -7,10 +7,13 @@ compute them. Everything else runs the real path, including the guardrail merge.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 from typing import Any
 
+import litellm
 import pytest
 from fastapi import HTTPException
+from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 
 from .support import (
     FakeStore,
@@ -602,3 +605,32 @@ async def test_tiers_crossed_together_are_delivered_together(team):
 
     assert [event.tier for event in emitter.tiers] == [75, 90]
     assert peak == 2, "the two tier events were delivered one after the other"
+
+
+async def test_the_window_follows_the_gateways_reset_schedule(team, monkeypatch):
+    """The plugin's window ends when LiteLLM's reset job says it does.
+
+    LiteLLM stamps ``budget_reset_at`` with ``litellm_settings.timezone`` and
+    ``budget_reset_time``. A window computed at UTC midnight instead would open
+    hours before the counter resets and claim this window's tiers on last
+    window's spend.
+    """
+    monkeypatch.setattr(litellm, "timezone", "America/New_York", raising=False)
+    monkeypatch.setattr(litellm, "budget_reset_time", "12:00", raising=False)
+    store = FakeStore()
+    handler = build_handler(
+        team=team,
+        emitter=RecordingEmitter(),
+        spend=team.envelope_usd * 0.8,
+        store=store,
+    )
+
+    await handler.async_pre_call_hook(
+        user_api_key_dict=make_auth(team),
+        cache=None,
+        data={"model": "budget-lab-primary", "messages": []},
+        call_type="acompletion",
+    )
+
+    window = get_budget_reset_time(team.budget_duration).astimezone(UTC).isoformat()
+    assert store.claimed == {f"tier:{team.team_id}:{team.policy_epoch}:{window}:75"}
