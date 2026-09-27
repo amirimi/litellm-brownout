@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Awaitable
+from dataclasses import dataclass
 from datetime import UTC
 from enum import StrEnum
 from typing import Any, Final, Literal, assert_never
@@ -35,12 +37,19 @@ from litellm.proxy.auth.auth_checks import (
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 
-from .catalog import CatalogError, FallbackRejected, PriceCatalog, UnpricedModel
+from .catalog import PriceCatalog, UnpricedModel
 from .manifest import Manifest, RoutePolicy, TeamPolicy
 from .metrics import DatadogMetricSink
 from .policy import Action, Decision, PolicyRequest, Reason, decide
 from .runtime import router, spend_reader
-from .signals import EventEmitter, IncidentEvent, TierEvent, TierSignalStore
+from .signals import (
+    EventEmitter,
+    FallbackRejectedEvent,
+    IncidentEvent,
+    Rejection,
+    TierEvent,
+    TierSignalStore,
+)
 
 logger: Final = logging.getLogger("budget_policy")
 
@@ -96,6 +105,14 @@ class Entitlement(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+@dataclass(frozen=True)
+class FallbackRejected:
+    """A declared target this caller may not be served, and why."""
+
+    candidate: str
+    reason: Rejection
+
+
 def _team_counter_key(team_id: str) -> str:
     """The counter LiteLLM keeps a team's spend in.
 
@@ -146,6 +163,7 @@ class BudgetPolicyHandler(CustomLogger):
             emitter = EventEmitter(_webhook_url(), _metric_sink())
         if spend_reader is None:
             spend_reader = TeamSpendReader()
+        _require_declared_fallbacks(manifest, catalog)
 
         self._catalog: Final = catalog
         self._manifest: Final = manifest
@@ -185,29 +203,37 @@ class BudgetPolicyHandler(CustomLogger):
             auth=user_api_key_dict, team=team, window_id=window_id
         )
 
+        projected_spend: Final = await self._projected_spend(user_api_key_dict, team)
+        selection: Final = await self._selectable_fallback(
+            user_api_key_dict, route, route_policy, team, window_id
+        )
         decision = decide(
             PolicyRequest(
                 team=team,
                 route=route_policy,
-                projected_spend_usd=await self._projected_spend(
-                    user_api_key_dict, team
-                ),
+                projected_spend_usd=projected_spend,
                 already_signalled=_ALREADY_SIGNALLED_IN_THE_GATEWAY,
-                selectable_fallback=await self._selectable_fallback(
-                    user_api_key_dict, route, route_policy, team, window_id
-                ),
+                selectable_fallback=_selectable_target(selection),
             )
         )
 
         if decision.action is Action.BLOCK:
             await self._publish(
-                team=team, window_id=window_id, route=route, decision=decision
+                team=team,
+                window_id=window_id,
+                route=route,
+                decision=decision,
+                selection=selection,
             )
             raise _enforcement_unavailable(team=team, route=route)
 
         applied: Final = _apply(data, decision, team)
         await self._publish(
-            team=team, window_id=window_id, route=route, decision=decision
+            team=team,
+            window_id=window_id,
+            route=route,
+            decision=decision,
+            selection=selection,
         )
         return applied
 
@@ -393,35 +419,20 @@ class BudgetPolicyHandler(CustomLogger):
         route_policy: RoutePolicy,
         team: TeamPolicy,
         window_id: str,
-    ) -> str | None:
-        """The degradation target, or None when it may not serve this request.
+    ) -> str | FallbackRejected | None:
+        """The degradation target, why this caller may not have it, or None.
 
-        A rejection is debug detail rather than a warning per request, because
-        the tier event carries ``fallback_rejected`` once per team per window
-        and that is the bounded record. An entitlement check that could not run
-        is the exception: it is a platform fault and gets an incident.
+        None means the route declares no target. The pairing itself was checked
+        against the catalog while the handler was built, so only the caller's
+        entitlement is left to vary. A rejection is debug detail on the request
+        path rather than a warning per request, because the rejection event is
+        claimed once per route and reason per window and that is the bounded
+        record. An entitlement check that could not run is also a platform fault
+        and gets an incident.
         """
-        if route_policy.fallback is None:
+        selected: Final = route_policy.fallback
+        if selected is None:
             return None
-        try:
-            selected = self._catalog.select_fallback(
-                primary=route, candidate=route_policy.fallback
-            )
-        except CatalogError:
-            logger.exception("Fallback validation failed for route=%s", route)
-            return None
-        if isinstance(selected, FallbackRejected):
-            logger.debug(
-                "Rejected degradation target %s for route %s on team %s: %s",
-                selected.candidate,
-                route,
-                team.team_id,
-                selected.reason,
-            )
-            return None
-        assert selected is not None, (
-            f"route {route!r} declares a fallback, so selection cannot return no target"
-        )
 
         entitlement = _caller_may_call(auth, selected)
         match entitlement:
@@ -434,7 +445,7 @@ class BudgetPolicyHandler(CustomLogger):
                     route,
                     team.team_id,
                 )
-                return None
+                return FallbackRejected(selected, Rejection.OUTSIDE_CALLER_ALLOWLIST)
             case Entitlement.UNAVAILABLE:
                 await self._incident(
                     reason="entitlement_check_unavailable",
@@ -447,7 +458,9 @@ class BudgetPolicyHandler(CustomLogger):
                     dedup=f"incident:entitlement_check_unavailable:{team.team_id}:{window_id}",
                     ttl_seconds=_window_ttl(team.budget_duration),
                 )
-                return None
+                return FallbackRejected(
+                    selected, Rejection.ENTITLEMENT_CHECK_UNAVAILABLE
+                )
             case _:
                 assert_never(entitlement)
 
@@ -457,20 +470,40 @@ class BudgetPolicyHandler(CustomLogger):
         window_id: str,
         route: str,
         decision: Decision,
+        selection: str | FallbackRejected | None,
     ) -> None:
         """Report the decision to whoever owns it.
 
         A decision taken without a counter is a platform incident and carries no
         tier, because there is no spend figure to have crossed one.
+
+        Every event claimed for one request goes out together. A request can
+        cross two tiers and be rejected, and delivering those one after another
+        would add a remote deadline per event to a single inference request.
+        Gathering holds the added latency at one round of
+        ``WEBHOOK_TIMEOUT_SECONDS`` and ``SUBMIT_TIMEOUT_SECONDS``.
         """
         if decision.reason is Reason.COUNTER_UNAVAILABLE:
             await self._report_unreadable_counter(
                 team=team, window_id=window_id, route=route, decision=decision
             )
             return
-        await self._emit_tiers_crossed(
-            team=team, window_id=window_id, route=route, decision=decision
+        deliveries: list[Awaitable[None]] = [
+            self._emitter.emit_tier(event)
+            for event in await self._claim_tiers(
+                team=team, window_id=window_id, route=route, decision=decision
+            )
+        ]
+        rejection: Final = await self._claim_rejection(
+            team=team,
+            window_id=window_id,
+            route=route,
+            decision=decision,
+            selection=selection,
         )
+        if rejection is not None:
+            deliveries.append(self._emitter.emit_fallback_rejected(rejection))
+        await asyncio.gather(*deliveries)
 
     async def _report_unreadable_counter(
         self, team: TeamPolicy, window_id: str, route: str, decision: Decision
@@ -487,20 +520,14 @@ class BudgetPolicyHandler(CustomLogger):
             ttl_seconds=_window_ttl(team.budget_duration),
         )
 
-    async def _emit_tiers_crossed(
+    async def _claim_tiers(
         self, team: TeamPolicy, window_id: str, route: str, decision: Decision
-    ) -> None:
+    ) -> list[TierEvent]:
         """One event per tier, once per team per window across every replica.
 
         The claim is what deduplicates. A replica that loses the race skips the
         tier rather than emitting a duplicate, and the epoch in the key retires
         every claim when the team's policy changes.
-
-        The events go out together. One request can cross several tiers at once,
-        and delivering them one after another would add a remote deadline per
-        tier to a single inference request. Gathering holds the added latency at
-        one round of ``WEBHOOK_TIMEOUT_SECONDS`` and ``SUBMIT_TIMEOUT_SECONDS``
-        however many tiers were crossed.
         """
         assert decision.utilisation is not None
         ttl_seconds: Final = _window_ttl(team.budget_duration)
@@ -523,7 +550,45 @@ class BudgetPolicyHandler(CustomLogger):
                     envelope_usd=team.envelope_usd,
                 )
             )
-        await asyncio.gather(*(self._emitter.emit_tier(event) for event in claimed))
+        return claimed
+
+    async def _claim_rejection(
+        self,
+        team: TeamPolicy,
+        window_id: str,
+        route: str,
+        decision: Decision,
+        selection: str | FallbackRejected | None,
+    ) -> FallbackRejectedEvent | None:
+        """One event per route and rejection, once per team per window.
+
+        The claim is independent of every tier claim. A tier belongs to the team,
+        so a route with no fallback can claim it first, and a rejection that rode
+        only on the tier event would then never reach the owner.
+        """
+        if decision.reason is not Reason.FALLBACK_REJECTED:
+            return None
+        assert isinstance(selection, FallbackRejected), (
+            f"route {route!r} reported fallback_rejected without a rejected target"
+        )
+        assert decision.tier is not None and decision.utilisation is not None
+        claim_key: Final = (
+            f"fallback_rejected:{team.team_id}:{team.policy_epoch}:{window_id}:"
+            f"{route}:{selection.reason.value}"
+        )
+        if not await self._store.claim(claim_key, _window_ttl(team.budget_duration)):
+            return None
+        return FallbackRejectedEvent(
+            team_id=team.team_id,
+            policy_epoch=team.policy_epoch,
+            window=window_id,
+            route=route,
+            target=selection.candidate,
+            rejection=selection.reason,
+            tier=decision.tier,
+            spend_usd=decision.utilisation * team.envelope_usd,
+            envelope_usd=team.envelope_usd,
+        )
 
     async def _incident(
         self,
@@ -562,6 +627,28 @@ def _apply(data: dict, decision: Decision, team: TeamPolicy) -> dict:
         "team_id": team.team_id,
     }
     return data
+
+
+def _require_declared_fallbacks(manifest: Manifest, catalog: PriceCatalog) -> None:
+    """Refuse to start on a declared pairing the catalog cannot allow.
+
+    Both files are loaded once and never change inside the process, so a bad
+    pairing is a startup error rather than a rejection discovered when a team
+    first reaches its degrade tier.
+    """
+    for team_id in manifest.team_ids:
+        team = manifest.team_policy(team_id)
+        assert team is not None
+        for route, route_policy in team.routes.items():
+            if route_policy.fallback is not None:
+                catalog.require_fallback(route, route_policy.fallback)
+
+
+def _selectable_target(selection: str | FallbackRejected | None) -> str | None:
+    """The target the decision may degrade to. A rejection offers none."""
+    if isinstance(selection, FallbackRejected):
+        return None
+    return selection
 
 
 def _own_hold_on_team_counter(auth: UserAPIKeyAuth, team_id: str) -> float:

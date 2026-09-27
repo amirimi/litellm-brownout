@@ -19,13 +19,19 @@ from budget_policy.adapter import _metric_sink
 from budget_policy.metrics import (
     COUNT,
     GAUGE,
+    METRIC_FALLBACK_REJECTED,
     METRIC_INCIDENT,
     METRIC_TIER_CROSSED,
     METRIC_UTILISATION,
     SUBMIT_TIMEOUT_SECONDS,
     DatadogMetricSink,
 )
-from budget_policy.signals import IncidentEvent, TierEvent
+from budget_policy.signals import (
+    FallbackRejectedEvent,
+    IncidentEvent,
+    Rejection,
+    TierEvent,
+)
 
 from .support import RecordingEmitter, build_handler, make_auth
 
@@ -148,6 +154,42 @@ async def test_a_rejected_downgrade_is_distinguishable_from_a_route_that_never_d
         entry for entry in transport.series if entry["metric"] == METRIC_TIER_CROSSED
     )
     assert "reason:fallback_rejected" in crossed["tags"]
+
+
+async def test_a_rejection_submission_carries_the_declared_series_and_dimensions(
+    monkeypatch,
+):
+    """One count per claimed rejection, tagged with the route and the reason."""
+    transport = CapturingTransport()
+    sink = _sink_over(transport, monkeypatch)
+
+    await sink.fallback_rejected(
+        FallbackRejectedEvent(
+            team_id="budget-lab",
+            policy_epoch="test-1",
+            window="2026-08-31T00:00:00+00:00",
+            route="budget-lab-primary",
+            target="budget-lab-degraded",
+            rejection=Rejection.OUTSIDE_CALLER_ALLOWLIST,
+            tier=90,
+            spend_usd=0.9049,
+            envelope_usd=1.0,
+        )
+    )
+
+    [rejected] = transport.series
+    assert rejected["metric"] == METRIC_FALLBACK_REJECTED
+    assert rejected["type"] == COUNT
+    assert set(rejected["tags"]) == {
+        "env:dev",
+        "service:budget-policy",
+        "team:budget-lab",
+        "route:budget-lab-primary",
+        "rejection:outside_caller_allowlist",
+    }
+    flat = json.dumps(transport.requests)
+    for forbidden in FORBIDDEN:
+        assert forbidden not in flat, f"{forbidden!r} reached a Datadog series"
 
 
 async def test_an_incident_without_a_team_still_submits(monkeypatch):

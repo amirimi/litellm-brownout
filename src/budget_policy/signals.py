@@ -18,6 +18,7 @@ import json
 import logging
 from collections.abc import Awaitable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Final, Protocol
 
 import httpx
@@ -33,6 +34,8 @@ class MetricSink(Protocol):
     """Where a state transition goes to be dashboarded and alerted on."""
 
     async def tier(self, event: TierEvent) -> None: ...
+
+    async def fallback_rejected(self, event: FallbackRejectedEvent) -> None: ...
 
     async def incident(self, event: IncidentEvent) -> None: ...
 
@@ -51,8 +54,8 @@ class TierEvent:
 
     ``decision`` alone cannot separate a route with no declared target from one
     whose target failed validation or entitlement. Both admit the primary. The
-    tier claim bounds this to one report per team per window, which is what
-    keeps the rejection off the request path as a log line."""
+    specific cause travels on ``FallbackRejectedEvent`` under its own claim,
+    because a tier claim is the team's and another route may already hold it."""
 
     spend_usd: float
     envelope_usd: float
@@ -69,6 +72,52 @@ class TierEvent:
             "served_route": self.served_route,
             "decision": self.decision,
             "reason": self.reason,
+            "spend_usd": round(self.spend_usd, 6),
+            "envelope_usd": self.envelope_usd,
+        }
+
+
+class Rejection(StrEnum):
+    """Why a declared, validated target may not serve this caller.
+
+    Only the caller varies between requests, because the pairing itself is
+    checked against the catalog while the handler is built. Closed, because the
+    claim key and the metric tag are built from it and must stay bounded.
+    """
+
+    OUTSIDE_CALLER_ALLOWLIST = "outside_caller_allowlist"
+    ENTITLEMENT_CHECK_UNAVAILABLE = "entitlement_check_unavailable"
+
+
+@dataclass(frozen=True)
+class FallbackRejectedEvent:
+    """A route reached its degrade tier and its target could not serve.
+
+    Claimed per team, policy epoch, window, route and rejection, independent of
+    every tier claim, so a route that crossed the tiers first cannot hide it.
+    """
+
+    team_id: str
+    policy_epoch: str
+    window: str
+    route: str
+    target: str
+    rejection: Rejection
+    tier: int
+    spend_usd: float
+    envelope_usd: float
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "event": "budget_fallback_rejected",
+            "owner": "team",
+            "team_id": self.team_id,
+            "policy_epoch": self.policy_epoch,
+            "window": self.window,
+            "route": self.route,
+            "target": self.target,
+            "rejection": self.rejection.value,
+            "tier": self.tier,
             "spend_usd": round(self.spend_usd, 6),
             "envelope_usd": self.envelope_usd,
         }
@@ -177,6 +226,14 @@ class EventEmitter:
         metric_delivery = None
         if self._metric_sink is not None:
             metric_delivery = self._metric_sink.tier(event)
+        await self._deliver(payload, metric_delivery)
+
+    async def emit_fallback_rejected(self, event: FallbackRejectedEvent) -> None:
+        payload = event.as_payload()
+        logger.warning("budget_policy %s", json.dumps(payload, sort_keys=True))
+        metric_delivery = None
+        if self._metric_sink is not None:
+            metric_delivery = self._metric_sink.fallback_rejected(event)
         await self._deliver(payload, metric_delivery)
 
     async def emit_incident(self, event: IncidentEvent) -> None:

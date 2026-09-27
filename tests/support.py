@@ -17,7 +17,7 @@ from litellm.proxy._types import UserAPIKeyAuth
 from budget_policy.adapter import BudgetPolicyHandler, TeamSpendReader
 from budget_policy.catalog import PriceCatalog
 from budget_policy.manifest import Manifest, TeamPolicy
-from budget_policy.signals import IncidentEvent, TierEvent
+from budget_policy.signals import FallbackRejectedEvent, IncidentEvent, TierEvent
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 CONFIG_DIR: Final = REPO_ROOT / "config"
@@ -94,9 +94,13 @@ class RecordingEmitter:
     def __init__(self) -> None:
         self.tiers: list[TierEvent] = []
         self.incidents: list[IncidentEvent] = []
+        self.fallback_rejections: list[FallbackRejectedEvent] = []
 
     async def emit_tier(self, event: TierEvent) -> None:
         self.tiers.append(event)
+
+    async def emit_fallback_rejected(self, event: FallbackRejectedEvent) -> None:
+        self.fallback_rejections.append(event)
 
     async def emit_incident(self, event: IncidentEvent) -> None:
         self.incidents.append(event)

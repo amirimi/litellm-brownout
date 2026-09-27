@@ -100,16 +100,13 @@ def test_every_deployment_declares_its_output_ceiling():
 def test_every_manifest_route_and_fallback_is_priced(
     manifest: Manifest, catalog: PriceCatalog
 ):
-    """A declared degradation target that is not priced would be rejected at runtime."""
+    """A declared pairing the catalog cannot allow would refuse the gateway at startup."""
     for team_id in manifest.team_ids:
         policy = manifest.team_policy(team_id)
         for route, route_policy in policy.routes.items():
             catalog.price(route)
             if route_policy.fallback is not None:
-                assert (
-                    catalog.select_fallback(route, route_policy.fallback)
-                    == route_policy.fallback
-                )
+                catalog.require_fallback(route, route_policy.fallback)
 
 
 def test_every_manifest_route_and_fallback_exists_as_a_gateway_model_group(

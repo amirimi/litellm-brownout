@@ -2,7 +2,6 @@
 
 from .catalog import (
     CatalogError,
-    FallbackRejected,
     ModelPrice,
     PriceCatalog,
     UnpricedModel,
@@ -10,7 +9,15 @@ from .catalog import (
 from .manifest import Manifest, ManifestError, Posture, RoutePolicy, TeamPolicy
 from .metrics import DatadogMetricSink
 from .policy import Action, Decision, PolicyRequest, Reason, decide
-from .signals import EventEmitter, IncidentEvent, MetricSink, TierEvent, TierSignalStore
+from .signals import (
+    EventEmitter,
+    FallbackRejectedEvent,
+    IncidentEvent,
+    MetricSink,
+    Rejection,
+    TierEvent,
+    TierSignalStore,
+)
 
 __all__ = [
     "Action",
@@ -18,7 +25,7 @@ __all__ = [
     "DatadogMetricSink",
     "Decision",
     "EventEmitter",
-    "FallbackRejected",
+    "FallbackRejectedEvent",
     "IncidentEvent",
     "Manifest",
     "ManifestError",
@@ -28,6 +35,7 @@ __all__ = [
     "Posture",
     "PriceCatalog",
     "Reason",
+    "Rejection",
     "RoutePolicy",
     "TeamPolicy",
     "TierEvent",

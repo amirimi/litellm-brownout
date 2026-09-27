@@ -7,13 +7,16 @@ compute them. Everything else runs the real path, including the guardrail merge.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 import litellm
 import pytest
 from fastapi import HTTPException
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
+
+from budget_policy.catalog import CatalogError
+from budget_policy.manifest import Posture, RoutePolicy, TeamPolicy
 
 from .support import (
     FakeStore,
@@ -634,3 +637,201 @@ async def test_the_window_follows_the_gateways_reset_schedule(team, monkeypatch)
 
     window = get_budget_reset_time(team.budget_duration).astimezone(UTC).isoformat()
     assert store.claimed == {f"tier:{team.team_id}:{team.policy_epoch}:{window}:75"}
+
+
+def _without_fallback_access(team):
+    """A key whose team may call its routes and not the degradation target."""
+    auth = make_auth(team)
+    auth.team_models = ["budget-lab-primary", "budget-lab-strict"]
+    return auth
+
+
+async def _request(handler, auth, model: str) -> dict:
+    return await handler.async_pre_call_hook(
+        user_api_key_dict=auth,
+        cache=None,
+        data={"model": model, "messages": []},
+        call_type="acompletion",
+    )
+
+
+async def test_a_rejected_downgrade_is_reported_after_another_route_claimed_the_tiers(
+    team,
+):
+    """A tier claim belongs to the team, so a route with no fallback can take it first.
+
+    The rejection then reaches the owner on its own claim. Riding on the tier
+    event alone, a downgrade that never happened stayed invisible until the 429.
+    """
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+    auth = _without_fallback_access(team)
+
+    await _request(handler, auth, "budget-lab-strict")
+    await _request(handler, auth, "budget-lab-primary")
+
+    assert [(event.tier, event.route) for event in emitter.tiers] == [
+        (75, "budget-lab-strict"),
+        (90, "budget-lab-strict"),
+    ]
+    assert [event.as_payload() for event in emitter.fallback_rejections] == [
+        {
+            "event": "budget_fallback_rejected",
+            "owner": "team",
+            "team_id": "budget-lab",
+            "policy_epoch": "test-1",
+            "window": emitter.tiers[0].window,
+            "route": "budget-lab-primary",
+            "target": "budget-lab-degraded",
+            "rejection": "outside_caller_allowlist",
+            "tier": 90,
+            "spend_usd": 950.0,
+            "envelope_usd": 1000.0,
+        }
+    ]
+
+
+async def test_a_repeated_rejection_is_reported_once_per_window(team):
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+    auth = _without_fallback_access(team)
+
+    await _request(handler, auth, "budget-lab-primary")
+    await _request(handler, auth, "budget-lab-primary")
+
+    assert [event.rejection for event in emitter.fallback_rejections] == [
+        "outside_caller_allowlist"
+    ]
+
+
+async def test_a_different_rejection_on_the_same_route_is_reported_separately(
+    team, monkeypatch
+):
+    """The claim carries the reason, so a second cause is not hidden by the first."""
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, _without_fallback_access(team), "budget-lab-primary")
+
+    def check_that_cannot_run(model, llm_router, models, team_id, object_type):
+        raise RuntimeError("router state unavailable")
+
+    monkeypatch.setattr(
+        "budget_policy.adapter._can_object_call_model", check_that_cannot_run
+    )
+    await _request(handler, make_auth(team), "budget-lab-primary")
+
+    assert [event.rejection for event in emitter.fallback_rejections] == [
+        "outside_caller_allowlist",
+        "entitlement_check_unavailable",
+    ]
+    assert [incident.reason for incident in emitter.incidents] == [
+        "entitlement_check_unavailable"
+    ]
+
+
+async def test_a_target_rejected_below_the_degrade_tier_is_not_reported(team):
+    """Below ``degrade_at`` no downgrade was due, so none was refused."""
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.8)
+
+    await _request(handler, _without_fallback_access(team), "budget-lab-primary")
+
+    assert [event.tier for event in emitter.tiers] == [75]
+    assert emitter.fallback_rejections == []
+
+
+async def test_a_new_window_reports_the_rejection_again(team, monkeypatch):
+    windows = iter(
+        [datetime(2026, 9, 28, tzinfo=UTC), datetime(2026, 10, 5, tzinfo=UTC)]
+    )
+    monkeypatch.setattr(
+        "budget_policy.adapter.get_budget_reset_time",
+        lambda budget_duration: next(windows),
+    )
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+    auth = _without_fallback_access(team)
+
+    await _request(handler, auth, "budget-lab-primary")
+    await _request(handler, auth, "budget-lab-primary")
+
+    assert [event.window for event in emitter.fallback_rejections] == [
+        "2026-09-28T00:00:00+00:00",
+        "2026-10-05T00:00:00+00:00",
+    ]
+
+
+async def test_tier_and_rejection_events_are_delivered_together(team):
+    """A request that crosses tiers and is rejected still pays one remote deadline."""
+
+    class CountingEmitter(RecordingEmitter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.in_flight = 0
+            self.peak = 0
+
+        async def _overlap(self) -> None:
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+            await asyncio.sleep(0)
+            self.in_flight -= 1
+
+        async def emit_tier(self, event):
+            await self._overlap()
+            await super().emit_tier(event)
+
+        async def emit_fallback_rejected(self, event):
+            await self._overlap()
+            await super().emit_fallback_rejected(event)
+
+    emitter = CountingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    await _request(handler, _without_fallback_access(team), "budget-lab-primary")
+
+    assert [event.tier for event in emitter.tiers] == [75, 90]
+    assert len(emitter.fallback_rejections) == 1
+    assert emitter.peak == 3, "the rejection was delivered after the tier events"
+
+
+def _team_with_one_route(route: str, fallback: str) -> TeamPolicy:
+    policy = RoutePolicy(
+        route=route,
+        fallback=fallback,
+        degrade_at=90,
+        on_counter_unavailable=Posture.BLOCK,
+    )
+    return TeamPolicy(
+        team_id="team-a",
+        policy_epoch="team-a-v1",
+        envelope_usd=500.0,
+        budget_duration="7d",
+        warn_tiers=(75, 90),
+        default_posture=Posture.BLOCK,
+        routes={route: policy},
+    )
+
+
+def test_the_handler_refuses_a_fallback_the_catalog_cannot_allow():
+    """Manifest and catalog are fixed for the process, so a bad pairing stops startup.
+
+    Checked per request, it surfaced only when a team reached its degrade tier,
+    and as the team's event although the fix is the platform's configuration.
+    """
+    team = _team_with_one_route("chat-qa", "code-review")
+
+    with pytest.raises(CatalogError, match="data class"):
+        build_handler(team=team, emitter=RecordingEmitter(), spend=0.0)
+
+
+async def test_a_dearer_fallback_approved_in_the_manifest_is_served(team):
+    """Price is the route owner's call, so the plugin serves the declared target."""
+    team = _team_with_one_route("chat-qa-degraded", "chat-qa")
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
+
+    applied = await _request(handler, make_auth(team), "chat-qa-degraded")
+
+    assert applied["model"] == "chat-qa"
+    assert emitter.fallback_rejections == []

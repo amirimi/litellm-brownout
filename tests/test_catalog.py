@@ -1,8 +1,9 @@
 """The price catalog and the fallback rules built on it.
 
-A degradation target has to be priced, cheaper on at least one token dimension
-and no dearer on either, and carry a data class at least as restrictive as the
-primary's. A price that cannot support those comparisons is a load-time error.
+A degradation target has to be priced, differ from its route, and carry a data
+class at least as restrictive as the route's. Its price relative to the route is
+the route owner's call, approved in the manifest. A price that cannot stand in
+for what LiteLLM reserves against is a load-time error.
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ import pytest
 
 from budget_policy.catalog import (
     CatalogError,
-    FallbackRejected,
     ModelPrice,
     PriceCatalog,
     UnpricedModel,
@@ -19,31 +19,8 @@ from budget_policy.catalog import (
 )
 
 
-def test_a_cheaper_same_class_fallback_is_selectable(catalog: PriceCatalog):
-    """The accepting case, and the lab price ordering."""
-    primary = catalog.price("budget-lab-primary")
-    fallback = catalog.price("budget-lab-degraded")
-
-    assert fallback.input_cost_per_token < primary.input_cost_per_token
-    assert fallback.output_cost_per_token < primary.output_cost_per_token
-    assert (
-        catalog.select_fallback("budget-lab-primary", "budget-lab-degraded")
-        == "budget-lab-degraded"
-    )
-
-
-@pytest.mark.parametrize(
-    ("candidate", "reason"),
-    [
-        ("more-expensive", "more_expensive_than_primary"),
-        ("same-price", "not_cheaper_than_primary"),
-        ("not-in-the-catalog", "unpriced"),
-        ("less-restricted", "data_class_does_not_permit_primary_traffic"),
-    ],
-)
-def test_an_invalid_fallback_is_rejected_with_its_reason(candidate, reason):
-    """Every rejection carries the reason that produced it."""
-    catalog = PriceCatalog(
+def _pairing_catalog() -> PriceCatalog:
+    return PriceCatalog(
         version="test",
         data_class_order=("internal", "customer_pii"),
         prices={
@@ -58,19 +35,41 @@ def test_an_invalid_fallback_is_rejected_with_its_reason(candidate, reason):
         },
     )
 
-    rejection = catalog.select_fallback("primary", candidate)
 
-    assert isinstance(rejection, FallbackRejected)
-    assert rejection.reason == reason
+def test_the_lab_pairing_is_accepted(catalog: PriceCatalog):
+    catalog.require_fallback("budget-lab-primary", "budget-lab-degraded")
+
+
+@pytest.mark.parametrize("candidate", ["more-expensive", "same-price"])
+def test_a_fallback_at_or_above_the_routes_price_is_the_owners_call(candidate):
+    """The manifest owner approved the pairing, and price is theirs to judge."""
+    _pairing_catalog().require_fallback("primary", candidate)
+
+
+@pytest.mark.parametrize(
+    ("primary", "candidate", "problem"),
+    [
+        ("primary", "primary", "itself"),
+        ("primary", "not-in-the-catalog", "no committed price"),
+        ("not-in-the-catalog", "same-price", "no committed price"),
+        ("primary", "less-restricted", "data class"),
+    ],
+)
+def test_a_pairing_the_platform_cannot_allow_is_a_catalog_error(
+    primary, candidate, problem
+):
+    """Each is a fact about two loaded files, so it is refused before any traffic."""
+    with pytest.raises(CatalogError, match=problem):
+        _pairing_catalog().require_fallback(primary, candidate)
 
 
 @pytest.mark.parametrize("price", [float("nan"), float("inf"), float("-inf")])
 def test_the_catalog_rejects_a_price_that_is_not_a_finite_number(price):
-    """A non-finite price disables every comparison built on it.
+    """A non-finite price cannot match the price LiteLLM reserves against.
 
-    ``nan`` fails every ordering test, so a fallback priced ``nan`` reads as
-    neither cheaper nor more expensive than its primary and slips past the
-    negative-price guard. ``inf`` poisons the reservation estimate instead.
+    ``nan`` never equals itself, so the contract that the catalog equals every
+    deployment's price could not hold, and it slips past the negative-price
+    guard. ``inf`` poisons the reservation estimate.
     """
     with pytest.raises(CatalogError, match="finite"):
         _build_price(
@@ -135,8 +134,8 @@ def test_a_price_cannot_be_constructed_in_a_shape_comparisons_cannot_use(
 ):
     """The loader reports these as catalog errors. The type refuses them outright.
 
-    Every fallback rule is a comparison between two of these, so a value that
-    breaks comparison disables selection rather than failing it.
+    The catalog stands in for the prices LiteLLM reserves against, so a value
+    that no deployment could carry is refused rather than compared.
     """
     with pytest.raises(AssertionError, match=expected):
         ModelPrice(

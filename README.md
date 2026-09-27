@@ -1,7 +1,7 @@
 # LiteLLM brownout
 
 A LiteLLM custom logger plugin that keeps each team's spend inside a budget its owner approved.
-It raises one event per declared warning tier, moves eligible routes to a validated cheaper model
+It raises one event per declared warning tier, moves eligible routes to a validated fallback model
 at a route-declared threshold, and tells the calling application in response headers which route
 served and why. LiteLLM 1.101.0 already reserves each request's worst-case cost at authentication,
 counts spend atomically across replicas in Redis, reconciles to actual cost and refuses admission
@@ -154,7 +154,7 @@ teams:
 | `warn_tiers` | non-empty list of integers in 1..99 | Each is a percentage of the envelope that raises one event per team per window. 100 belongs to the native ceiling and is refused at load |
 | `on_counter_unavailable` | `block`, `degrade` or `admit` | The team's posture when the spend counter cannot be read. Default `block` |
 | `routes.<model_group>` | mapping, may be empty | Keyed by LiteLLM model group name. A route absent from the manifest still spends against the envelope and still earns tier events. It never degrades |
-| `routes.<model_group>.fallback` | model group name or `null` | The degradation target |
+| `routes.<model_group>.fallback` | model group name or `null` | The degradation target. Checked against the catalog when the handler loads, as described under [Fallback validation](#fallback-validation). Its price relative to the route is the owner's call |
 | `routes.<model_group>.degrade_at` | integer in 1..99 or `null` | Requires `fallback`. Joined to the team's tier set, so a downgrade raises an event even at a percentage the team did not list |
 | `routes.<model_group>.on_counter_unavailable` | as above | Per-route override of the team posture |
 
@@ -185,13 +185,22 @@ because LiteLLM returns `None` for an unpriced model and skips reservation entir
 
 ### Fallback validation
 
-A degradation target serves only when every check holds. It is priced, it differs from the primary,
-it costs no more on either token dimension and less on at least one, its data class sits at or
-above the primary's in `data_class_order`, and LiteLLM's own `_can_object_call_model` permits it for
-both the key and the team. Any failed check serves the primary, and both the response header and
-the tier event carry `fallback_rejected`. An entitlement check that raises anything other than
-LiteLLM's `ProxyException` is a platform fault, so it serves the primary and raises an incident
-rather than reading as a narrow allowlist.
+A declared fallback is checked twice, once when the handler loads and once per request.
+
+The load check covers what the manifest and the catalog fix for the life of the process. Both
+routes are priced, the fallback differs from its route, and its data class sits at or above the
+route's in `data_class_order`. A pairing that fails refuses the handler, so the gateway does not
+start. The fallback's price relative to its route is not checked. The manifest's owner approved the
+pairing, and a fallback that costs more speeds spending toward the 429 while the header still says
+degraded.
+
+The request check asks LiteLLM's own `_can_object_call_model` whether both the key and the team may
+call the fallback. A refusal serves the primary. The response header and the tier event carry
+`fallback_rejected`, and a `budget_fallback_rejected` event names the route, the target and the
+rejection. That event has its own claim per route and rejection per window, because a tier claim
+belongs to the team and a route with no fallback may already hold it. An entitlement check that
+raises anything other than LiteLLM's `ProxyException` is a platform fault, so it serves the primary
+and raises an incident as well as the rejection event, rather than reading as a narrow allowlist.
 
 ### The spend figure a tier compares
 
@@ -255,15 +264,16 @@ Every failure direction is closed. A request the plugin cannot govern is refused
 
 | Condition | Response |
 |---|---|
-| Route reaches its declared threshold | Serve the validated cheaper route with tier and degradation headers |
+| Route reaches its declared threshold | Serve the declared fallback with tier and degradation headers |
 | Team reaches 100% of its budget | Native 429 at reservation time. The plugin never sees that request |
 | Caller supplies `fallbacks`, `mock_testing_fallbacks`, any `x-platform-*` key or `degraded_from` in `metadata` or `litellm_metadata` | 400 `caller_routing_not_permitted` naming the refused keys |
 | Requested model has no committed price | 503 `unpriced_model` plus a platform incident |
 | Key has no team, or its team is absent from the manifest | 503 `team_not_in_manifest` plus a platform incident |
 | Spend counter unreadable | The route's `on_counter_unavailable` posture. `block` is a 503 `spend_counter_unreadable`. `degrade` with no selectable target collapses to `block`. Every posture raises a platform incident |
 | Runtime `team.max_budget` drifts from `envelope_usd` | 503 `budget_ceiling_drift` plus a platform incident |
-| Degradation target fails validation or entitlement | Serve the primary, disclose `fallback_rejected`, tag the tier event with it |
-| Entitlement check itself cannot run | Serve the primary and raise a platform incident |
+| Declared fallback is unpriced, is its own route, or carries a less restricted data class | The handler refuses to load, so the gateway does not start |
+| Caller's key or team may not call the fallback | Serve the primary, disclose `fallback_rejected`, tag the tier event with it, and raise one `budget_fallback_rejected` event per route and rejection per window |
+| Entitlement check itself cannot run | Serve the primary, raise a platform incident and a `budget_fallback_rejected` event |
 | Redis unavailable for the tier claim | Deduplication falls back to per-replica and says so in the log |
 | Non-chat call type (embeddings, images) | Passed through untouched |
 
@@ -287,10 +297,12 @@ Headers are set in the post-call hook on the success path.
 
 ### Events and metrics
 
-Every event is a structured log line on the `budget_policy` logger, tiers at warning and incidents
-at error. With `BUDGET_POLICY_WEBHOOK_URL` set, the same payload is POSTed with a one-second
-timeout. With `DD_API_KEY` set, series go to the Datadog v2 API directly. Remote delivery is
-concurrent and best-effort, and a failed sink cannot fail the request.
+Every event is a structured log line on the `budget_policy` logger, tier and rejection events at
+warning and incidents at error. With `BUDGET_POLICY_WEBHOOK_URL` set, the same payload is POSTed
+with a one-second timeout. With `DD_API_KEY` set, series go to the Datadog v2 API directly. Remote
+delivery is concurrent and best-effort, and a failed sink cannot fail the request. Events are
+published after the request is rewritten and before it is dispatched, so an event describes the
+routing decision applied to the request and says nothing about the provider's response.
 
 ```json
 {"event": "budget_tier_crossed", "owner": "team", "team_id": "team-a",
@@ -299,11 +311,20 @@ concurrent and best-effort, and a failed sink cannot fail the request.
  "decision": "degrade", "reason": "degrade_tier_reached",
  "spend_usd": 376.2, "envelope_usd": 500.0}
 
+{"event": "budget_fallback_rejected", "owner": "team", "team_id": "team-a",
+ "policy_epoch": "team-a-v1", "window": "2026-09-21T00:00:00+00:00",
+ "route": "route-chat", "target": "route-chat-degraded",
+ "rejection": "outside_caller_allowlist", "tier": 90,
+ "spend_usd": 452.1, "envelope_usd": 500.0}
+
 {"event": "budget_policy_incident", "owner": "platform",
  "reason": "budget_ceiling_drift", "window": "2026-09-21T00:00:00+00:00",
  "team_id": "team-a", "envelope_usd": 500.0, "team_max_budget_usd": 5000.0,
  "manifest_version": "v1"}
 ```
+
+A rejection is `outside_caller_allowlist` or `entitlement_check_unavailable`. Every other problem
+with a pairing stops the handler from loading.
 
 Incident reasons are `unpriced_model`, `team_not_in_manifest`, `budget_ceiling_drift`,
 `spend_counter_unreadable` and `entitlement_check_unavailable`. Incidents are deduplicated once per
@@ -313,6 +334,7 @@ window on their own claim key.
 |---|---|---|
 | `budget_policy.tier_crossed` | count | `env`, `service:budget-policy`, `team`, `tier`, `decision`, `reason`, `route` |
 | `budget_policy.envelope_utilisation` | gauge | `env`, `service:budget-policy`, `team` |
+| `budget_policy.fallback_rejected` | count | `env`, `service:budget-policy`, `team`, `route`, `rejection` |
 | `budget_policy.incident` | count | `env`, `service:budget-policy`, `reason`, and `team` when the incident names one |
 
 The utilisation gauge is sampled at tier transitions only. Numbers and tags are all that reach
@@ -366,7 +388,7 @@ read from the pinned source in `.venv/lib/python3.12/site-packages/litellm`.
 |---|---|
 | Tier events at 75%, 90% and any route-declared threshold | The native alerter is hardcoded to 85% and 95% ([`integrations/SlackAlerting/slack_alerting.py:648-653`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/integrations/SlackAlerting/slack_alerting.py#L648-L653)), and no `alerting` key is declared. A team `soft_budget` is one absolute-dollar threshold, compared against the team row's recorded spend rather than the counter, alert-only, and delivered by email to `metadata.soft_budget_alerting_emails` ([`proxy/auth/auth_checks.py:5332`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/auth/auth_checks.py#L5332), [`proxy/_types.py:1805`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/_types.py#L1805)) |
 | Route-declared degradation on a team total | `budget_fallbacks` fires on per-model `model_max_budget`, never on a team total ([`proxy/hooks/model_max_budget_limiter.py:300`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/hooks/model_max_budget_limiter.py#L300)) |
-| Validated fallback selection | Nothing native checks that a target is cheaper, priced, and cleared for the primary's data class |
+| Validated fallback selection | Nothing native checks that a target is priced, cleared for the primary's data class, and callable by the caller's key and team |
 | A catalog that raises on an unknown model | LiteLLM returns `None` for an unpriced model and skips reservation entirely ([`proxy/spend_tracking/budget_reservation.py:236`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236)) |
 | Caller disclosure | No native header carries the served route or the route it degraded from |
 | Guardrail re-merge after a rewrite | The merge runs at stage 3 keyed on the requested model, so a stage 4 rewrite would drop the target's guardrails |
@@ -399,7 +421,7 @@ Six limits a deployment inherits as the plugin stands.
 ```bash
 cp .env.example .env          # set LITELLM_MASTER_KEY and the two passwords
 uv sync
-uv run pytest -m "not e2e"    # 111 tests, no Redis or gateway needed
+uv run pytest -m "not e2e"    # 123 tests, no Redis or gateway needed
 ```
 
 The decision function is pure, and the adapter's two impure edges, the spend counter and the tier

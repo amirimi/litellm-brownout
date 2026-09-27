@@ -36,13 +36,13 @@ class UnpricedModel(Exception):
 
 @dataclass(frozen=True)
 class ModelPrice:
-    """A committed per-token price, in a shape every comparison can rely on.
+    """A committed per-token price, in a shape LiteLLM could reserve against.
 
-    A ``NaN`` price compares false against every threshold, so a fallback
-    carrying one reads as neither cheaper nor more expensive than its primary. A
-    route free on both dimensions can never move spend, so no threshold on it is
-    reachable. The loader reports either as a catalog error and the assertions
-    catch any construction that bypasses it.
+    A ``NaN`` price never equals itself, so it could never match the deployment
+    price the contract test compares it with. A route free on both dimensions
+    can never move spend, so no threshold on it is reachable. The loader reports
+    either as a catalog error and the assertions catch any construction that
+    bypasses it.
     """
 
     model: str
@@ -62,12 +62,6 @@ class ModelPrice:
         assert self.input_cost_per_token > 0 or self.output_cost_per_token > 0, (
             f"model {self.model!r} is free on both token dimensions"
         )
-
-
-@dataclass(frozen=True)
-class FallbackRejected:
-    candidate: str
-    reason: str
 
 
 class PriceCatalog:
@@ -119,49 +113,35 @@ class PriceCatalog:
         except ValueError:
             raise CatalogError(f"Unknown data class {data_class!r}") from None
 
-    def select_fallback(
-        self, primary: str, candidate: str | None
-    ) -> str | FallbackRejected | None:
-        """Validate a degradation target before it is allowed to serve traffic.
+    def require_fallback(self, primary: str, candidate: str) -> None:
+        """Refuse a declared pairing the platform cannot allow to serve traffic.
 
-        A target is selectable only when it is priced, costs no more on either
-        token dimension and less on at least one, and carries a data class at
-        least as restrictive as the primary's. Returns the target, a rejection
-        carrying the reason, or None when the route declares no target at all.
+        Both routes must be priced and distinct, and the target's data class must
+        be at least as restrictive as the route's. The target's price relative
+        to the route is the route owner's call, approved in the manifest, so it
+        is not checked. Catalog and manifest are fixed for the life of the
+        process, so this runs once, while the handler is built.
         """
-        if candidate is None:
-            return None
         if candidate == primary:
-            return FallbackRejected(candidate, "same_route_as_primary")
-
-        primary_price = self.price(primary)
-        try:
-            candidate_price = self.price(candidate)
-        except UnpricedModel:
-            return FallbackRejected(candidate, "unpriced")
-
-        if (
-            candidate_price.input_cost_per_token > primary_price.input_cost_per_token
-            or candidate_price.output_cost_per_token
-            > primary_price.output_cost_per_token
-        ):
-            return FallbackRejected(candidate, "more_expensive_than_primary")
-
-        if (
-            candidate_price.input_cost_per_token == primary_price.input_cost_per_token
-            and candidate_price.output_cost_per_token
-            == primary_price.output_cost_per_token
-        ):
-            return FallbackRejected(candidate, "not_cheaper_than_primary")
-
+            raise CatalogError(f"route {primary!r} declares itself as its fallback")
+        primary_price = self._declared_price(primary, primary)
+        candidate_price = self._declared_price(primary, candidate)
         if self.sensitivity(candidate_price.data_class) < self.sensitivity(
             primary_price.data_class
         ):
-            return FallbackRejected(
-                candidate, "data_class_does_not_permit_primary_traffic"
+            raise CatalogError(
+                f"route {primary!r} declares fallback {candidate!r}, whose data class "
+                f"{candidate_price.data_class!r} is less restricted than the route's "
+                f"{primary_price.data_class!r}"
             )
 
-        return candidate
+    def _declared_price(self, primary: str, model: str) -> ModelPrice:
+        try:
+            return self.price(model)
+        except UnpricedModel:
+            raise CatalogError(
+                f"route {primary!r} pairs with {model!r}, which has no committed price"
+            ) from None
 
 
 def _build_price(
@@ -187,9 +167,8 @@ def _build_price(
 
     if not isfinite(input_cost) or not isfinite(output_cost):
         raise CatalogError(
-            f"{path}: model {name!r} has a price that is not a finite number. "
-            "A NaN price compares false against every threshold and a fallback "
-            "carrying one reads as neither cheaper nor more expensive"
+            f"{path}: model {name!r} has a price that is not a finite number, so it "
+            "cannot match the price any deployment reserves against"
         )
     if input_cost < 0 or output_cost < 0:
         raise CatalogError(f"{path}: model {name!r} has a negative price")
