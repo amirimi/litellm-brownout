@@ -71,10 +71,14 @@ Two pieces of work remain.
 - The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
   suite and has yet to be driven through a live gateway.
 
-A deployment inherits six limits as the plugin stands.
+A deployment inherits ten limits as the plugin stands.
 
 | Limit | What it means for a deployment |
 |---|---|
+| Request compatibility between a route and its fallback goes unchecked | Context capacity, tools, structured output and modalities can differ. With `drop_params: true`, as in the lab config, a parameter the fallback does not support may be dropped silently. Check each fallback against the workload before it carries real traffic |
+| Reset windows are tested at `7d` in UTC | `2d` produces a moving claim window, `2mo` passes validation and then raises during window calculation, and DST can shift reset boundaries. LiteLLM resets the counter asynchronously |
+| The manifest loader ignores unknown keys | A typo such as `degrade_At` leaves degradation off without an error |
+| The counter posture applies after LiteLLM's own check | With `fail_closed_budget_enforcement` on, LiteLLM may refuse a request whose spend it cannot verify before `on_counter_unavailable` is consulted |
 | Entitlement reads the direct key and team model lists | A target reachable only through an access group, a team alias, or project or member scope reads as unselectable, so the primary is served. Those scopes need LiteLLM's full resolved-model path |
 | Only the budget amount is re-checked per request | The authenticated object carries `team_max_budget` and no duration or reset instant ([`proxy/_types.py:2879`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/_types.py#L2879)), so a drifted window is caught where the team is rendered. The manifest parses `budget_duration` at load, because one derivation raises on a bad value and the other quietly returns the next midnight |
 | Data classes are compared as an ordering | The whole rule for two classes. Provider, region, retention, purpose and audit requirement can each be more restrictive without the combination being permitted, and a production deployment needs a matrix over those dimensions |

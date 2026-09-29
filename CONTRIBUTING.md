@@ -16,10 +16,12 @@ uv run pytest -m "not e2e"
 The unit suite holds 131 tests and needs no Redis or gateway. The decision function is pure, and
 the adapter's two impure edges, the spend counter and the tier store, are injected.
 `tests/test_config_contract.py` holds the cross-file checks that fail an unpriced or unserved route
-at review time, before it reaches a gateway.
+at review time, before it reaches a gateway. Adapt those checks when you change the manifest, the
+catalog or the gateway config for your own deployment.
 
-The end-to-end sequence runs on mock routes. It spends no provider money and still exercises real
-reservations, a real Redis counter and the native ceiling.
+The end-to-end sequence holds 3 tests and runs on mock routes. It spends no provider money and
+still exercises real reservations, a real Redis counter and the native ceiling. Real-provider
+quality and concurrent admission across gateway replicas stay outside both suites.
 
 ```bash
 docker compose up -d --wait

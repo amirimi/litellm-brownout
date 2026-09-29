@@ -103,7 +103,8 @@ The post-call hook sets these headers on the success path.
 Every event is a structured log line on the `budget_policy` logger, with team-owned events at
 warning and incidents at error. With `BUDGET_POLICY_WEBHOOK_URL` set, the same payload is POSTed
 with a one-second timeout. With `DD_API_KEY` set, series go to the Datadog v2 API directly. Remote
-delivery is concurrent and best-effort, and a failed sink cannot fail the request. Events are
+delivery is concurrent and best-effort. A failed sink cannot fail the request, and a failed
+delivery is dropped without a retry. Events are
 published after the request is rewritten and before it is dispatched, so an event describes the
 routing decision before any provider has answered.
 
