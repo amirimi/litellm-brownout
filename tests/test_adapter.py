@@ -990,3 +990,48 @@ async def test_tier_and_degradation_events_are_delivered_together(team):
     assert [event.tier for event in emitter.tiers] == [75, 90]
     assert len(emitter.route_degradations) == 1
     assert emitter.peak == 3, "the degradation was delivered after the tier events"
+
+
+async def test_made_up_model_names_raise_one_incident_per_team_per_window(team):
+    """The caller chooses the name, so a claim keyed on it would grow without bound.
+
+    LiteLLM lets an unknown name through to this hook for a team with no model
+    list. Each name used to raise its own platform incident and Redis key.
+    """
+    emitter = RecordingEmitter()
+    store = FakeStore()
+    handler = build_handler(team=team, emitter=emitter, spend=100.0, store=store)
+
+    for name in ("made-up-1", "made-up-2", "made-up-3"):
+        with pytest.raises(HTTPException) as raised:
+            await _request(handler, make_auth(team), name)
+        assert raised.value.status_code == 503
+
+    assert [incident.as_payload()["model"] for incident in emitter.incidents] == [
+        "made-up-1"
+    ]
+    assert emitter.incidents[0].as_payload()["model_group_served"] is False
+    assert len(store.claimed) == 1
+
+
+async def test_an_unpriced_model_group_the_gateway_serves_is_reported_per_group(
+    team, monkeypatch
+):
+    """A configured group with no price is a catalog gap, reported once per group."""
+
+    class ServingRouter:
+        def get_model_names(self, team_id: str | None = None) -> list[str]:
+            return ["served-unpriced-a", "served-unpriced-b"]
+
+    monkeypatch.setattr("budget_policy.adapter.router", lambda: ServingRouter())
+    emitter = RecordingEmitter()
+    handler = build_handler(team=team, emitter=emitter, spend=100.0)
+
+    for name in ("served-unpriced-a", "served-unpriced-b", "served-unpriced-a"):
+        with pytest.raises(HTTPException):
+            await _request(handler, make_auth(team), name)
+
+    assert [
+        (incident.as_payload()["model"], incident.as_payload()["model_group_served"])
+        for incident in emitter.incidents
+    ] == [("served-unpriced-a", True), ("served-unpriced-b", True)]

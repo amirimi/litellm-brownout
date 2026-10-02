@@ -13,7 +13,9 @@ names run against the placeholder keys in `.env.example` without failing a reque
 
 ## 1. Start the stack and create a fresh team
 
-Copy `.env.example` to `.env` once, then run these commands.
+Copy `.env.example` to `.env` once, then run these commands. Its passwords and master key are
+placeholders, and every port the stack publishes binds to `127.0.0.1`, so the lab is reachable only
+from the machine it runs on. Change both before exposing it anywhere else.
 
 ```bash
 docker compose up -d --wait

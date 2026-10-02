@@ -147,6 +147,12 @@ Incident reasons are `unpriced_model`, `team_not_in_manifest`, `budget_ceiling_d
 `spend_counter_unreadable` and `entitlement_check_unavailable`. Incidents are deduplicated once per
 window on their own claim key.
 
+An `unpriced_model` incident is keyed on the model only when the model is a group the gateway's
+config declares, because that is a gap in the catalog. Any other name is the caller's choice, so it
+raises at most one incident per team per window. Keyed on the name, a key holder could raise an
+unbounded number of platform incidents by inventing model names. The incident's
+`model_group_served` field says which case it was, and the caller gets the same 503 either way.
+
 | Metric | Type | Tags |
 |---|---|---|
 | `budget_policy.tier_crossed` | count | `env`, `service:budget-policy`, `team`, `tier`, `decision`, `reason`, `route` |

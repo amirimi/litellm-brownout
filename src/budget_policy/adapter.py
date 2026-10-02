@@ -278,23 +278,30 @@ class BudgetPolicyHandler(CustomLogger):
         stop LiteLLM from skipping the reservation for a model it could not
         price. What it can do is stop that request reaching a provider.
 
-        The incident is deduplicated on the model rather than the team, because
-        the missing price is a fact about the catalog and every team calling
-        that route hits the same gap. The team it names is therefore the first
-        one observed, not the full set affected.
+        A model group the gateway's config declares is a catalog gap, so its
+        incident is deduplicated on the group, and every team calling it hits
+        the same gap. Any other name is the caller's choice, so its incident is
+        deduplicated on the team. Keyed on the name, a caller could raise an
+        unbounded number of platform incidents and claims by inventing names.
         """
         try:
             self._catalog.price(route)
         except UnpricedModel:
+            served: Final = route in _served_model_groups(team.team_id)
+            if served:
+                dedup = f"incident:unpriced_model:group:{route}:{window_id}"
+            else:
+                dedup = f"incident:unpriced_model:team:{team.team_id}:{window_id}"
             await self._incident(
                 reason="unpriced_model",
                 window_id=window_id,
                 detail={
                     "model": route,
+                    "model_group_served": served,
                     "team_id": team.team_id,
                     "catalog_version": self._catalog.version,
                 },
-                dedup=f"incident:unpriced_model:{route}:{window_id}",
+                dedup=dedup,
                 ttl_seconds=_window_ttl(team.budget_duration),
             )
             raise HTTPException(
@@ -663,6 +670,18 @@ def _apply(data: dict, decision: Decision, team: TeamPolicy) -> dict:
         "team_id": team.team_id,
     }
     return data
+
+
+def _served_model_groups(team_id: str) -> frozenset[str]:
+    """The model groups the gateway's config declares, empty outside the proxy.
+
+    Bounded by the config, unlike a name a caller sends. A name a wildcard
+    route would serve is absent here, so it counts as the caller's choice.
+    """
+    gateway_router: Final = router()
+    if gateway_router is None:
+        return frozenset()
+    return frozenset(gateway_router.get_model_names(team_id=team_id))
 
 
 def _require_declared_fallbacks(manifest: Manifest, catalog: PriceCatalog) -> None:
