@@ -1,5 +1,3 @@
-"""Tiered team budget enforcement and graceful downgrade for a LiteLLM gateway."""
-
 from .catalog import (
     CatalogError,
     ModelPrice,

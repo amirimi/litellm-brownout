@@ -1,15 +1,3 @@
-"""Shared fixtures.
-
-The catalog and manifest paths are pinned to the repository copies before the
-adapter is imported, so the suite never depends on the working directory it was
-launched from.
-
-``.env`` is loaded here rather than left to whichever module imports LiteLLM
-first. LiteLLM calls ``load_dotenv`` at import, so the master key used to be
-present only when a unit test happened to run before the end-to-end one, and
-running the end-to-end file alone skipped on a missing key.
-"""
-
 from __future__ import annotations
 
 import os
@@ -33,13 +21,6 @@ from budget_policy.manifest import Manifest, Posture, RoutePolicy, TeamPolicy
 
 @pytest.fixture(autouse=True)
 def isolated_router(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No unit test reaches the proxy runtime.
-
-    ``litellm.proxy.proxy_server`` builds the whole FastAPI application at
-    import. ``budget_policy.runtime`` is the only place that reads it, so
-    stubbing the name the adapter imported from there keeps the suite runnable
-    without a gateway. Tests that care about the router substitute their own.
-    """
     monkeypatch.setattr("budget_policy.adapter.router", lambda: None)
 
 

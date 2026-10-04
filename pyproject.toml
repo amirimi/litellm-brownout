@@ -43,7 +43,6 @@ extend-exclude = [".venv"]
 
 [tool.ruff.lint]
 extend-select = ["I", "UP", "B", "BLE", "SIM"]
-# SIM108 rewrites if/else into a ternary. The explicit block reads better at a glance.
 ignore = ["SIM108"]
 
 [tool.mypy]

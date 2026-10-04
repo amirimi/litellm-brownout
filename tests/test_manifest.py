@@ -1,10 +1,3 @@
-"""Manifest values the loader refuses.
-
-Every tier belongs to this component and 100% belongs to the native ceiling, so
-the range is closed at both ends. A degradation threshold with no target is a
-policy that can reach a decision it cannot act on.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -20,7 +13,6 @@ from budget_policy.manifest import (
 
 @pytest.mark.parametrize("tier", [0, 100, 150])
 def test_the_manifest_rejects_a_tier_outside_the_range_it_owns(tier):
-    """Warning tiers are below the policy-envelope action at 100%."""
     with pytest.raises(ManifestError):
         _build_team(
             "test.yaml",
@@ -81,14 +73,6 @@ def test_the_manifest_rejects_degradation_with_no_target():
 
 @pytest.mark.parametrize("duration", ["1y", "banana", "7", "-1d", "0d"])
 def test_the_manifest_rejects_a_budget_duration_litellm_cannot_parse(duration):
-    """The two derivations disagree about a value neither understands.
-
-    ``duration_in_seconds`` raises, which would fail a claim TTL on the request
-    path. ``get_next_standardized_reset_time`` logs and quietly returns the next
-    midnight, which would give the team a daily policy window against a budget
-    that resets weekly. Neither is discoverable at runtime, so the load rejects
-    it.
-    """
     with pytest.raises(ManifestError, match="budget_duration"):
         _build_team(
             "test.yaml",
@@ -104,12 +88,6 @@ def test_the_manifest_rejects_a_budget_duration_litellm_cannot_parse(duration):
 
 
 def test_a_route_cannot_be_constructed_with_a_threshold_it_cannot_act_on():
-    """The loader reports this as a manifest error. The type refuses it outright.
-
-    ``decide`` reads ``degrade_at`` alone, so a route carrying one with no target
-    would report a degrade tier while serving the primary for a reason nothing
-    records.
-    """
     with pytest.raises(AssertionError, match="no fallback"):
         RoutePolicy(
             route="a",
@@ -121,7 +99,6 @@ def test_a_route_cannot_be_constructed_with_a_threshold_it_cannot_act_on():
 
 @pytest.mark.parametrize("envelope", [0.0, -1.0, float("nan"), float("inf")])
 def test_a_team_cannot_be_constructed_with_an_unusable_envelope(envelope):
-    """Every tier is a percentage of this number."""
     with pytest.raises(AssertionError, match="envelope"):
         TeamPolicy(
             team_id="t",

@@ -1,10 +1,3 @@
-"""Recording webhook sink for the end-to-end smoke test.
-
-The gateway posts tier and incident events here. The smoke test reads them back
-over ``GET /events`` and asserts on the sequence, which is what lets the test
-observe the 75% and 90% crossings rather than infer them from response headers.
-"""
-
 import json
 import logging
 import threading

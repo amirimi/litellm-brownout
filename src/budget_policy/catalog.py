@@ -1,12 +1,3 @@
-"""Committed price catalog for every route the gateway serves.
-
-LiteLLM's reservation path returns ``None`` for a model it cannot price and then
-skips reservation entirely, which turns an unknown price into a silent
-enforcement hole. This catalog is the component's own pricing authority. It
-raises rather than returning ``None``, so an unpriced model is a platform
-incident and never an admission.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -19,16 +10,10 @@ import yaml
 
 
 class CatalogError(Exception):
-    """The catalog file itself is unusable."""
+    pass
 
 
 class UnpricedModel(Exception):
-    """No committed price exists for a model the gateway was asked to serve.
-
-    Never a legitimate state. No model is free, so this is a gap in the catalog
-    and the response to not knowing a price is to stop admitting the request.
-    """
-
     def __init__(self, model: str) -> None:
         self.model = model
         super().__init__(f"No committed price for model {model!r}")
@@ -36,15 +21,6 @@ class UnpricedModel(Exception):
 
 @dataclass(frozen=True)
 class ModelPrice:
-    """A committed per-token price, in a shape LiteLLM could reserve against.
-
-    A ``NaN`` price never equals itself, so it could never match the deployment
-    price the contract test compares it with. A route free on both dimensions
-    can never move spend, so no threshold on it is reachable. The loader reports
-    either as a catalog error and the assertions catch any construction that
-    bypasses it.
-    """
-
     model: str
     input_cost_per_token: float
     output_cost_per_token: float
@@ -65,8 +41,6 @@ class ModelPrice:
 
 
 class PriceCatalog:
-    """Per-token prices and data classes, keyed by LiteLLM model group name."""
-
     def __init__(
         self,
         version: str,
@@ -114,14 +88,6 @@ class PriceCatalog:
             raise CatalogError(f"Unknown data class {data_class!r}") from None
 
     def require_fallback(self, primary: str, candidate: str) -> None:
-        """Refuse a declared pairing the platform cannot allow to serve traffic.
-
-        Both routes must be priced and distinct, and the target's data class must
-        be at least as restrictive as the route's. The target's price relative
-        to the route is the route owner's call, approved in the manifest, so it
-        is not checked. Catalog and manifest are fixed for the life of the
-        process, so this runs once, while the handler is built.
-        """
         if candidate == primary:
             raise CatalogError(f"route {primary!r} declares itself as its fallback")
         primary_price = self._declared_price(primary, primary)

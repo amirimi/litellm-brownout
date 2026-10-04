@@ -1,23 +1,3 @@
-"""Create the lab team, envelope and key the end-to-end smoke test drives.
-
-Reads the budget straight out of `config/manifest.yaml`, so the LiteLLM team
-`max_budget` and the owner-approved policy budget are equal by construction.
-The native 429 owns 100% and this component owns every configurable tier below
-it.
-
-Rerunnable. It tears the team down, waits out LiteLLM's batched spend writer,
-clears the Redis spend counter and the tier claims for the window, then
-rebuilds, so a second demo run starts from zero rather than from wherever the
-first one stopped.
-
-The wait is load-bearing. LiteLLM buffers spend per team and flushes it every
-`PROXY_BATCH_WRITE_AT` seconds (`constants.py:1693`, 10 by default). Deleting the
-team and recreating it under the same id inside that window lets the previous
-run's buffered spend land on the new row, and the next clean Redis miss reseeds
-the counter straight off it. Deleting first and creating after the flush window
-leaves that write with no row to hit.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -92,10 +72,6 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _await_spend_flush(seconds: float) -> None:
-    """Let the previous run's buffered spend flush before the team id is reused.
-
-    Only reached when a team was actually removed, so a first run pays nothing.
-    """
     if seconds <= 0:
         return
     logger.info("Waiting %.0fs for the batched spend writer to drain", seconds)
@@ -103,12 +79,6 @@ def _await_spend_flush(seconds: float) -> None:
 
 
 def _lab_routes(team: TeamPolicy) -> list[str]:
-    """Every route the team may reach, primaries and their degradation targets.
-
-    The team's model allowlist has to include the fallback. A degradation the
-    team is not entitled to serve would be rejected by LiteLLM after this
-    component selected it.
-    """
     routes: set[str] = set(team.routes)
     for policy in team.routes.values():
         if policy.fallback is not None:
@@ -144,11 +114,6 @@ def _create_team(client: httpx.Client, team: TeamPolicy, models: list[str]) -> N
 
 
 def _create_key(client: httpx.Client, team: TeamPolicy) -> str:
-    """Mint a team key with no key-level budget.
-
-    A key budget would become a second ceiling and the team envelope would stop
-    being the only thing this component enforces against.
-    """
     response = client.post(
         "/key/generate",
         json={
@@ -163,18 +128,6 @@ def _create_key(client: httpx.Client, team: TeamPolicy) -> str:
 
 
 def _clear_counters(redis_url: str, team_id: str) -> None:
-    """Zero the spend counter and the tier claims, or fail.
-
-    This used to log and carry on. A wrong Redis password then produced a script
-    that reported a ready lab while the counter still held the previous run's
-    spend, and the Postgres team row read zero the whole time because the row
-    was genuinely new. Nothing downstream could tell the difference, so the
-    failure has to stop here.
-
-    Both patterns are qualified by the team. The claim sweep used to be
-    ``*budget_policy:*``, which on a shared development Redis would re-arm every
-    other team's tier events as a side effect of resetting this one.
-    """
     url: Final = redis_url or _redis_url_from_environment()
     client = redis.from_url(url)
     try:
@@ -188,7 +141,6 @@ def _clear_counters(redis_url: str, team_id: str) -> None:
 
 
 def _verify_counter_cleared(client: Any, team_id: str) -> None:
-    """Read the counter back rather than trusting the delete."""
     survivors: Final = [
         key.decode() for key in client.scan_iter(match=f"*spend:team:{team_id}*")
     ]

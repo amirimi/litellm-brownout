@@ -1,16 +1,3 @@
-"""Tier events, and the atomic claim that deduplicates them across replicas.
-
-An event is a state transition, not a request. It carries the team, policy
-epoch, window, tier, route and the two dollar figures, and nothing per-request.
-A per-request dimension is what makes a metrics bill unbounded.
-
-The claim is keyed on the policy epoch and budget window rather than on a TTL.
-A reviewed policy change or window reset therefore re-arms every tier without
-anyone guessing how long a warning should live. The key still carries an expiry
-derived from the window so Redis does not accumulate claims forever, but
-correctness comes from the key, not from the expiry.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -31,8 +18,6 @@ WEBHOOK_TIMEOUT_SECONDS: Final = 1.0
 
 
 class MetricSink(Protocol):
-    """Where a state transition goes to be dashboarded and alerted on."""
-
     async def tier(self, event: TierEvent) -> None: ...
 
     async def fallback_rejected(self, event: FallbackRejectedEvent) -> None: ...
@@ -52,12 +37,6 @@ class TierEvent:
     served_route: str
     decision: str
     reason: str
-    """Why the decision came out that way.
-
-    ``decision`` alone cannot separate a route with no declared target from one
-    whose target failed validation or entitlement. Both admit the primary. The
-    specific cause travels on ``FallbackRejectedEvent`` under its own claim,
-    because a tier claim is the team's and another route may already hold it."""
 
     spend_usd: float
     envelope_usd: float
@@ -80,26 +59,12 @@ class TierEvent:
 
 
 class Rejection(StrEnum):
-    """Why a declared, validated target may not serve this caller.
-
-    Only the caller varies between requests, because the pairing itself is
-    checked against the catalog while the handler is built. Closed, because the
-    claim key and the metric tag are built from it and must stay bounded.
-    """
-
     OUTSIDE_CALLER_ALLOWLIST = "outside_caller_allowlist"
     ENTITLEMENT_CHECK_UNAVAILABLE = "entitlement_check_unavailable"
 
 
 @dataclass(frozen=True)
 class RouteDegradedEvent:
-    """A route started serving its fallback in this window.
-
-    Claimed per team, policy epoch, window and route, independent of every tier
-    claim, so the app team calling the route hears about it even when another
-    route crossed the degrade tier first.
-    """
-
     team_id: str
     policy_epoch: str
     window: str
@@ -126,12 +91,6 @@ class RouteDegradedEvent:
 
 @dataclass(frozen=True)
 class FallbackRejectedEvent:
-    """A route reached its degrade tier and its target could not serve.
-
-    Claimed per team, policy epoch, window, route and rejection, independent of
-    every tier claim, so a route that crossed the tiers first cannot hide it.
-    """
-
     team_id: str
     policy_epoch: str
     window: str
@@ -160,8 +119,6 @@ class FallbackRejectedEvent:
 
 @dataclass(frozen=True)
 class IncidentEvent:
-    """Enforcement itself is degraded. Page the platform, not the team."""
-
     reason: str
     window: str
     detail: dict[str, Any]
@@ -177,15 +134,6 @@ class IncidentEvent:
 
 
 class TierSignalStore:
-    """One winner per team, policy epoch, window and tier across every replica.
-
-    Backed by the gateway's own coordination Redis through ``SET NX``. When no
-    Redis is attached the store degrades to a per-replica set and says so, since
-    a silently replica-local dedup would emit one event per replica per
-    crossing. The claim is not exactly-once delivery: a process can stop after
-    winning the claim and before an optional remote sink accepts the event.
-    """
-
     def __init__(self, namespace: str = "budget_policy") -> None:
         self._namespace: Final = namespace
         self._local: Final[set[str]] = set()
@@ -227,28 +175,13 @@ class TierSignalStore:
 
     @staticmethod
     def _redis_cache() -> Any | None:
-        """The gateway's spend-counter Redis.
-
-        LiteLLM attaches Redis to this cache whenever a connection target is
-        configured, and only attaches it to the auth cache behind an opt-in
-        flag. Reusing it keeps the claim on the same Redis the spend counter
-        already depends on, with no second connection to configure.
-        """
         try:
             return spend_counter_redis()
-        except Exception:  # noqa: BLE001 -- proxy import can fail outside its configured runtime
+        except Exception:  # noqa: BLE001
             return None
 
 
 class EventEmitter:
-    """A structured log line always, plus the webhook and metric sink when set.
-
-    The log line is an operational record and always happens. It is not the
-    durable audit store described in the target architecture. The webhook is
-    how the lab observes a crossing. The metric sink is the platform-owned view
-    a dashboard and an alert read, and it carries no content.
-    """
-
     def __init__(
         self, webhook_url: str | None, metric_sink: MetricSink | None = None
     ) -> None:
@@ -292,7 +225,6 @@ class EventEmitter:
         payload: dict[str, Any],
         metric_delivery: Awaitable[None] | None,
     ) -> None:
-        """Attempt independent remote sinks concurrently without breaking inference."""
         deliveries: list[Awaitable[None]] = [self._post(payload)]
         if metric_delivery is not None:
             deliveries.append(metric_delivery)

@@ -1,11 +1,3 @@
-"""The atomic claim that deduplicates a transition, and bounded remote delivery.
-
-The claim is the only thing that stops one crossing becoming one event per
-replica. Its key carries the team, policy epoch, budget window and tier, so a
-window reset or an approved policy change re-arms every tier without anyone
-guessing how long a warning should live.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,8 +31,6 @@ def _tier_event() -> TierEvent:
 
 
 class FakeRedisCache:
-    """``SET NX`` semantics, and nothing else the store is allowed to rely on."""
-
     def __init__(self, fail: bool = False) -> None:
         self.keys: dict[str, int] = {}
         self.ttls: dict[str, int] = {}
@@ -64,7 +54,6 @@ def _store_backed_by(cache: Any, monkeypatch: pytest.MonkeyPatch) -> TierSignalS
 
 
 async def test_only_one_caller_wins_a_claim(monkeypatch):
-    """This is what makes a crossing one event rather than one event per replica."""
     cache = FakeRedisCache()
     first = _store_backed_by(cache, monkeypatch)
     second = _store_backed_by(cache, monkeypatch)
@@ -76,11 +65,6 @@ async def test_only_one_caller_wins_a_claim(monkeypatch):
 
 
 async def test_a_new_window_rearms_every_tier(monkeypatch):
-    """The window is part of the claim key.
-
-    The window is part of the key, so nothing has to expire for the next window
-    to warn again. A claim settled in one window does not answer for the next.
-    """
     cache = FakeRedisCache()
     store = _store_backed_by(cache, monkeypatch)
 
@@ -93,7 +77,6 @@ async def test_a_new_window_rearms_every_tier(monkeypatch):
 
 
 async def test_an_approved_policy_change_rearms_every_tier(monkeypatch):
-    """A team whose envelope was raised is owed its warnings against the new one."""
     cache = FakeRedisCache()
     store = _store_backed_by(cache, monkeypatch)
 
@@ -102,7 +85,6 @@ async def test_an_approved_policy_change_rearms_every_tier(monkeypatch):
 
 
 async def test_a_claim_is_namespaced_and_carries_the_window_ttl(monkeypatch):
-    """Correctness comes from the key. The expiry only stops Redis accumulating."""
     cache = FakeRedisCache()
     store = _store_backed_by(cache, monkeypatch)
 
@@ -115,7 +97,6 @@ async def test_a_claim_is_namespaced_and_carries_the_window_ttl(monkeypatch):
 async def test_an_unreachable_redis_falls_back_to_replica_local_dedup(
     monkeypatch, caplog
 ):
-    """Losing Redis must not turn one crossing into one event per request."""
     store = _store_backed_by(FakeRedisCache(fail=True), monkeypatch)
 
     assert await store.claim("tier:budget-lab:test-1:w:75", TTL_SECONDS) is True
@@ -124,7 +105,6 @@ async def test_an_unreachable_redis_falls_back_to_replica_local_dedup(
 
 
 async def test_the_replica_local_warning_is_logged_once(monkeypatch, caplog):
-    """A per-request warning would be the noise this component exists to remove."""
     store = _store_backed_by(None, monkeypatch)
 
     for tier in (75, 90, 95):

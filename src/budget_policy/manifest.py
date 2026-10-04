@@ -1,11 +1,3 @@
-"""Team manifests: the budget, its tiers, and each route's degradation policy.
-
-The budget is a single owner-approved team total accumulating across every
-route the team runs. It is materialised as LiteLLM's native ``max_budget``, so
-the native 429 owns admission at 100% and this component owns every configurable
-tier below it.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -20,12 +12,10 @@ from litellm.litellm_core_utils.duration_parser import duration_in_seconds
 
 
 class ManifestError(Exception):
-    """The manifest file itself is unusable."""
+    pass
 
 
 class Posture(StrEnum):
-    """What a route does when the spend counter cannot be read."""
-
     BLOCK = "block"
     DEGRADE = "degrade"
     ADMIT = "admit"
@@ -33,15 +23,6 @@ class Posture(StrEnum):
 
 @dataclass(frozen=True)
 class RoutePolicy:
-    """A route's degradation policy.
-
-    ``degrade_at`` set with no ``fallback`` is not a state this type admits. The
-    decision reads ``degrade_at`` alone, so a route that could reach a threshold
-    with nothing to degrade to would silently keep serving the primary while
-    reporting a degrade tier. The loader reports that as a manifest error and
-    the assertion catches any construction that bypasses it.
-    """
-
     route: str
     fallback: str | None
     degrade_at: int | None
@@ -84,12 +65,6 @@ class TeamPolicy:
         )
 
     def route_policy(self, route: str) -> RoutePolicy:
-        """The declared policy for a route, or a non-degrading default.
-
-        A route the manifest does not name still spends against the envelope, so
-        it still earns tier events. It just has no declared degradation target
-        and therefore never degrades.
-        """
         declared = self.routes.get(route)
         if declared is not None:
             return declared
@@ -102,8 +77,6 @@ class TeamPolicy:
 
 
 class Manifest:
-    """Every team the gateway enforces an envelope for."""
-
     def __init__(self, version: str, teams: Mapping[str, TeamPolicy]) -> None:
         self.version: Final = version
         self._teams: Final = dict(teams)
@@ -214,15 +187,6 @@ def _build_route(
 
 
 def _budget_duration(path: str | Path, team_id: str, value: Any) -> str:
-    """A duration LiteLLM's own parser accepts, checked while the manifest loads.
-
-    The window id and every claim TTL are derived from this string on the
-    request path, and the two derivations disagree about a value neither
-    understands. ``duration_in_seconds`` raises, while the reset-time helper
-    logs a warning and silently returns the next midnight. A typo would
-    therefore give a team a daily policy window against a budget that resets on
-    another schedule. Parsing it here is what keeps that out of the runtime.
-    """
     if not isinstance(value, str) or not value:
         raise ManifestError(
             f"{path}: team {team_id!r} must declare a string 'budget_duration'"

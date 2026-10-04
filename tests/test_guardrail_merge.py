@@ -1,12 +1,3 @@
-"""Guardrails survive a route rewrite.
-
-LiteLLM merges model-level guardrails into the request immediately before the
-pre-call hook, keyed on the model the caller asked for. Rewriting the model
-inside the hook therefore drops the target route's guardrails unless the merge
-is re-run. The merge is a set union, so re-running it is idempotent and can only
-add controls.
-"""
-
 from __future__ import annotations
 
 from typing import Any, Final
@@ -22,8 +13,6 @@ FALLBACK_GUARDRAIL: Final = "residency-policy"
 
 
 class FakeRouter:
-    """The slice of ``Router`` the guardrail merge actually reads."""
-
     def __init__(self, groups: dict[str, list[str]]) -> None:
         self._groups: Final = groups
 
@@ -83,7 +72,6 @@ def degrade_decision() -> Decision:
 
 
 def test_a_rewrite_keeps_both_routes_guardrails(monkeypatch, router, team):
-    """The merge is a union, so the primary's guardrail survives beside the target's."""
     monkeypatch.setattr("budget_policy.adapter.router", lambda: router)
 
     data = {
@@ -101,7 +89,6 @@ def test_a_rewrite_keeps_both_routes_guardrails(monkeypatch, router, team):
 
 
 def test_remerging_twice_changes_nothing(monkeypatch, router):
-    """The union is idempotent, so a re-run can only ever add controls."""
     monkeypatch.setattr("budget_policy.adapter.router", lambda: router)
 
     data = {
@@ -116,7 +103,6 @@ def test_remerging_twice_changes_nothing(monkeypatch, router):
 
 
 def test_an_admitted_request_is_not_rewritten(monkeypatch, router, team):
-    """No rewrite means no guardrail change."""
     monkeypatch.setattr("budget_policy.adapter.router", lambda: router)
 
     data = {

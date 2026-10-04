@@ -1,10 +1,3 @@
-"""The pure decision: which tier, which action, which route.
-
-Nothing here builds a handler. ``decide`` takes a resolved request and returns
-an outcome, so every threshold rule is provable without Redis, a gateway, or a
-price catalog.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -43,7 +36,6 @@ def test_below_the_first_tier_is_admitted_silently(team, degrading_route):
 
 
 def test_crossing_a_tier_signals_once_per_window(team, degrading_route):
-    """The repeat sits at higher spend, so the claim suppresses it rather than the figure."""
     first = decide(request_at(team, degrading_route, 75.0))
     assert first.tiers_crossed == (75,)
     assert first.tier == 75
@@ -64,11 +56,6 @@ def test_one_request_crossing_two_tiers_signals_both_ascending(team, degrading_r
 
 
 def test_a_tier_does_not_unwind_inside_a_window(team, degrading_route):
-    """Reconciliation can lower the counter mid-window.
-
-    Reconciliation lowers the counter after a request completes, so spend does
-    fall back below a tier inside a window. That must not re-arm the warning.
-    """
     signalled = frozenset({75})
 
     fell_back = decide(
@@ -83,7 +70,6 @@ def test_a_tier_does_not_unwind_inside_a_window(team, degrading_route):
 
 
 def test_a_degrading_route_degrades_at_its_declared_tier(team, degrading_route):
-    """The threshold is inclusive, so 90.0 degrades and 89.9 does not."""
     below = decide(request_at(team, degrading_route, 89.9))
     assert below.action is Action.ADMIT
     assert below.served_route == "budget-lab-primary"
@@ -98,7 +84,6 @@ def test_a_degrading_route_degrades_at_its_declared_tier(team, degrading_route):
 
 @pytest.mark.parametrize("percent", [75.0, 90.0, 95.0, 99.9])
 def test_a_route_with_degradation_disabled_never_degrades(team, strict_route, percent):
-    """Tested to 99.9, because a route with no target still admits rather than blocks."""
     decision = decide(request_at(team, strict_route, percent, selectable_fallback=None))
 
     assert decision.action is Action.ADMIT
@@ -109,12 +94,6 @@ def test_a_route_with_degradation_disabled_never_degrades(team, strict_route, pe
 def test_an_unselectable_fallback_serves_the_primary_rather_than_degrading(
     team, degrading_route
 ):
-    """A rejected target is not a blocked request.
-
-    Rejecting a target is not the same as blocking the request. The native
-    ceiling still bounds real overspend, so the request is served at the primary
-    and the rejection is what the tier event carries.
-    """
     decision = decide(request_at(team, degrading_route, 95.0, selectable_fallback=None))
 
     assert decision.action is Action.ADMIT
@@ -123,13 +102,6 @@ def test_an_unselectable_fallback_serves_the_primary_rather_than_degrading(
 
 
 def test_a_degrade_tier_the_team_did_not_list_still_signals(team):
-    """A downgrade always raises an event, whatever the team listed.
-
-    ``warn_tiers`` and ``degrade_at`` are declared independently, so a route can
-    degrade at a percentage the team never listed. The event set is derived from
-    both, otherwise the request that moves a caller to a cheaper model is the
-    one nobody hears about.
-    """
     off_tier_route = RoutePolicy(
         route="budget-lab-primary",
         fallback="budget-lab-degraded",
@@ -157,7 +129,6 @@ def test_a_degrade_tier_the_team_did_not_list_still_signals(team):
 def test_an_unreadable_counter_applies_the_declared_posture(
     team, posture, expected_action
 ):
-    """A valid target is supplied, so the posture decides and not the lack of one."""
     route = RoutePolicy(
         route="budget-lab-primary",
         fallback="budget-lab-degraded",
@@ -179,7 +150,6 @@ def test_an_unreadable_counter_applies_the_declared_posture(
 
 
 def test_a_degrade_posture_with_no_valid_target_blocks(team):
-    """The case where the posture cannot be honoured."""
     route = RoutePolicy(
         route="budget-lab-primary",
         fallback="budget-lab-degraded",

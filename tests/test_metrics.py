@@ -1,12 +1,3 @@
-"""The platform-owned metric view, through the sink's own public methods.
-
-Only derived operational metrics may reach Datadog, never PII or raw prompt or
-response content, so the thing worth pinning is what the sink actually puts on
-the wire. Every test here goes through ``tier`` or ``incident`` and
-captures the submitted body, so a change to how a series is built cannot pass by
-constructing the expected series in the test.
-"""
-
 from __future__ import annotations
 
 import json
@@ -58,8 +49,6 @@ def _tier_event(
 
 
 class CapturingTransport(httpx.AsyncBaseTransport):
-    """Answers the series API and keeps every request the sink made."""
-
     def __init__(self, status_code: int = 202) -> None:
         self.requests: list[dict[str, Any]] = []
         self.headers: list[httpx.Headers] = []
@@ -78,11 +67,6 @@ class CapturingTransport(httpx.AsyncBaseTransport):
 
 
 def _sink_over(transport: httpx.AsyncBaseTransport, monkeypatch) -> DatadogMetricSink:
-    """A real sink whose HTTP client answers from a transport the test can read.
-
-    Substituting the transport rather than the submit method keeps the series
-    construction, the header and the timeout inside what the test observes.
-    """
     original: Final = httpx.AsyncClient
 
     def client(timeout: float) -> httpx.AsyncClient:
@@ -93,7 +77,6 @@ def _sink_over(transport: httpx.AsyncBaseTransport, monkeypatch) -> DatadogMetri
 
 
 async def test_a_tier_submission_carries_only_numbers_and_tags(monkeypatch):
-    """No message, response or credential can reach Datadog through this sink."""
     transport = CapturingTransport()
     sink = _sink_over(transport, monkeypatch)
 
@@ -112,7 +95,6 @@ async def test_a_tier_submission_carries_only_numbers_and_tags(monkeypatch):
 async def test_a_tier_submission_carries_the_declared_series_and_dimensions(
     monkeypatch,
 ):
-    """Utilisation is a gauge on the team alone, so the dashboard can sum teams."""
     transport = CapturingTransport()
     sink = _sink_over(transport, monkeypatch)
 
@@ -146,7 +128,6 @@ async def test_a_tier_submission_carries_the_declared_series_and_dimensions(
 async def test_a_rejected_downgrade_is_distinguishable_from_a_route_that_never_degrades(
     monkeypatch,
 ):
-    """Both admit the primary. Only the tag separates a policy hole from a policy."""
     transport = CapturingTransport()
     sink = _sink_over(transport, monkeypatch)
 
@@ -161,7 +142,6 @@ async def test_a_rejected_downgrade_is_distinguishable_from_a_route_that_never_d
 async def test_a_rejection_submission_carries_the_declared_series_and_dimensions(
     monkeypatch,
 ):
-    """One count per claimed rejection, tagged with the route and the reason."""
     transport = CapturingTransport()
     sink = _sink_over(transport, monkeypatch)
 
@@ -197,7 +177,6 @@ async def test_a_rejection_submission_carries_the_declared_series_and_dimensions
 async def test_a_degradation_submission_carries_the_declared_series_and_dimensions(
     monkeypatch,
 ):
-    """One count per route entering degradation, so an app team can alert on its route."""
     transport = CapturingTransport()
     sink = _sink_over(transport, monkeypatch)
 
@@ -230,7 +209,6 @@ async def test_a_degradation_submission_carries_the_declared_series_and_dimensio
 
 
 async def test_an_incident_without_a_team_still_submits(monkeypatch):
-    """A team is diagnostic context here, not a required dimension."""
     transport = CapturingTransport()
     sink = _sink_over(transport, monkeypatch)
 
@@ -250,7 +228,6 @@ async def test_an_incident_without_a_team_still_submits(monkeypatch):
 
 
 async def test_a_submission_is_authenticated_and_time_bounded(monkeypatch):
-    """A sink with no timeout would make a Datadog outage an inference outage."""
     transport = CapturingTransport()
     sink = _sink_over(transport, monkeypatch)
 
@@ -261,7 +238,6 @@ async def test_a_submission_is_authenticated_and_time_bounded(monkeypatch):
 
 
 async def test_a_rejected_submission_is_logged_and_not_raised(monkeypatch, caplog):
-    """Enforcement does not depend on this delivery, so it cannot fail a request."""
     transport = CapturingTransport(status_code=403)
     sink = _sink_over(transport, monkeypatch)
 
@@ -283,7 +259,6 @@ async def test_a_transport_failure_is_logged_and_not_raised(monkeypatch, caplog)
 
 
 async def test_a_tier_event_reaches_the_emitter_from_the_hook(team):
-    """The platform-owned view is fed by the same decision the team sees."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=950.0)
 
@@ -299,7 +274,6 @@ async def test_a_tier_event_reaches_the_emitter_from_the_hook(team):
 
 
 def test_the_sink_is_absent_without_a_datadog_key(monkeypatch):
-    """A lab with no Datadog configured stays quiet rather than erroring per event."""
     monkeypatch.delenv("DD_API_KEY", raising=False)
     assert _metric_sink() is None
 

@@ -1,9 +1,3 @@
-"""The LiteLLM seam: what the hook reads, refuses, rewrites and reports.
-
-The spend counter and the tier store are faked because the adapter cannot
-compute them. Everything else runs the real path, including the guardrail merge.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +21,6 @@ from .support import (
 
 
 async def test_an_unpriced_model_fails_closed_and_pages_the_platform(team):
-    """The team gets no event. An unpriced model is a catalog gap the platform owns."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=100.0)
 
@@ -48,7 +41,6 @@ async def test_an_unpriced_model_fails_closed_and_pages_the_platform(team):
 
 
 async def test_an_unreadable_counter_raises_a_platform_incident(team):
-    """A team is never paged for this."""
     emitter = RecordingEmitter()
     handler = build_handler(
         team=team, emitter=emitter, spend=RuntimeError("redis is down")
@@ -70,16 +62,6 @@ async def test_an_unreadable_counter_raises_a_platform_incident(team):
 
 
 async def test_a_request_is_judged_without_its_own_reservation(team):
-    """A tier measures consumption, and a hold is not consumption.
-
-    LiteLLM reserves the worst case during authentication, so the counter this
-    hook reads already contains a charge for a request that has not run. That
-    hold is what the native ceiling at 100% is for. A tier asks a different
-    question, how much of the envelope the team has consumed, and a request has
-    consumed nothing at the moment it is being decided. A team at $900 of a
-    $1000 envelope whose request reserves $50 reads $950 and is evaluated
-    against $900.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=950.0)
 
@@ -100,14 +82,6 @@ async def test_a_request_is_judged_without_its_own_reservation(team):
 
 
 async def test_a_request_does_not_degrade_on_the_size_of_its_own_hold(team):
-    """The distortion this removes, at its sharpest.
-
-    Nothing else is in flight. Settled spend is $880 against a $1000 envelope,
-    which is below the route's 90% degrade tier. The $50 hold alone pushes the
-    counter to $930 and used to degrade the request that placed it, so the
-    declared tier meant something the size of one reservation lower than it
-    said.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=930.0)
 
@@ -126,13 +100,6 @@ async def test_a_request_does_not_degrade_on_the_size_of_its_own_hold(team):
 
 
 async def test_holds_from_other_in_flight_requests_still_count(team):
-    """Only the request's own hold comes out.
-
-    Settled spend is $500 and nine other admitted requests hold $50 each, so the
-    counter reads $980 including this request's own $50. Those nine were already
-    admitted and will each produce a real charge, so dropping them would let a
-    burst sail past the tier together. This request is judged against $930.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=980.0)
 
@@ -153,15 +120,6 @@ async def test_holds_from_other_in_flight_requests_still_count(team):
 
 
 async def test_a_resized_reservation_is_removed_at_the_size_it_now_holds(team):
-    """A reservation near the ceiling is resized down when fail-closed is off.
-
-    ``_apply_over_budget_reservation_policy`` shrinks the hold to the budget
-    that remains and admits, so the entry records a smaller figure than the
-    worst case first estimated. With ``fail_closed_budget_enforcement`` on,
-    LiteLLM 1.101.0 refuses that request instead, and this hook never sees it. Removing the original estimate would understate
-    the team. Here $980 of settled spend leaves $20, the $50 estimate is resized
-    to it, and the counter reads $1000.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=1000.0)
 
@@ -179,17 +137,6 @@ async def test_a_resized_reservation_is_removed_at_the_size_it_now_holds(team):
 
 
 async def test_an_adjusted_entry_is_read_at_its_adjusted_size(team):
-    """The helper is total over both fields that describe a hold.
-
-    ``_set_reserved_entry_actual_cost`` records a change as
-    ``applied_adjustment`` and leaves ``reserved_cost`` alone, so a reader of
-    ``reserved_cost`` alone would be wrong by the adjustment. This pre-call hook
-    never observes that state, because an admission-time resize normalises the
-    entry back to ``applied_adjustment = 0``
-    (``budget_reservation.py:979-981``) and reconciliation happens after the
-    response. Summing both fields makes the helper correct by construction
-    rather than correct by that timing argument.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=1000.0)
 
@@ -207,11 +154,6 @@ async def test_an_adjusted_entry_is_read_at_its_adjusted_size(team):
 
 
 async def test_a_request_with_no_reservation_is_judged_on_the_counter_as_read(team):
-    """An unpriced route, or reservation disabled, leaves nothing to remove.
-
-    ``reserve_budget_for_request`` returns None when it cannot estimate a worst
-    case, and the counter then carries no hold for this request.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=930.0)
 
@@ -226,13 +168,6 @@ async def test_a_request_with_no_reservation_is_judged_on_the_counter_as_read(te
 
 
 async def test_a_hold_larger_than_the_counter_floors_at_zero(team):
-    """The counter can legitimately read below this request's own hold.
-
-    ``get_current_spend`` returns the recorded DB floor instead of the counter
-    when a counter has drifted stale-low, and that floor carries no in-flight
-    holds. Subtracting one from it would produce a negative utilisation, so the
-    result is floored rather than trusted.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=10.0)
 
@@ -262,12 +197,6 @@ async def test_a_hold_larger_than_the_counter_floors_at_zero(team):
 async def test_caller_supplied_routing_is_refused_rather_than_ignored(
     team, interference
 ):
-    """Stripping caller routing silently was the worse failure.
-
-    Stripping these silently meant a caller using per-request ``fallbacks`` saw
-    them stop working with nothing to grep for. Refusing names the keys, so the
-    caller learns on the first request instead of debugging silence.
-    """
     handler = build_handler(team=team, emitter=RecordingEmitter(), spend=10.0)
     data: dict[str, Any] = {
         "model": "budget-lab-primary",
@@ -289,11 +218,6 @@ async def test_caller_supplied_routing_is_refused_rather_than_ignored(
 
 
 async def test_a_forged_disclosure_is_overwritten_rather_than_refused(team):
-    """``_budget_policy`` is ours and ``_apply`` always rewrites it.
-
-    A forged value can never be read by anything, so refusing the request would
-    cost a caller a 400 for a key that carries no authority.
-    """
     handler = build_handler(team=team, emitter=RecordingEmitter(), spend=10.0)
     data = {
         "model": "budget-lab-primary",
@@ -328,7 +252,6 @@ async def test_a_forged_disclosure_is_overwritten_rather_than_refused(team):
 
 
 async def test_a_non_chat_route_is_passed_through_untouched(team):
-    """The worst-case estimate is route-specific, so only chat completions are governed."""
     handler = build_handler(team=team, emitter=RecordingEmitter(), spend=999.0)
     original = {
         "model": "never-priced",
@@ -350,12 +273,6 @@ async def test_a_non_chat_route_is_passed_through_untouched(team):
 async def test_an_envelope_that_no_longer_matches_the_team_ceiling_pages_the_platform(
     team,
 ):
-    """The owner-approved budget and LiteLLM runtime ceiling must agree.
-
-    Tiers are percentages of the budget and LiteLLM's native 429 owns 100%.
-    Editing ``team.max_budget`` in the UI would silently move the hard stop away
-    from every warning and degradation threshold without this check.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=10.0)
     auth = make_auth(team)
@@ -392,7 +309,6 @@ async def test_an_aligned_envelope_raises_no_incident(team):
 
 
 async def test_a_missing_native_team_budget_fails_closed(team):
-    """A team without a native hard stop must not run on callback policy alone."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=10.0)
     auth = make_auth(team)
@@ -412,7 +328,6 @@ async def test_a_missing_native_team_budget_fails_closed(team):
 
 
 async def test_tier_claims_include_the_policy_epoch(team):
-    """A reviewed policy change re-arms transitions without changing the window."""
     store = FakeStore()
     handler = build_handler(
         team=team,
@@ -437,12 +352,6 @@ async def test_tier_claims_include_the_policy_epoch(team):
 
 
 async def test_a_team_absent_from_the_manifest_pages_the_platform(team):
-    """An undeclared team is ungoverned, and silence about that is the hole.
-
-    It has no trustworthy envelope, action policy or price policy. The request
-    fails closed and the incident makes the onboarding/configuration gap
-    visible.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=10.0)
     stranger = make_auth(team)
@@ -500,12 +409,6 @@ async def test_the_ungoverned_incident_is_raised_once_per_window(team):
 
 
 async def test_a_rejected_downgrade_is_disclosed_to_the_caller_and_the_platform(team):
-    """A team that expected a downgrade and did not get one is owed the reason.
-
-    The decision carries ``fallback_rejected`` either way. Without this it
-    reached neither the caller's headers nor the tier event, which left a policy
-    hole visible only in a per-request log line.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
     auth = make_auth(team)
@@ -533,7 +436,6 @@ async def test_a_rejected_downgrade_is_disclosed_to_the_caller_and_the_platform(
 
 
 async def test_an_ordinary_admission_discloses_no_degradation_reason(team):
-    """The reason header means the degradation decision has something to say."""
     handler = build_handler(team=team, emitter=RecordingEmitter(), spend=10.0)
 
     applied = await handler.async_pre_call_hook(
@@ -552,14 +454,6 @@ async def test_an_ordinary_admission_discloses_no_degradation_reason(team):
 
 
 async def test_no_tier_is_claimed_when_the_rewrite_does_not_complete(team, monkeypatch):
-    """A claim suppresses every later attempt in the window, so it must not
-    outlive the request it describes.
-
-    ``_apply`` re-runs the private guardrail merge against the new model and that
-    merge can raise. Claiming the tier first would report a request as degraded to
-    a served route when no provider dispatch ever happened, and would then silence
-    the retry.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
 
@@ -582,12 +476,6 @@ async def test_no_tier_is_claimed_when_the_rewrite_does_not_complete(team, monke
 
 
 async def test_tiers_crossed_together_are_delivered_together(team):
-    """A request crossing 75 and 90 must not pay two remote deadlines.
-
-    Each tier is claimed separately, so deduplication is unchanged. Delivery is
-    gathered, which holds the added latency at one round however many tiers a
-    single request crosses.
-    """
     started = 0
     peak = 0
 
@@ -615,13 +503,6 @@ async def test_tiers_crossed_together_are_delivered_together(team):
 
 
 async def test_the_window_follows_the_gateways_reset_schedule(team, monkeypatch):
-    """The plugin's window ends when LiteLLM's reset job says it does.
-
-    LiteLLM stamps ``budget_reset_at`` with ``litellm_settings.timezone`` and
-    ``budget_reset_time``. A window computed at UTC midnight instead would open
-    hours before the counter resets and claim this window's tiers on last
-    window's spend.
-    """
     monkeypatch.setattr(litellm, "timezone", "America/New_York", raising=False)
     monkeypatch.setattr(litellm, "budget_reset_time", "12:00", raising=False)
     store = FakeStore()
@@ -644,7 +525,6 @@ async def test_the_window_follows_the_gateways_reset_schedule(team, monkeypatch)
 
 
 def _without_fallback_access(team):
-    """A key whose team may call its routes and not the degradation target."""
     auth = make_auth(team)
     auth.team_models = ["budget-lab-primary", "budget-lab-strict"]
     return auth
@@ -662,11 +542,6 @@ async def _request(handler, auth, model: str) -> dict:
 async def test_a_rejected_downgrade_is_reported_after_another_route_claimed_the_tiers(
     team,
 ):
-    """A tier claim belongs to the team, so a route with no fallback can take it first.
-
-    The rejection then reaches the owner on its own claim. Riding on the tier
-    event alone, a downgrade that never happened stayed invisible until the 429.
-    """
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
     auth = _without_fallback_access(team)
@@ -711,7 +586,6 @@ async def test_a_repeated_rejection_is_reported_once_per_window(team):
 async def test_a_different_rejection_on_the_same_route_is_reported_separately(
     team, monkeypatch
 ):
-    """The claim carries the reason, so a second cause is not hidden by the first."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
 
@@ -735,7 +609,6 @@ async def test_a_different_rejection_on_the_same_route_is_reported_separately(
 
 
 async def test_a_target_rejected_below_the_degrade_tier_is_not_reported(team):
-    """Below ``degrade_at`` no downgrade was due, so none was refused."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.8)
 
@@ -767,7 +640,6 @@ async def test_a_new_window_reports_the_rejection_again(team, monkeypatch):
 
 
 async def test_tier_and_rejection_events_are_delivered_together(team):
-    """A request that crosses tiers and is rejected still pays one remote deadline."""
 
     class CountingEmitter(RecordingEmitter):
         def __init__(self) -> None:
@@ -818,11 +690,6 @@ def _team_with_one_route(route: str, fallback: str) -> TeamPolicy:
 
 
 def test_the_handler_refuses_a_fallback_the_catalog_cannot_allow():
-    """Manifest and catalog are fixed for the process, so a bad pairing stops startup.
-
-    Checked per request, it surfaced only when a team reached its degrade tier,
-    and as the team's event although the fix is the platform's configuration.
-    """
     team = _team_with_one_route("chat-qa", "code-review")
 
     with pytest.raises(CatalogError, match="data class"):
@@ -830,7 +697,6 @@ def test_the_handler_refuses_a_fallback_the_catalog_cannot_allow():
 
 
 async def test_a_dearer_fallback_approved_in_the_manifest_is_served(team):
-    """Price is the route owner's call, so the plugin serves the declared target."""
     team = _team_with_one_route("chat-qa-degraded", "chat-qa")
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
@@ -842,7 +708,6 @@ async def test_a_dearer_fallback_approved_in_the_manifest_is_served(team):
 
 
 async def test_a_route_that_starts_degrading_is_announced(team):
-    """The app team calling the route alerts on this, whoever owns the budget."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
 
@@ -875,7 +740,6 @@ async def test_a_degrading_route_is_announced_once_per_window(team):
 
 
 async def test_each_degrading_route_is_announced_on_its_own(team):
-    """The claim carries the route, so one route's entry does not cover another's."""
     chat = RoutePolicy(
         route="chat-qa",
         fallback="chat-qa-degraded",
@@ -906,7 +770,6 @@ async def test_each_degrading_route_is_announced_on_its_own(team):
 
 
 async def test_a_route_degrading_after_another_claimed_the_tier_is_announced(team):
-    """A tier claim belongs to the team, so it cannot stand in for a route's entry."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
 
@@ -942,7 +805,6 @@ async def test_a_new_window_announces_the_degrading_route_again(team, monkeypatc
 async def test_no_degradation_is_announced_when_the_rewrite_does_not_complete(
     team, monkeypatch
 ):
-    """A claim spent on a rewrite that raised would hide the route's real entry."""
     emitter = RecordingEmitter()
     handler = build_handler(team=team, emitter=emitter, spend=team.envelope_usd * 0.95)
 
@@ -960,7 +822,6 @@ async def test_no_degradation_is_announced_when_the_rewrite_does_not_complete(
 
 
 async def test_tier_and_degradation_events_are_delivered_together(team):
-    """A request that crosses tiers and degrades still pays one remote deadline."""
 
     class CountingEmitter(RecordingEmitter):
         def __init__(self) -> None:
@@ -993,11 +854,6 @@ async def test_tier_and_degradation_events_are_delivered_together(team):
 
 
 async def test_made_up_model_names_raise_one_incident_per_team_per_window(team):
-    """The caller chooses the name, so a claim keyed on it would grow without bound.
-
-    LiteLLM lets an unknown name through to this hook for a team with no model
-    list. Each name used to raise its own platform incident and Redis key.
-    """
     emitter = RecordingEmitter()
     store = FakeStore()
     handler = build_handler(team=team, emitter=emitter, spend=100.0, store=store)
@@ -1017,7 +873,6 @@ async def test_made_up_model_names_raise_one_incident_per_team_per_window(team):
 async def test_an_unpriced_model_group_the_gateway_serves_is_reported_per_group(
     team, monkeypatch
 ):
-    """A configured group with no price is a catalog gap, reported once per group."""
 
     class ServingRouter:
         def get_model_names(self, team_id: str | None = None) -> list[str]:

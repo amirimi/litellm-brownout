@@ -1,26 +1,3 @@
-"""The production-shaped behavior, exercised against the composed stack over HTTP.
-
-One scripted sequence on mock routes, so it spends no provider money and still
-drives real reservations, a real Redis counter and the real native ceiling. It
-observes the 75% and 90% warnings, a route-declared downgrade below the hard
-ceiling, the 429 raised by LiteLLM at 100% of the owner-approved budget, and a
-counter that never passed the envelope on the way there.
-
-Skipped unless the stack is up. Bring it up with:
-
-    docker compose up -d
-    uv run pytest tests/test_smoke_e2e.py -v
-
-Set ``LAB_REQUIRE_STACK=1`` where the sequence is the point, which turns an
-unreachable gateway into a failure instead of a skip.
-
-The sequence provisions the one lab team named in the manifest, so two copies
-of it cannot run at once. Run this file serially.
-
-The fixture runs `lab/setup_lab.py` itself and `conftest.py` loads `.env`,
-so the master key does not have to be passed on the command line.
-"""
-
 from __future__ import annotations
 
 import os
@@ -54,12 +31,6 @@ def _stack_is_up() -> bool:
 
 
 def _stack_is_required() -> bool:
-    """Whether an unreachable gateway is a failure rather than a skip.
-
-    A skip keeps the unit suite runnable from a clean clone with no Docker, and
-    it is the wrong default anywhere the sequence is the point. CI sets this, so
-    a stack that failed to come up cannot report as not applicable.
-    """
     return os.getenv("LAB_REQUIRE_STACK", "").lower() in {"1", "true", "yes"}
 
 
@@ -75,12 +46,6 @@ requires_stack = pytest.mark.skipif(not _stack_is_up(), reason=_STACK_UNAVAILABL
 
 @pytest.fixture(scope="module")
 def lab_key() -> str:
-    """A fresh lab team, envelope and key, so the sequence starts from zero.
-
-    An unreachable gateway is a skip and is already handled by ``requires_stack``.
-    A gateway that answered and then could not be set up is a failure, because
-    turning that into a skip lets a broken stack report as not applicable.
-    """
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "lab" / "setup_lab.py")],
         capture_output=True,
@@ -97,12 +62,6 @@ def lab_key() -> str:
 
 
 def _require_zero_start(key: str) -> None:
-    """Prove the envelope is empty before the sequence claims to have driven it.
-
-    A run that starts mid-envelope produces the same empty event list as a run
-    whose events never fired, and the second reading is the one worth chasing.
-    Naming the dirty start separates them.
-    """
     response = httpx.get(
         f"{GATEWAY}/team/info",
         params={"team_id": LAB_TEAM_ID},
@@ -125,8 +84,6 @@ def _require_zero_start(key: str) -> None:
 
 
 class Observation:
-    """What the scripted sequence saw, in the order it saw it."""
-
     def __init__(self) -> None:
         self.requests = 0
         self.first_degraded_headers: dict[str, str] | None = None
@@ -176,7 +133,6 @@ def _tier_events(team_id: str = LAB_TEAM_ID) -> list[dict[str, Any]]:
 
 @requires_stack
 def test_the_full_tier_sequence_is_observable_on_mock_routes(lab_key: str) -> None:
-    """The warning, downgrade and native hard-stop sequence is externally visible."""
     with httpx.Client(base_url=GATEWAY, timeout=REQUEST_TIMEOUT_SECONDS) as client:
         observed = _drive_to_exhaustion(client, lab_key)
 
@@ -217,12 +173,6 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(lab_key: str) -> No
 def test_the_component_sink_contains_only_its_declared_event_types(
     lab_key: str,
 ) -> None:
-    """No undeclared payload shape reached the component-owned lab sink.
-
-    The subset assertion alone is vacuously true on an empty sink, which is
-    exactly the state a broken emitter produces. The sequence crossed 75 and 90,
-    so the tier event has to be present before the subset means anything.
-    """
     payload = httpx.get(EVENT_SINK, timeout=10.0).json()
     observed = [event.get("event") for event in payload["events"]]
     owners = set(observed)
@@ -239,7 +189,6 @@ def test_the_component_sink_contains_only_its_declared_event_types(
 
 @requires_stack
 def test_the_downgrade_is_announced_once_for_the_route(lab_key: str) -> None:
-    """The app team calling the lab route can alert on its entry into degradation."""
     payload = httpx.get(EVENT_SINK, timeout=10.0).json()
     degraded = [
         event

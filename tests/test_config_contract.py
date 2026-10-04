@@ -1,9 +1,3 @@
-"""Cross-file invariants among the manifest, the catalog and the gateway config.
-
-These are the checks a merge gate runs. They are what makes an unpriced route or
-a route the gateway cannot serve a review failure rather than a runtime one.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -23,11 +17,6 @@ from .support import (
 
 
 def test_the_catalog_covers_every_route_the_gateway_serves(catalog: PriceCatalog):
-    """The durable fix for the unpriced-model hole is a merge-time check.
-
-    Every model group in config.yaml must carry a committed price and the same
-    data class the gateway advertises for it.
-    """
     with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
         gateway_config: dict[str, Any] = yaml.safe_load(handle)
 
@@ -46,7 +35,6 @@ def test_the_catalog_covers_every_route_the_gateway_serves(catalog: PriceCatalog
 
 
 def test_native_budget_alerting_is_not_a_second_tier_event_owner():
-    """LiteLLM's hardcoded 85/95 alerter is off, so this component owns 75/90."""
     with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
         gateway_config: dict[str, Any] = yaml.safe_load(handle)
 
@@ -54,16 +42,6 @@ def test_native_budget_alerting_is_not_a_second_tier_event_owner():
 
 
 def test_the_gateway_refuses_a_worst_case_that_does_not_fit():
-    """The hard boundary is one gateway flag, and the plugin never reads it.
-
-    ``fail_closed_budget_enforcement`` makes LiteLLM refuse a worst case larger
-    than the remaining headroom instead of shrinking the hold to fit
-    (``budget_reservation.py:141``), and ``disable_budget_reservation`` would
-    remove the hold from every budget on the gateway
-    (``user_api_key_auth.py:2708``). Both are read from ``general_settings``
-    alone, after the plugin has already loaded, so review time is the only place
-    a drift can be caught.
-    """
     with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
         gateway_config: dict[str, Any] = yaml.safe_load(handle)
 
@@ -79,13 +57,6 @@ def test_the_gateway_refuses_a_worst_case_that_does_not_fit():
 
 
 def test_every_deployment_declares_its_output_ceiling():
-    """The worst-case hold reserves ``min(max_tokens, max_output_tokens or 16384)``.
-
-    The router fills ``max_output_tokens`` from LiteLLM's cost map for a model the
-    map knows (``router.py:10528-10535``). The lab's mock models are unknown to
-    it, so a deployment that omits the field reserves 16384 output tokens per
-    request (``budget_reservation.py:1434``), which is most of a lab envelope.
-    """
     with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
         gateway_config: dict[str, Any] = yaml.safe_load(handle)
 
@@ -100,7 +71,6 @@ def test_every_deployment_declares_its_output_ceiling():
 def test_every_manifest_route_and_fallback_is_priced(
     manifest: Manifest, catalog: PriceCatalog
 ):
-    """A declared pairing the catalog cannot allow would refuse the gateway at startup."""
     for team_id in manifest.team_ids:
         policy = manifest.team_policy(team_id)
         for route, route_policy in policy.routes.items():
@@ -112,12 +82,6 @@ def test_every_manifest_route_and_fallback_is_priced(
 def test_every_manifest_route_and_fallback_exists_as_a_gateway_model_group(
     manifest: Manifest,
 ):
-    """The inverse of the catalog check, and the direction that actually fails.
-
-    A priced route the gateway does not serve passes every price check and then
-    fails during routing, after the policy has already selected it. A degradation
-    target is the dangerous case, because the caller never named it.
-    """
     with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
         gateway_config: dict[str, Any] = yaml.safe_load(handle)
     served = {deployment["model_name"] for deployment in gateway_config["model_list"]}
@@ -134,13 +98,6 @@ def test_every_manifest_route_and_fallback_exists_as_a_gateway_model_group(
 
 
 def test_the_gateway_declares_no_cross_group_router_fallbacks():
-    """``x-platform-route-served`` is recorded before routing, so it is only true
-    while native failover stays among deployments of one model group.
-
-    A ``fallbacks`` entry in ``router_settings`` would move a request to another
-    model group after the header was decided, and the caller would be told it was
-    served by a route that never ran.
-    """
     with open(CONFIG_DIR / "config.yaml", encoding="utf-8") as handle:
         gateway_config: dict[str, Any] = yaml.safe_load(handle)
 

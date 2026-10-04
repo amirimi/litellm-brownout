@@ -1,15 +1,3 @@
-"""Tier and incident events as Datadog metric series.
-
-The gateway's own telemetry answers how fast a request was. It cannot answer
-which team is about to run out of money, because that is a fact about policy
-rather than about traffic. This sink carries the second question.
-
-Numbers and tags only. Only derived operational metrics reach Datadog, never
-PII or raw prompt or response content, so nothing here reads a message, a
-response, an end user or a key. The widest tag is a team id, which
-is also the dimension the platform view is organised around.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -39,8 +27,6 @@ METRIC_INCIDENT: Final = "budget_policy.incident"
 
 
 class DatadogMetricSink:
-    """Submits to the Datadog series API directly, with no agent in the path."""
-
     def __init__(self, api_key: str, site: str, env: str) -> None:
         self._api_key: Final = api_key
         self._url: Final = f"https://api.{site}/api/v2/series"

@@ -1,10 +1,3 @@
-"""Test doubles for the adapter's two impure edges.
-
-The spend counter and the tier store are the only things the adapter cannot
-compute for itself, so they are the only things faked. Everything else runs the
-real code path, including the guardrail merge.
-"""
-
 from __future__ import annotations
 
 import os
@@ -29,7 +22,6 @@ CONFIG_DIR: Final = REPO_ROOT / "config"
 
 
 def lab_redis_url() -> str:
-    """The same Redis the gateway coordinates through."""
     host: Final = os.getenv("LAB_REDIS_HOST", "localhost")
     port: Final = os.getenv("LAB_REDIS_PORT", "6379")
     password: Final = os.getenv("REDIS_PASSWORD", "")
@@ -41,13 +33,6 @@ def lab_redis_url() -> str:
 
 
 def lab_spend_counter(team_id: str) -> float:
-    """The live team counter, reservations included.
-
-    Redis is the only place an in-flight reservation is visible. The Postgres
-    team row carries reconciled spend that lags by ``PROXY_BATCH_WRITE_AT``, so
-    a check that reads it alone cannot tell a clean lab from one whose counter
-    was never cleared.
-    """
     client = redis.from_url(lab_redis_url())
     try:
         total = 0.0
@@ -61,8 +46,6 @@ def lab_spend_counter(team_id: str) -> float:
 
 
 class FakeSpendReader(TeamSpendReader):
-    """Returns a fixed counter value, or raises when the counter is unreadable."""
-
     def __init__(self, spend: float | Exception) -> None:
         self._spend: Final = spend
         self.calls: list[dict[str, Any]] = []
@@ -83,8 +66,6 @@ class FakeSpendReader(TeamSpendReader):
 
 
 class FakeStore:
-    """Grants every claim once, the way Redis SET NX does across replicas."""
-
     def __init__(self) -> None:
         self.claimed: set[str] = set()
 
@@ -143,14 +124,6 @@ def make_auth(
     reserved_cost: float = 0.0,
     applied_adjustment: float = 0.0,
 ) -> Any:
-    """An authenticated key, optionally carrying this request's own hold.
-
-    The shape mirrors what ``reserve_budget_for_request`` returns, including the
-    per-counter entry the adapter reads. ``applied_adjustment`` is the delta
-    LiteLLM has already pushed onto the counter beyond ``reserved_cost``, which
-    is how a resized or reconciled reservation records its true size. The key
-    counter is present so a reader that ignores ``counter_key`` fails the suite.
-    """
     auth = UserAPIKeyAuth(
         api_key="sk-lab",
         team_id=team.team_id,

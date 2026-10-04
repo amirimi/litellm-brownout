@@ -1,15 +1,3 @@
-"""The budget decision, expressed as a pure function.
-
-Nothing here reads a counter, talks to Redis, or imports LiteLLM. The adapter
-resolves the inputs and applies the outcome, so the whole policy is testable
-without a gateway.
-
-The spend handed in is what the team has already committed, which is the counter
-LiteLLM maintains with this request's own worst-case hold taken back out. The
-adapter does that subtraction, because the hold is a temporary authorisation
-rather than consumption and a tier measures consumption.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,17 +23,10 @@ class Reason(StrEnum):
 
 @dataclass(frozen=True)
 class PolicyRequest:
-    """Everything the decision needs, already resolved by the adapter."""
-
     team: TeamPolicy
     route: RoutePolicy
     projected_spend_usd: float | None
     already_signalled: frozenset[int]
-    """Tiers already signalled for this team in this window.
-
-    Lets the rule be stated and tested without Redis. The gateway leaves it
-    empty and lets the atomic tier store deduplicate, so there is one authority
-    rather than two."""
 
     selectable_fallback: str | None
 
@@ -62,11 +43,6 @@ class Decision:
 
 
 def decide(request: PolicyRequest) -> Decision:
-    """Choose an action, a served route, and the tiers this request newly crosses.
-
-    Tiers are compared as percentages of the envelope at the single comparison
-    site below. Every other figure in this component is US dollars.
-    """
     if request.projected_spend_usd is None:
         return _counter_unavailable(request)
 
@@ -127,14 +103,6 @@ def _should_degrade(request: PolicyRequest, percent_used: float) -> bool:
 
 
 def _declared_tiers(request: PolicyRequest) -> tuple[int, ...]:
-    """Every percentage this request can be signalled at, in ascending order.
-
-    The route's degrade tier belongs here even when the team did not list it.
-    A downgrade changes the model a caller is served, so it has to raise an
-    event wherever it happens. Deriving both the event set and the reported tier
-    from this one list keeps that structural rather than leaving it to a team
-    remembering to repeat its degrade tier in ``warn_tiers``.
-    """
     declared: Final = set(request.team.warn_tiers)
     if request.route.degrade_at is not None:
         declared.add(request.route.degrade_at)
@@ -149,12 +117,6 @@ def _highest_tier_reached(declared: tuple[int, ...], percent_used: float) -> int
 
 
 def _counter_unavailable(request: PolicyRequest) -> Decision:
-    """Apply the route's declared posture. Never an implicit admit.
-
-    Degrading needs a validated target. Without one the posture collapses to a
-    block, because serving the primary at full price is the outcome the posture
-    exists to prevent.
-    """
     posture: Final = request.route.on_counter_unavailable
     if posture is Posture.ADMIT:
         action, served, degraded_from = Action.ADMIT, request.route.route, None
