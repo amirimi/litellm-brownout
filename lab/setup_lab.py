@@ -9,7 +9,7 @@ from typing import Any, Final
 import httpx
 import redis
 
-from budget_policy.manifest import Manifest, TeamPolicy
+from brownout.manifest import Manifest, TeamPolicy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger: Final = logging.getLogger("setup_lab")
@@ -57,7 +57,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--master-key", default=os.getenv("LITELLM_MASTER_KEY", ""))
     parser.add_argument(
         "--manifest",
-        default=os.getenv("BUDGET_POLICY_MANIFEST", "config/manifest.yaml"),
+        default=os.getenv("BROWNOUT_MANIFEST", "config/manifest.yaml"),
     )
     parser.add_argument("--team-id", default=LAB_TEAM_ID)
     parser.add_argument("--redis-url", default=os.getenv("LAB_REDIS_URL", ""))
@@ -133,7 +133,7 @@ def _clear_counters(redis_url: str, team_id: str) -> None:
     try:
         removed = _delete_matching(
             client, f"*spend:team:{team_id}*"
-        ) + _delete_matching(client, f"*budget_policy:*{team_id}*")
+        ) + _delete_matching(client, f"*brownout:*{team_id}*")
         logger.info("Cleared %d lab counter and claim keys from Redis", removed)
         _verify_counter_cleared(client, team_id)
     finally:

@@ -7,7 +7,7 @@ general_settings:
     password: os.environ/REDIS_PASSWORD
 
 litellm_settings:
-  callbacks: ["budget_policy.adapter.handler"]
+  callbacks: ["brownout.gateway.handler"]
   success_callback: ["langfuse", "datadog_metrics"]
   failure_callback: ["langfuse", "datadog_metrics"]
   cache: false

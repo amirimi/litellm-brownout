@@ -1,9 +1,10 @@
 # Contributing
 
-A change passes two suites before it merges. The unit suite runs from a clean clone with no
-services. The end-to-end sequence drives the composed gateway from `docker-compose.yml` over HTTP.
-CI runs `ruff format --check`, `ruff check`, `mypy` and the unit suite in one job, and the
-end-to-end sequence in a second.
+A change passes three suites before it merges. The unit suite runs from a clean clone with no
+services. The seam suite asserts the LiteLLM behaviours the plugin relies on. The end-to-end
+sequence drives the composed gateway from `docker-compose.yml` over HTTP. CI runs `ruff format
+--check`, `ruff check`, `mypy`, the unit and seam suites and `brownout check` on the lab config in
+one job, and the end-to-end sequence in a second.
 
 ## Running the tests
 
@@ -13,15 +14,20 @@ uv sync
 uv run pytest -m "not e2e"
 ```
 
-The unit suite holds 131 tests and needs no Redis or gateway. The decision function is pure, and
-the adapter's two impure edges, the spend counter and the tier store, are injected.
-`tests/test_config_contract.py` holds the cross-file checks that fail an unpriced or unserved route
-at review time, before it reaches a gateway. Adapt those checks when you change the manifest, the
-catalog or the gateway config for your own deployment.
+The unit and seam suites hold 238 tests and need no Redis or gateway. `decide` and `resolve` are
+pure functions tested with plain values. Every outside dependency of the pipeline sits behind a
+protocol in `src/brownout/ports.py`, so the gateway tests inject fakes, and the permission and
+guardrail tests drive LiteLLM's real helpers. `tests/test_rules.py` and `tests/test_cli.py` run the
+shared rule set against the lab config and against one fixture per rule.
+
+`tests/test_litellm_seams.py` imports none of the plugin. Each test names one LiteLLM behaviour the
+plugin depends on, such as the signature of a private helper, the shape of a reservation entry or
+guardrails merging before the pre-call hook. A LiteLLM release that changes one of them fails with
+that behaviour's name.
 
 The end-to-end sequence holds 3 tests and runs on mock routes. It spends no provider money and
 still exercises real reservations, a real Redis counter and the native ceiling. Real-provider
-quality and concurrent admission across gateway replicas stay outside both suites.
+quality and concurrent admission across gateway replicas stay outside every suite.
 
 ```bash
 docker compose up -d --wait
@@ -38,14 +44,26 @@ write. LiteLLM buffers spend per team and flushes it every `PROXY_BATCH_WRITE_AT
 cleared in Redis is reseeded from the database row on the next read. The script therefore deletes
 the team, waits out the flush window, clears the counter and the claims, then recreates the team.
 
-## Moving to a newer LiteLLM
+## Supported LiteLLM releases
 
-The image tag sits on line 3 of `docker-compose.yml`, and `pyproject.toml` pins
-`litellm[proxy]==1.101.0`. The plugin imports three private LiteLLM helpers, so a new tag is
-trusted only after both suites pass against it.
+Brownout supports LiteLLM 1.101.0 and newer. `SUPPORTED_FLOOR` and `TESTED_CEILING` in
+`src/brownout/bridge.py` hold the range. Below the floor the handler refuses to start, and past the
+ceiling it logs one warning. The floor moves only by a decision recorded in a spec, because
+releases before 1.101.0 shrink the last reservation instead of refusing it, and releases before
+1.84 place no reservation at all.
+
+The `litellm matrix` workflow runs every suite against the latest patch of each supported release
+line, weekly and on demand. To run one release line by hand, install it into the project's
+environment and point the lab at the matching image.
 
 ```bash
-docker compose pull && docker compose up -d --wait
-uv run pytest -m "not e2e"
-LAB_REQUIRE_STACK=1 uv run pytest -m e2e
+uv pip install "litellm[proxy]==1.104.2"
+uv run --no-sync pytest -m "not e2e"
+LITELLM_TAG=v1.104.2 docker compose up -d --wait
+LAB_REQUIRE_STACK=1 uv run --no-sync pytest -m e2e
 ```
+
+A new release joins the range when all three suites pass on it. The end-to-end sequence accepts
+LiteLLM's budget refusal as a 429 or a 422, because 1.104 changed the default code to 422. Add it to the workflow's matrix and
+raise `TESTED_CEILING`. A seam failure names the LiteLLM behaviour that changed, and the fix belongs
+in `src/brownout/bridge.py`, the only module that touches LiteLLM's internals.

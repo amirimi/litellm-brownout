@@ -1,6 +1,6 @@
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:v1.101.0
+    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.101.0}
     restart: unless-stopped
     ports:
       - "127.0.0.1:4000:4000"
@@ -25,11 +25,10 @@ services:
       DD_ENV: ${DD_ENV}
       DD_SERVICE: ${DD_SERVICE}
       PYTHONPATH: /app/plugins
-      BUDGET_POLICY_PRICES: /app/config/prices.yaml
-      BUDGET_POLICY_MANIFEST: /app/config/manifest.yaml
-      BUDGET_POLICY_WEBHOOK_URL: http://event-sink:8080/events
+      BROWNOUT_MANIFEST: /app/config/manifest.yaml
+      BROWNOUT_WEBHOOK_URL: http://event-sink:8080/events
     volumes:
-      - ./src/budget_policy:/app/plugins/budget_policy:ro
+      - ./src/brownout:/app/plugins/brownout:ro
       - ./config:/app/config:ro
     command: ["--config", "/app/config/config.yaml", "--port", "4000"]
     healthcheck:

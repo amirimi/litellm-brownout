@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   checks:
-    name: format, lint, types, unit and configuration contracts
+    name: format, lint, types, unit, seams and the lab's brownout check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +23,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy
       - run: uv run pytest -m "not e2e"
+      - run: uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml
 
   end-to-end:
     name: composed gateway sequence

@@ -19,6 +19,8 @@ LAB_ENVELOPE_USD: Final = 1.0
 MAX_TOKENS: Final = 40
 MAX_REQUESTS: Final = 80
 REQUEST_TIMEOUT_SECONDS: Final = 30.0
+BUDGET_REFUSAL_STATUSES: Final = frozenset({422, 429})
+BUDGET_REFUSAL_MESSAGE: Final = "Budget has been exceeded"
 
 pytestmark = pytest.mark.e2e
 
@@ -106,7 +108,10 @@ def _drive_to_exhaustion(client: httpx.Client, key: str) -> Observation:
                 ],
             },
         )
-        if response.status_code == 429:
+        if (
+            response.status_code in BUDGET_REFUSAL_STATUSES
+            and BUDGET_REFUSAL_MESSAGE in response.text
+        ):
             observed.blocked_status = response.status_code
             observed.blocked_body = response.text
             return observed
@@ -115,7 +120,7 @@ def _drive_to_exhaustion(client: httpx.Client, key: str) -> Observation:
         headers = {name.lower(): value for name, value in response.headers.items()}
         if (
             observed.first_degraded_headers is None
-            and "x-platform-degraded-from" in headers
+            and "x-brownout-degraded-from" in headers
         ):
             observed.first_degraded_headers = headers
     return observed
@@ -126,8 +131,9 @@ def _tier_events(team_id: str = LAB_TEAM_ID) -> list[dict[str, Any]]:
     return [
         event
         for event in payload["events"]
-        if event.get("event") == "budget_tier_crossed"
+        if event.get("event") == "brownout_tier_crossed"
         and event.get("team_id") == team_id
+        and event.get("scope") == "team"
     ]
 
 
@@ -152,11 +158,11 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(lab_key: str) -> No
     assert observed.first_degraded_headers is not None, (
         "no response disclosed a downgrade"
     )
-    assert observed.first_degraded_headers["x-platform-degraded-from"] == LAB_ROUTE
-    assert observed.first_degraded_headers["x-platform-route-served"] == DEGRADED_ROUTE
-    assert observed.first_degraded_headers["x-platform-budget-tier"] == "75"
+    assert observed.first_degraded_headers["x-brownout-degraded-from"] == LAB_ROUTE
+    assert observed.first_degraded_headers["x-brownout-route-served"] == DEGRADED_ROUTE
+    assert observed.first_degraded_headers["x-brownout-budget-tier"] == "75"
 
-    assert observed.blocked_status == 429, (
+    assert observed.blocked_status in BUDGET_REFUSAL_STATUSES, (
         f"never reached the native ceiling in {observed.requests} requests"
     )
     assert "budget" in observed.blocked_body.lower()
@@ -177,13 +183,13 @@ def test_the_component_sink_contains_only_its_declared_event_types(
     observed = [event.get("event") for event in payload["events"]]
     owners = set(observed)
 
-    assert "budget_tier_crossed" in owners, (
+    assert "brownout_tier_crossed" in owners, (
         f"the sequence crossed two tiers and the sink recorded {observed}"
     )
     assert owners <= {
-        "budget_tier_crossed",
-        "budget_route_degraded",
-        "budget_policy_incident",
+        "brownout_tier_crossed",
+        "brownout_route_degraded",
+        "brownout_incident",
     }, f"an undeclared event type reached the component sink: {owners}"
 
 
@@ -193,10 +199,11 @@ def test_the_downgrade_is_announced_once_for_the_route(lab_key: str) -> None:
     degraded = [
         event
         for event in payload["events"]
-        if event.get("event") == "budget_route_degraded"
+        if event.get("event") == "brownout_route_degraded"
         and event.get("team_id") == LAB_TEAM_ID
     ]
 
     assert [
-        (event["route"], event["served_route"], event["tier"]) for event in degraded
+        (event["route"], event["served_route"], event["degrade_at"])
+        for event in degraded
     ] == [(LAB_ROUTE, DEGRADED_ROUTE, 75)]

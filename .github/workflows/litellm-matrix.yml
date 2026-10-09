@@ -1,0 +1,40 @@
+name: litellm matrix
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  release-line:
+    name: LiteLLM ${{ matrix.litellm }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        litellm: ["1.101.6", "1.102.4", "1.103.4", "1.104.2"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv pip install "litellm[proxy]==${{ matrix.litellm }}"
+      - run: uv run --no-sync pytest -m "not e2e"
+      - run: cp .env.example .env
+      - run: docker compose up -d --wait
+        env:
+          LITELLM_TAG: v${{ matrix.litellm }}
+      - name: run the sequence
+        run: set -a && . ./.env && set +a && uv run --no-sync pytest -m e2e
+        env:
+          LAB_REQUIRE_STACK: "1"
+          LITELLM_TAG: v${{ matrix.litellm }}
+      - if: always()
+        run: docker compose logs litellm
+        env:
+          LITELLM_TAG: v${{ matrix.litellm }}
+      - if: always()
+        run: docker compose down -v
+        env:
+          LITELLM_TAG: v${{ matrix.litellm }}

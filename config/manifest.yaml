@@ -1,12 +1,15 @@
 version: "v1"
 
+data_class_order:
+  - internal
+  - customer_pii
+
 teams:
   team-a:
     policy_epoch: "team-a-v1"
     envelope_usd: 500.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
-    on_counter_unavailable: block
     routes:
       chat-qa:
         fallback: chat-qa-degraded
@@ -17,22 +20,16 @@ teams:
     envelope_usd: 2000.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
-    on_counter_unavailable: block
     routes:
-      code-review:
-        fallback: null
-        degrade_at: null
+      code-review: {}
 
   budget-lab:
     policy_epoch: "budget-lab-v1"
     envelope_usd: 1.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
-    on_counter_unavailable: block
     routes:
       budget-lab-primary:
         fallback: budget-lab-degraded
         degrade_at: 75
-      budget-lab-strict:
-        fallback: null
-        degrade_at: null
+      budget-lab-strict: {}
