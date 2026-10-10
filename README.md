@@ -12,7 +12,9 @@ A team has $500 for the week, and at $450 its routine Q&A moves to a smaller mod
 
 The plugin is a Python package, `brownout`, that you mount into the stock LiteLLM image. It is
 tested on LiteLLM 1.101 to 1.104. Clone the repository to get the package, the example config and a
-lab stack. The lab needs Docker Compose, Python 3.12+, [uv](https://docs.astral.sh/uv/) and `curl`.
+lab stack. The lab needs Docker Compose, Python 3.12+, [uv](https://docs.astral.sh/uv/), `curl` and
+`jq`. The first `docker compose up` pulls the LiteLLM image, about 1.2 GB, so the first start can
+take several minutes.
 
 ```bash
 git clone https://github.com/amk9978/litellm-brownout.git
