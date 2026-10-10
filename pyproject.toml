@@ -16,6 +16,9 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.scripts]
+brownout = "brownout.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -27,7 +30,7 @@ dev = [
 ]
 
 [tool.uv.build-backend]
-module-name = "budget_policy"
+module-name = "brownout"
 module-root = "src"
 
 [tool.pytest.ini_options]
@@ -47,7 +50,7 @@ ignore = ["SIM108"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src/budget_policy"]
+files = ["src/brownout"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 disallow_untyped_defs = true

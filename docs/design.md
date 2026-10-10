@@ -34,6 +34,30 @@ Stage 4 is where the plugin decides, and its position sets three constraints.
 | after stage 2 | the request that exhausts the budget never reaches it, so degradation fires below 100% |
 | before stage 5 | it cannot know which deployment will serve, so price is a property of the route |
 
+## Modules
+
+A request passes through four layers in this order. The bridge turns LiteLLM's request into plain
+facts, the request rules refuse anything the plugin cannot govern, the pure core decides, and the
+bridge applies the decision while the transitions are claimed and published.
+
+| Module | Holds | Imports LiteLLM |
+|---|---|---|
+| `policy.py` | `decide` and `resolve`, the only place a threshold is compared | No |
+| `manifest.py` | The manifest types and loader, with strict keys and the accepted windows | No |
+| `rules.py` | Every rule as a function of plain values, shared by `brownout check` and the request path | No |
+| `refusals.py` | Rule ids and the closed `Refusal` type | No |
+| `ports.py` | Protocols for every outside dependency, and the `Caller` facts | No |
+| `transitions.py` | Window ids, claim keys and one claim-then-emit function | No |
+| `events.py`, `datadog.py` | Event types, webhook delivery and metric series | No |
+| `settings.py` | Environment variables | No |
+| `cli.py` | `brownout check` | Its cost map only |
+| `bridge.py` | Every LiteLLM touchpoint, including the three private helpers and the version check | Yes |
+| `gateway.py` | The two hooks, the request pipeline and the one place a refusal becomes an `HTTPException` | Through the bridge |
+
+The permission check runs only when `decide` wants a downgrade, because it is the one check whose
+answer the decision may not need. Every other check runs before `decide`, which therefore takes
+only a team, a route and a spend figure, and performs no I/O.
+
 ## Native vs built
 
 Configuring an existing capability was preferred to reimplementing it. Every native claim below was
@@ -56,10 +80,11 @@ read from the pinned source in `.venv/lib/python3.12/site-packages/litellm`.
 | Tier events at 75%, 90% and any route-declared threshold | The native alerter is hardcoded to 85% and 95% ([`integrations/SlackAlerting/slack_alerting.py:648-653`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/integrations/SlackAlerting/slack_alerting.py#L648-L653)), and no `alerting` key is declared. A team `soft_budget` is one absolute-dollar threshold. It compares against the recorded spend on the team row, a different figure from the counter, only alerts, and emails `metadata.soft_budget_alerting_emails` ([`proxy/auth/auth_checks.py:5332`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/auth/auth_checks.py#L5332), [`proxy/_types.py:1805`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/_types.py#L1805)) |
 | Route-declared degradation on a team total | `budget_fallbacks` fires on per-model `model_max_budget`, never on a team total ([`proxy/hooks/model_max_budget_limiter.py:300`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/hooks/model_max_budget_limiter.py#L300)) |
 | Validated fallback selection | Nothing native checks that a target is priced, cleared for the primary's data class, and callable by the caller's key and team |
-| A catalog that raises on an unknown model | LiteLLM returns `None` for an unpriced model and skips reservation entirely ([`proxy/spend_tracking/budget_reservation.py:236`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236)) |
+| A refusal for a model LiteLLM cannot price | LiteLLM returns `None` for an unpriced model and skips reservation entirely ([`proxy/spend_tracking/budget_reservation.py:236`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236)) |
+| Rules over LiteLLM's own config, run in CI and on every request | LiteLLM validates its settings one at a time and has no notion of the assumptions a plugin makes about them |
 | Caller disclosure | No native header carries the served route or the route it degraded from |
 | Guardrail re-merge after a rewrite | The merge runs at stage 3 keyed on the requested model, so a stage 4 rewrite would drop the target's guardrails |
-| Versioned, cross-replica deduplication | Each claim carries team, policy epoch, window and threshold, so an approved policy change re-arms its transitions |
+| Versioned, cross-replica deduplication | Each claim carries team, policy epoch, window and transition, so an approved policy change re-arms its transitions |
 
 ## Known limitations
 
@@ -71,17 +96,19 @@ Two pieces of work remain.
 - The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
   suite and has yet to be driven through a live gateway.
 
-A deployment inherits ten limits as the plugin stands.
+A deployment inherits these limits as the plugin stands. The [assumptions table](../README.md#assumptions)
+lists the ones a rule enforces.
 
 | Limit | What it means for a deployment |
 |---|---|
 | Request compatibility between a route and its fallback goes unchecked | Context capacity, tools, structured output and modalities can differ. With `drop_params: true`, as in the lab config, a parameter the fallback does not support may be dropped silently. Check each fallback against the workload before it carries real traffic |
-| Reset windows are tested at `7d` in UTC | `2d` produces a moving claim window, `2mo` passes validation and then raises during window calculation, and DST can shift reset boundaries. LiteLLM resets the counter asynchronously |
-| The manifest loader ignores unknown keys | A typo such as `degrade_At` leaves degradation off without an error |
-| The counter posture applies after LiteLLM's own check | With `fail_closed_budget_enforcement` on, LiteLLM may refuse a request whose spend it cannot verify before `on_counter_unavailable` is consulted |
+| The counter resets after the window does | LiteLLM's reset job zeroes the counter every 597 to 605 seconds by default, and later if the job is delayed. Until it runs, the previous window's spend can degrade requests and consume the new window's claims. Closing this needs the team's persisted `budget_reset_at` |
+| Reset times that daylight saving skips or repeats are unsupported | A `budget_reset_time` that does not occur exactly once on a reset date, such as 02:30 or 01:30 in a US zone, makes LiteLLM's own schedule move early or backward on the transition day |
+| Only the budget amount is re-checked per request | The authenticated object carries `team_max_budget` and no duration or reset instant ([`proxy/_types.py:2879`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/_types.py#L2879)), so a drifted window is caught where the team is rendered |
+| Other owners' LiteLLM budgets are not modelled | A user, organisation, end-user or tag budget, or a stacked team `budget_limits` window, can refuse a request before any tier fires. The authenticated object exposes the user, organisation and end-user budgets per request, and they stay unchecked because refusing them would break gateways that use them for other governance. Team `budget_limits` and tag budgets are not exposed per request |
 | Entitlement reads the direct key and team model lists | A target reachable only through an access group, a team alias, or project or member scope reads as unselectable, so the primary is served. Those scopes need LiteLLM's full resolved-model path |
-| Only the budget amount is re-checked per request | The authenticated object carries `team_max_budget` and no duration or reset instant ([`proxy/_types.py:2879`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/_types.py#L2879)), so a drifted window is caught where the team is rendered. The manifest parses `budget_duration` at load, because one derivation raises on a bad value and the other quietly returns the next midnight |
 | Data classes are compared as an ordering | The whole rule for two classes. Provider, region, retention, purpose and audit requirement can each be more restrictive without the combination being permitted, and a production deployment needs a matrix over those dimensions |
 | Money is a `float` | It matches the counter LiteLLM increments with `INCRBYFLOAT`. Nothing here is the system of record for spend |
-| The reservation is sized on the requested route, never the served one | Reservation runs at authentication and the rewrite runs after it, so a degraded request still needs the primary's worst case to fit the headroom. With `fail_closed_budget_enforcement` on, admission therefore stops at the envelope minus the requested route's worst case, and a degrade tier above that ratio never fires. Keep `max_tokens` small relative to the envelope, as the lab does |
-| A request LiteLLM cannot estimate places no hold | `reserve_budget_for_request` returns before reserving when the worst-case estimate is `None` ([`budget_reservation.py:236-237`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236-L237)). That is a group the router and the cost map cannot price, an input the token counter cannot count on a model with no `max_input_tokens`, or an image route priced per pixel or by size ([`budget_reservation.py:1222-1228`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L1222-L1228)). The fail-closed flag is consulted only after the estimate, so it changes nothing on this path. Admission falls back to `_team_max_budget_check` ([`auth_checks.py:5242`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/auth/auth_checks.py#L5242)), a plain read of a counter the response updates afterwards ([`proxy_server.py:2713`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2713)), so concurrent requests each pass on the same figure. The catalog proves the plugin knows a price, and LiteLLM estimates from the deployment's own price fields, so `tests/test_config_contract.py` keeps the two equal for every deployment in the lab config. Non-chat call types pass through the plugin untouched, so an embeddings, audio or image route the estimate cannot price is admitted on the read alone |
+| The reservation is sized on the requested route, never the served one | Reservation runs at authentication and the rewrite runs after it, so a degraded request still needs the primary's worst case to fit the headroom. Admission therefore stops at the envelope minus the requested route's worst case, and a degrade threshold above that ratio never fires. Keep `max_tokens` small relative to the envelope, as the lab does |
+| A request LiteLLM cannot estimate places no hold | `reserve_budget_for_request` returns before reserving when the worst-case estimate is `None` ([`budget_reservation.py:236-237`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236-L237)). Rule `model-priced` refuses a chat request for a model LiteLLM cannot price. Non-chat call types pass through the plugin untouched, so an embeddings, audio or image route the estimate cannot price is admitted on LiteLLM's read alone |
+| The request rules cost about 0.3 ms | The pre-call hook reads two model groups through `Router.get_model_group_info`, at about 0.1 ms each on the lab config, once per request |
