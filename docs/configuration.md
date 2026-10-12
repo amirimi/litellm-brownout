@@ -24,8 +24,9 @@ services:
 The plugin imports `httpx`, `pyyaml`, `fastapi` and `litellm`, all present in the image. Three of
 its LiteLLM imports are private helpers (`_can_object_call_model`,
 `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), and all of
-them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.101.0 and
-logs one warning on a release newer than the tested 1.104. The repository documents and tests the
+them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.95.1. It
+logs one warning on 1.95.1 to 1.100, whose budget boundary is weaker, and one on a release newer
+than the tested 1.104. The repository documents and tests the
 mount. Installing the built wheel into a custom image is untested.
 
 | Variable | Default | Purpose |
@@ -74,7 +75,7 @@ model_list:
 
 | Setting | Why it is there |
 |---|---|
-| `fail_closed_budget_enforcement: true` | Decides the envelope boundary for the whole gateway, read from `general_settings` alone ([`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)). On, a worst case that does not fit the remaining headroom is refused whole at authentication ([`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)), and so is a reservation that cannot be written or a spend figure that cannot be verified. Rule `fail-closed-on` requires it |
+| `fail_closed_budget_enforcement: true` | Decides the envelope boundary for the whole gateway, read from `general_settings` alone ([`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)). On, a worst case that does not fit the remaining headroom is refused whole at authentication ([`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)), and so is a reservation that cannot be written or a spend figure that cannot be verified. LiteLLM 1.95.1 to 1.100 lack the first refusal and shrink the hold to the headroom instead. Rule `fail-closed-on` requires it |
 | `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's claims reuse the same Redis, so one crossing is one event across every replica. Rule `redis-configured` requires it in `brownout check` |
 | `callbacks` | The dotted path to the handler `src/brownout/gateway.py` builds at import |
 | `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. A deployment without them is priced from LiteLLM's cost map. Rules `route-priced` and `model-priced` refuse a model with neither |
@@ -176,7 +177,7 @@ the gateway settings.
 | `model-priced` | The requested model is priced | Request |
 | `ceiling-matches-envelope` | The team's `max_budget` equals `envelope_usd` | Request |
 | `spend-readable` | The team's spend counter can be read | Request |
-| `supported-litellm` | LiteLLM is 1.101.0 or newer | Load |
+| `supported-litellm` | LiteLLM is 1.95.1 or newer | Load |
 
 ```bash
 uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml

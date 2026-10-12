@@ -3,7 +3,9 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
+import re
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 from typing import Final
 
@@ -17,6 +19,16 @@ from litellm.proxy.spend_tracking import budget_reservation
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 
 LITELLM_ROOT: Final = Path(importlib.util.find_spec("litellm").origin).parent
+REFUSE_WHOLE_FROM: Final = (1, 101, 0)
+
+
+def _installed_release() -> tuple[int, int, int]:
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", version("litellm"))
+    assert match is not None, f"cannot read the LiteLLM release {version('litellm')!r}"
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+REFUSES_WHOLE: Final = _installed_release() >= REFUSE_WHOLE_FROM
 
 
 def _function_in_source(
@@ -104,6 +116,7 @@ def test_seam_the_spend_read_accepts_the_arguments_the_plugin_passes():
     assert {"counter_key", "fallback_spend", "max_budget"} <= _parameter_names(read)
 
 
+@pytest.mark.skipif(not REFUSES_WHOLE, reason="the hold is shrunk before 1.101.0")
 def test_seam_fail_closed_refuses_a_worst_case_that_does_not_fit():
     policy = _function_in_source(
         "proxy/spend_tracking/budget_reservation.py",
@@ -111,6 +124,17 @@ def test_seam_fail_closed_refuses_a_worst_case_that_does_not_fit():
     )
 
     assert "fail_closed_budget_enforcement" in _parameter_names(policy)
+
+
+@pytest.mark.skipif(REFUSES_WHOLE, reason="the hold is refused whole from 1.101.0")
+def test_seam_before_1_101_an_over_budget_hold_is_shrunk():
+    policy = _function_in_source(
+        "proxy/spend_tracking/budget_reservation.py",
+        "_apply_over_budget_reservation_policy",
+    )
+
+    assert "fail_closed_budget_enforcement" not in _parameter_names(policy)
+    assert "_resize_applied_reservation(" in ast.unparse(policy)
 
 
 def test_seam_the_authenticated_object_carries_the_fields_the_plugin_reads():

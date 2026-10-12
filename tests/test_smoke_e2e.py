@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from typing import Any, Final
+from typing import Any, Final, assert_never
 
 import httpx
 import pytest
+
+from brownout import bridge
 
 from .support import REPO_ROOT, lab_spend_counter
 
@@ -16,6 +18,7 @@ LAB_TEAM_ID: Final = "budget-lab"
 LAB_ROUTE: Final = "budget-lab-primary"
 DEGRADED_ROUTE: Final = "budget-lab-degraded"
 LAB_ENVELOPE_USD: Final = 1.0
+LAB_PRIMARY_WORST_CASE_USD: Final = 0.0408
 MAX_TOKENS: Final = 40
 MAX_REQUESTS: Final = 80
 REQUEST_TIMEOUT_SECONDS: Final = 30.0
@@ -126,6 +129,38 @@ def _drive_to_exhaustion(client: httpx.Client, key: str) -> Observation:
     return observed
 
 
+def _gateway_release() -> str:
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "litellm",
+            "python",
+            "-c",
+            "from importlib.metadata import version; print(version('litellm'))",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"could not read the gateway's LiteLLM release: {result.stderr}")
+    return result.stdout.strip()
+
+
+def _settled_ceiling_usd(boundary: bridge.Boundary) -> float:
+    match boundary:
+        case "refuse_whole":
+            return LAB_ENVELOPE_USD
+        case "shrink_to_fit":
+            return LAB_ENVELOPE_USD + LAB_PRIMARY_WORST_CASE_USD
+        case _:
+            assert_never(boundary)
+
+
 def _tier_events(team_id: str = LAB_TEAM_ID) -> list[dict[str, Any]]:
     payload = httpx.get(EVENT_SINK, timeout=10.0).json()
     return [
@@ -167,11 +202,13 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(lab_key: str) -> No
     )
     assert "budget" in observed.blocked_body.lower()
 
+    release = _gateway_release()
+    boundary = bridge.boundary_for(release)
+    ceiling = _settled_ceiling_usd(boundary)
     counter = lab_spend_counter(LAB_TEAM_ID)
-    assert counter <= LAB_ENVELOPE_USD, (
+    assert counter <= ceiling, (
         f"the window closed with the counter at ${counter:.4f} against a "
-        f"${LAB_ENVELOPE_USD:.2f} envelope, so a hold was admitted that did not fit. "
-        "The lab config sets fail_closed_budget_enforcement, which refuses such a hold"
+        f"${ceiling:.4f} ceiling for the {boundary} boundary of LiteLLM {release}"
     )
 
 

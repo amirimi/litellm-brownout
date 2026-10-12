@@ -31,7 +31,7 @@ Stage 4 is where the plugin decides, and its position sets three constraints.
 | Because stage 4 runs | It follows that |
 |---|---|
 | after stage 2 | the counter it reads already holds a charge for a request that has not run |
-| after stage 2 | the request that exhausts the budget never reaches it, so degradation fires below 100% |
+| after stage 2 | on LiteLLM 1.101 and newer the request that exhausts the budget never reaches it, so degradation fires below 100%. On 1.95.1 to 1.100 requests keep arriving with their holds shrunk until no headroom is left, and each is judged like any other |
 | before stage 5 | it cannot know which deployment will serve, so price is a property of the route |
 
 ## Modules
@@ -61,7 +61,8 @@ only a team, a route and a spend figure, and performs no I/O.
 ## Native vs built
 
 Configuring an existing capability was preferred to reimplementing it. Every native claim below was
-read from the pinned source in `.venv/lib/python3.12/site-packages/litellm`.
+read from the LiteLLM 1.101.0 source that the links cite. The hard boundary is the one claim that
+differs on the supported releases before 1.101.0.
 
 | Native, configured and reused | Where |
 |---|---|
@@ -69,7 +70,7 @@ read from the pinned source in `.venv/lib/python3.12/site-packages/litellm`.
 | The reservation increments the counter with Redis `INCRBYFLOAT` | [`proxy/proxy_server.py:3283`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L3283), [`caching/redis_cache.py:1195`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/caching/redis_cache.py#L1195) |
 | Counters for Key, Team and User, only when `max_budget > 0` | [`proxy/spend_tracking/budget_reservation.py:417-474`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L417-L474) |
 | An exhausted budget raises `BudgetExceededError` with `status_code = 429` at auth | [`proxy/spend_tracking/budget_reservation.py:161`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L161), [`exceptions.py:440`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/exceptions.py#L440) |
-| The hard boundary. With `fail_closed_budget_enforcement` on, a worst case that does not fit the remaining headroom is refused whole at authentication. With it off, the hold is resized to the headroom instead | [`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141), [`budget_reservation.py:147`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L147), [`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429) |
+| The hard boundary. With `fail_closed_budget_enforcement` on, a worst case that does not fit the remaining headroom is refused whole at authentication. With it off, the hold is resized to the headroom instead. On 1.95.1 to 1.100 the hold is resized whatever the flag says, because the refusal arrived in 1.101.0 | [`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141), [`budget_reservation.py:147`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L147), [`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429) |
 | Spend reconciled to real cost after the response completes | [`proxy/spend_tracking/budget_reservation.py:305`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L305) |
 | `budget_duration: "7d"` anchors the window to Monday at the configured reset time | [`litellm_core_utils/duration_parser.py:246-249`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/litellm_core_utils/duration_parser.py#L246-L249) |
 | Model-level guardrails merge into the request just before the pre-call hook | [`proxy/common_request_processing.py:2002`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/common_request_processing.py#L2002) |
@@ -92,7 +93,8 @@ Two pieces of work remain.
 
 - A request blocked at the native ceiling carries no platform header. LiteLLM wraps the
   response-headers hook in a try/except that swallows, and runs it on success only, so the signal
-  for that request lives in the body of LiteLLM's budget refusal. A response middleware seam would close this.
+  for that request lives in the body of LiteLLM's budget refusal. A response middleware seam would
+  close this.
 - The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
   suite and has yet to be driven through a live gateway.
 
@@ -101,6 +103,7 @@ lists the ones a rule enforces.
 
 | Limit | What it means for a deployment |
 |---|---|
+| LiteLLM 1.95.1 to 1.100 can close a window above the envelope | Their `_apply_over_budget_reservation_policy` shrinks a hold that does not fit instead of refusing it, and admits requests until no headroom is left. Each admitted request can overrun its shrunk hold. That is at most one request's cost under serial traffic, and more when several shrunk requests are in flight at once. LiteLLM overwrites the hold's original size, so the plugin cannot tell a shrunk hold from a full one, and it logs a warning at startup instead. Run 1.101 or newer for the hard boundary |
 | Request compatibility between a route and its fallback goes unchecked | Context capacity, tools, structured output and modalities can differ. With `drop_params: true`, as in the lab config, a parameter the fallback does not support may be dropped silently. Check each fallback against the workload before it carries real traffic |
 | The counter resets after the window does | LiteLLM's reset job zeroes the counter every 597 to 605 seconds by default, and later if the job is delayed. Until it runs, the previous window's spend can degrade requests and consume the new window's claims. Closing this needs the team's persisted `budget_reset_at` |
 | Reset times that daylight saving skips or repeats are unsupported | A `budget_reset_time` that does not occur exactly once on a reset date, such as 02:30 or 01:30 in a US zone, makes LiteLLM's own schedule move early or backward on the transition day |

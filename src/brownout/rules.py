@@ -86,8 +86,8 @@ def settings_rules(settings: GatewaySettings) -> list[Violation]:
             Violation(
                 RuleId.FAIL_CLOSED_ON,
                 "general_settings.fail_closed_budget_enforcement",
-                "must be true, or the last hold shrinks to the headroom and a window "
-                "can close one request above its envelope",
+                "must be true, or a hold that does not fit shrinks to the headroom and a "
+                "window can close above its envelope",
             )
         )
     if settings.disable_budget_reservation:

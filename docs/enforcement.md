@@ -1,8 +1,9 @@
 # Enforcement
 
 Each chat request meets LiteLLM first and the plugin second. LiteLLM authenticates the key,
-reserves the request's worst-case cost on the team's Redis counter and refuses the request with a
-429 when that worst case does not fit. The plugin's pre-call hook then runs the request rules,
+reserves the request's worst-case cost on the team's Redis counter and refuses the request when
+that worst case does not fit. LiteLLM 1.95.1 to 1.100 shrink the hold to fit instead, as
+[the envelope boundary](#the-envelope-boundary) sets out. The plugin's pre-call hook then runs the request rules,
 reads the counter, decides, checks the caller's permission only if it wants a downgrade, rewrites
 the request if the downgrade is allowed, and publishes its events. The provider answers, the
 plugin's post-call hook sets the disclosure headers, and LiteLLM reconciles the hold to the actual
@@ -48,7 +49,8 @@ plugin reports and degrades below the boundary, and LiteLLM alone owns the bound
 
 | Gateway posture | When the worst case exceeds the headroom | Settled spend at window close |
 |---|---|---|
-| `fail_closed_budget_enforcement: true` | Refused whole, 429 at authentication ([`budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)) | At or below the envelope, to the accuracy of the estimate below. Up to one worst case of headroom goes unspent |
+| `fail_closed_budget_enforcement: true` on LiteLLM 1.101.0 and newer | Refused whole, 429 at authentication ([`budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)) | At or below the envelope, to the accuracy of the estimate below. Up to one worst case of headroom goes unspent |
+| `fail_closed_budget_enforcement: true` on LiteLLM 1.95.1 to 1.100 | Hold shrunk to the headroom and the request served at its full `max_tokens`. Requests keep being admitted this way until no headroom is left, then refused with a 429 | Above the envelope by the overrun of the shrunk requests, at most one request's cost under serial traffic. The handler logs this boundary at startup |
 | Flag absent or `false` | Refused by rule `fail-closed-on` before the plugin decides | Not reached |
 | `disable_budget_reservation: true` | Refused by rule `reservation-on` before the plugin decides | Not reached |
 

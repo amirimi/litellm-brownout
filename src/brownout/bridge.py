@@ -24,7 +24,8 @@ from .rules import ROUTER_FALLBACK_KEYS, GatewaySettings, ModelGroup
 
 logger: Final = logging.getLogger("brownout")
 
-SUPPORTED_FLOOR: Final = (1, 101, 0)
+SUPPORTED_FLOOR: Final = (1, 95, 1)
+REFUSE_WHOLE_FROM: Final = (1, 101, 0)
 TESTED_CEILING: Final = (1, 104)
 
 CHAT_COMPLETION_CALL_TYPES: Final = frozenset({"completion", "acompletion"})
@@ -43,6 +44,7 @@ HEADER_DEGRADED_FROM: Final = "x-brownout-degraded-from"
 HEADER_DEGRADATION_REASON: Final = "x-brownout-degradation-reason"
 
 RouterProvider = Callable[[], Any | None]
+Boundary = Literal["refuse_whole", "shrink_to_fit"]
 
 
 class UnsupportedLiteLLM(Exception):
@@ -65,6 +67,34 @@ def require_supported_litellm(release: str) -> None:
             release,
             ceiling,
         )
+    _report_boundary(release)
+
+
+def boundary_for(release: str) -> Boundary:
+    if _release_tuple(release) < REFUSE_WHOLE_FROM:
+        return "shrink_to_fit"
+    return "refuse_whole"
+
+
+def _report_boundary(release: str) -> None:
+    boundary: Final = boundary_for(release)
+    match boundary:
+        case "refuse_whole":
+            return
+        case "shrink_to_fit":
+            refusing = ".".join(map(str, REFUSE_WHOLE_FROM))
+            logger.warning(
+                "%s: LiteLLM %s shrinks a reservation that exceeds the remaining budget "
+                "instead of refusing it, so a budget window can close above the envelope. "
+                "Each request admitted with a shrunk hold can overrun it, by at most one "
+                "request's cost under serial traffic. LiteLLM %s and newer refuse such a "
+                "reservation",
+                RuleId.SUPPORTED_LITELLM,
+                release,
+                refusing,
+            )
+        case _:
+            assert_never(boundary)
 
 
 def running_litellm() -> str:
