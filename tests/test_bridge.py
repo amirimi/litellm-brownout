@@ -195,16 +195,41 @@ def test_a_refusal_becomes_one_http_error(reason, status_code, error):
     }
 
 
+SHRINK_WARNING: Final = "a budget window can close above the envelope"
+
+
 def test_a_release_below_the_floor_refuses_to_start():
-    with pytest.raises(bridge.UnsupportedLiteLLM, match="1.101.0 and newer"):
-        bridge.require_supported_litellm("1.100.9")
+    with pytest.raises(bridge.UnsupportedLiteLLM, match="1.95.1 and newer"):
+        bridge.require_supported_litellm("1.95.0")
 
 
 @pytest.mark.parametrize("release", ["1.101.0", "1.103.4", "1.104.2"])
-def test_a_tested_release_runs_quietly(release, caplog):
+def test_a_tested_release_that_refuses_whole_runs_quietly(release, caplog):
     bridge.require_supported_litellm(release)
 
-    assert "newer than the newest release" not in caplog.text
+    assert not [record for record in caplog.records if record.levelname == "WARNING"]
+
+
+@pytest.mark.parametrize("release", ["1.95.1", "1.98.1", "1.100.5"])
+def test_a_release_that_shrinks_holds_to_fit_runs_with_a_warning(release, caplog):
+    bridge.require_supported_litellm(release)
+
+    assert SHRINK_WARNING in caplog.text
+    assert release in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("release", "boundary"),
+    [
+        ("1.95.1", "shrink_to_fit"),
+        ("1.100.9", "shrink_to_fit"),
+        ("1.101.0", "refuse_whole"),
+        ("1.104.2", "refuse_whole"),
+        ("1.105.0rc1", "refuse_whole"),
+    ],
+)
+def test_the_boundary_follows_the_release(release, boundary):
+    assert bridge.boundary_for(release) == boundary
 
 
 def test_a_release_past_the_ceiling_runs_with_a_warning(caplog):

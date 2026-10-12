@@ -1,9 +1,14 @@
 name: litellm matrix
 
 on:
+  pull_request:
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+
+concurrency:
+  group: litellm-matrix-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   release-line:
@@ -12,7 +17,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        litellm: ["1.101.6", "1.102.4", "1.103.4", "1.104.2"]
+        litellm:
+          - "1.95.1"
+          - "1.96.2"
+          - "1.97.0"
+          - "1.98.1"
+          - "1.99.4"
+          - "1.100.5"
+          - "1.101.6"
+          - "1.102.4"
+          - "1.103.4"
+          - "1.104.2"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

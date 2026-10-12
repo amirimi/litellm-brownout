@@ -12,7 +12,7 @@ authors = [{ name = "Amir Karimi" }]
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28",
-    "litellm[proxy]==1.101.0",
+    "litellm[proxy]==1.95.1",
     "pyyaml>=6.0",
 ]
 

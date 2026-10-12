@@ -46,14 +46,18 @@ the team, waits out the flush window, clears the counter and the claims, then re
 
 ## Supported LiteLLM releases
 
-Brownout supports LiteLLM 1.101.0 and newer. `SUPPORTED_FLOOR` and `TESTED_CEILING` in
-`src/brownout/bridge.py` hold the range. Below the floor the handler refuses to start, and past the
-ceiling it logs one warning. The floor moves only by a decision recorded in a spec, because
-releases before 1.101.0 shrink the last reservation instead of refusing it, and releases before
-1.84 place no reservation at all.
+Brownout supports LiteLLM 1.95.1 and newer. `SUPPORTED_FLOOR`, `REFUSE_WHOLE_FROM` and
+`TESTED_CEILING` in `src/brownout/bridge.py` hold the range and the budget boundary. Below the floor
+the handler refuses to start. On 1.95.1 to 1.100 it warns that LiteLLM shrinks an over-budget
+reservation instead of refusing it, and past the ceiling it warns that the release is untested. The
+floor moves only by a decision recorded in a spec. Releases before 1.95 differ in the guardrail
+merge and in the helpers the bridge calls, 1.95.0 carries a LiteLLM security advisory, and releases
+before 1.84 place no reservation at all.
 
-The `litellm matrix` workflow runs every suite against the latest patch of each supported release
-line, weekly and on demand. To run one release line by hand, install it into the project's
+`pyproject.toml` pins the floor, so the ci workflow runs the unit and seam suites on it. The
+`litellm matrix` workflow runs every suite against the latest patch of each supported release line,
+on every pull request, weekly and on demand. The boundary seam and the end-to-end counter bound both
+follow the release under test. To run one release line by hand, install it into the project's
 environment and point the lab at the matching image.
 
 ```bash
@@ -64,6 +68,7 @@ LAB_REQUIRE_STACK=1 uv run --no-sync pytest -m e2e
 ```
 
 A new release joins the range when all three suites pass on it. Add the release to the workflow's
-matrix and raise `TESTED_CEILING`. The end-to-end sequence accepts LiteLLM's budget refusal as a
-429 or a 422, because 1.104 changed the default code to 422. A seam failure names the LiteLLM behaviour that changed, and the fix belongs
-in `src/brownout/bridge.py`, the only module that touches LiteLLM's internals.
+matrix and raise `TESTED_CEILING`. The end-to-end sequence accepts LiteLLM's budget refusal as a 429
+or a 422, because 1.104 changed the default code to 422. A seam failure names the LiteLLM behaviour
+that changed, and the fix belongs in `src/brownout/bridge.py`, the only module that touches
+LiteLLM's internals.

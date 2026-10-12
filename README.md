@@ -11,7 +11,7 @@ A team has $500 for the week, and at $450 its routine Q&A moves to a smaller mod
 ## Install
 
 The plugin is a Python package, `brownout`, that you mount into the stock LiteLLM image. It is
-tested on LiteLLM 1.101 to 1.104. Clone the repository to get the package, the example config and a
+tested on LiteLLM 1.95.1 to 1.104. Clone the repository to get the package, the example config and a
 lab stack. The lab needs Docker Compose, Python 3.12+, [uv](https://docs.astral.sh/uv/), `curl` and
 `jq`. The first `docker compose up` pulls the LiteLLM image, about 1.2 GB, so the first start can
 take several minutes.
@@ -64,10 +64,12 @@ broken manifest.
 
 ## How it works
 
-A team's spend passes the thresholds its manifest declares. Each warning tier raises one event. At
-a route's `degrade_at` percentage, requests for that route are served by its fallback model, and
-the response headers tell the caller. When the next request's worst-case cost no longer fits the
-budget, LiteLLM refuses it with a 429. From LiteLLM 1.104 that refusal is a 422 by default, and
+A team's spend passes the thresholds its manifest declares. Each warning tier raises one event. At a
+route's `degrade_at` percentage, requests for that route are served by its fallback model, and the
+response headers tell the caller. When the next request's worst-case cost no longer fits the budget,
+LiteLLM 1.101 and newer refuse it with a 429. LiteLLM 1.95.1 to 1.100 instead keep admitting
+requests with their holds shrunk to the remaining headroom until none is left, so a window can close
+above the budget. From LiteLLM 1.104 the refusal is a 422 by default, and
 `budget_exceeded_status_code: 429` under `litellm_settings` restores the 429. The $500 team above
 warns at 75% and 90%, and its Q&A route degrades at 90%.
 
@@ -115,7 +117,7 @@ rules in your CI, and the gateway runs the request rules on every governed reque
 | Only chat completions are governed | Embeddings, images and audio pass through untouched | Documented |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade | Documented, not checked |
-| LiteLLM is 1.101.0 or newer | The gateway refuses to start, and warns past the tested 1.104 | `supported-litellm` |
+| LiteLLM is 1.95.1 or newer | The gateway refuses to start. It warns on 1.95.1 to 1.100, whose boundary can close a window above the budget, and past the tested 1.104 | `supported-litellm` |
 
 ## Add it to your gateway
 
@@ -206,10 +208,11 @@ at any level stops the manifest from loading, so a typo such as `degrade_At` fai
 
 ## Notes
 
-- **Supported LiteLLM:** 1.101.0 and newer, tested up to 1.104. The plugin imports three private LiteLLM helpers, so `src/brownout/bridge.py` refuses to start below the floor and warns past the tested ceiling. [CONTRIBUTING.md](CONTRIBUTING.md) explains how a new release joins the range.
+- **Supported LiteLLM:** 1.95.1 and newer, tested up to 1.104. The plugin imports three private LiteLLM helpers, so `src/brownout/bridge.py` refuses to start below the floor and warns past the tested ceiling. LiteLLM 1.95.1 to 1.100 shrink an over-budget reservation to the remaining headroom instead of refusing it. A window can then close above the envelope, by at most one request's cost under serial traffic, and the handler logs a warning at startup. Run 1.101 or newer for the hard boundary. [CONTRIBUTING.md](CONTRIBUTING.md) explains how a new release joins the range.
+- **Image dependencies:** the LiteLLM images for 1.95.1 to 1.99.4 and for 1.101.0 ship PyJWT 2.13.0, urllib3 2.7.0, multidict 6.7.1 and oauthlib 3.3.1, which carry known advisories. The 1.100.5, 1.101.6, 1.102.4, 1.103.4 and 1.104.2 images ship fixed releases. On 1.95 to 1.99, upgrade those packages in your own image or move to a fixed patch.
 - **Test the fallback first:** the plugin checks that a fallback is served, priced, cleared for the data class and callable by the key and team. Context size, tools, structured output and modalities stay unchecked, so try the fallback on your workload before real traffic. A dearer fallback is allowed, and it reaches LiteLLM's 429 sooner.
 - **Failures refuse the request:** a broken assumption from the table above returns a 503 naming its rule id and raises a platform incident. The [enforcement reference](docs/enforcement.md) lists every failure mode, header, event and metric.
-- **LiteLLM owns the hard limit:** `fail_closed_budget_enforcement` decides whether a window may close one request over budget. The trade-off is set out under [the envelope boundary](docs/enforcement.md#the-envelope-boundary).
+- **LiteLLM owns the hard limit:** on LiteLLM 1.101 and newer, `fail_closed_budget_enforcement` decides whether a window may close above its budget. The trade-off is set out under [the envelope boundary](docs/enforcement.md#the-envelope-boundary).
 - **Known limitations:** the [design notes](docs/design.md#known-limitations) list them.
 - **Field reports:** trying it on a real workload? [Open an issue](https://github.com/amk9978/litellm-brownout/issues) with the model pair, budget window, threshold, LiteLLM version and whether the fallback stayed useful. Leave keys and private prompts out.
 
