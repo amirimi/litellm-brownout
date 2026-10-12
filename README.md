@@ -18,7 +18,7 @@ gateway, because the callback governs every chat completion it serves.
 - Every key that sends chat traffic belongs to a team the manifest lists.
 - No key carries a budget of its own.
 - LiteLLM's built-in budget alerting is off.
-- `fail_closed_budget_enforcement` is on and Redis is configured.
+- `fail_closed_budget_enforcement` is on and `coordination_redis` is configured.
 - LiteLLM runs a release from 1.95.1 to 1.104, pinned by image tag.
 
 ## Install
@@ -134,8 +134,8 @@ rules in your CI, and the gateway runs the request rules on every governed reque
 | The team's model list includes each fallback | The primary serves and a `brownout_fallback_rejected` event fires | The permission check |
 | `fail_closed_budget_enforcement` is on and reservations are on | 503 and a platform incident | `fail-closed-on`, `reservation-on` |
 | A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
-| LiteLLM's built-in alerting is off and Redis is configured | `brownout check` fails | `no-native-alerting`, `redis-configured` |
-| Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | 503 and a platform incident, or `brownout check` fails | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
+| LiteLLM's budget alerts are off and `coordination_redis` is configured | `brownout check` fails | `no-native-budget-alerts`, `redis-configured` |
+| Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | `brownout check` fails before deploy. A pairing that breaks after deploy withholds the downgrade, so the primary serves and the platform gets an incident | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
 | Only chat completions are governed | Embeddings, images, audio, `/v1/messages` and `/v1/responses` pass through untouched, at full price and without headers | Documented |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade | Documented, not checked |
@@ -186,9 +186,9 @@ litellm_settings:
 
 Every model group the manifest names needs input and output prices, either on its deployments or
 from LiteLLM's cost map. A route with a fallback and the fallback itself also need a
-`model_info.data_class` from the manifest's `data_class_order`. Leave `general_settings.alerting`
-and `disable_budget_reservation` out of the gateway config. Router fallbacks may stay, and they
-never apply to governed chat completions. Each
+`model_info.data_class` from the manifest's `data_class_order`. Leave `disable_budget_reservation`
+out of the gateway config, and if LiteLLM alerting is on, list `alert_types` without
+`budget_alerts`. Router fallbacks may stay, and they never apply to governed chat completions. Each
 LiteLLM team needs the manifest's budget and duration and a model list that includes the fallback,
 and its keys carry no budget of their own. The [configuration reference](docs/configuration.md)
 explains every setting and gives the `curl` calls that create a team and key.

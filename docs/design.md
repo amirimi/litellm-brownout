@@ -55,9 +55,10 @@ bridge writes the request's facts into its LiteLLM metadata.
 | `bridge.py` | Every LiteLLM touchpoint, including the three private helpers, the version check and the request facts field | Yes |
 | `gateway.py` | The two hooks, the request pipeline and the one place a refusal becomes an `HTTPException` | Through the bridge |
 
-The permission check runs only when `decide` wants a downgrade, because it is the one check whose
-answer the decision may not need. Every other check runs before `decide`, which therefore takes
-only a team, a route and a spend figure, and performs no I/O.
+The pairing rules and the permission check run only when `decide` wants a downgrade, because they
+are the checks whose answers the decision may not need. A broken pairing withholds the downgrade and
+skips the permission check. Every other check runs before `decide`, which therefore takes only a
+team, a route and a spend figure, and performs no I/O.
 
 ## Native vs built
 
@@ -120,4 +121,4 @@ lists the ones a rule enforces.
 | Money is a `float` | It matches the counter LiteLLM increments with `INCRBYFLOAT`. Nothing here is the system of record for spend |
 | The reservation is sized on the requested route, never the served one | Reservation runs at authentication and the rewrite runs after it, so a degraded request still needs the primary's worst case to fit the headroom. Admission therefore stops at the envelope minus the requested route's worst case, and a degrade threshold above that ratio never fires. Keep `max_tokens` small relative to the envelope, as the lab does |
 | A request LiteLLM cannot estimate places no hold | `reserve_budget_for_request` returns before reserving when the worst-case estimate is `None` ([`budget_reservation.py:236-237`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236-L237)). Rule `model-priced` refuses a chat request for a model LiteLLM cannot price. Non-chat call types pass through the plugin untouched, so an embeddings, audio or image route the estimate cannot price is admitted on LiteLLM's read alone |
-| The request rules cost about 0.3 ms | The pre-call hook reads two model groups through `Router.get_model_group_info`, at about 0.1 ms each on the lab config, once per request |
+| The request rules cost about 0.1 to 0.3 ms | The pre-call hook reads the requested model group through `Router.get_model_group_info`, at about 0.1 ms on the lab config, and the fallback group too when a downgrade is wanted |

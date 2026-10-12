@@ -12,7 +12,7 @@ from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 
 from brownout import bridge
 from brownout.manifest import RoutePolicy, TeamPolicy
-from brownout.policy import Permission
+from brownout.policy import Permission, Rejection
 from brownout.rules import ModelGroup
 
 from .support import (
@@ -193,9 +193,6 @@ async def test_a_hold_larger_than_the_counter_floors_at_zero(team):
         {"mock_testing_fallbacks": True},
         {"context_window_fallbacks": [{"budget-lab-primary": ["budget-lab-degraded"]}]},
         {"content_policy_fallbacks": [{"budget-lab-primary": ["budget-lab-degraded"]}]},
-        {"metadata": {"x-brownout-route-served": "something-expensive"}},
-        {"metadata": {"degraded_from": "something-expensive"}},
-        {"litellm_metadata": {"x-brownout-budget-tier": "10"}},
     ],
 )
 async def test_caller_supplied_routing_is_refused_rather_than_ignored(
@@ -212,6 +209,22 @@ async def test_caller_supplied_routing_is_refused_rather_than_ignored(
     assert error.detail["error"] == "caller_routing_not_permitted"
     assert error.detail["refused"]
     assert sink.incidents == []
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"metadata": {"x-brownout-route-served": "a caller tag"}},
+        {"metadata": {"degraded_from": "a caller tag"}},
+        {"litellm_metadata": {"x-brownout-budget-tier": "a caller tag"}},
+    ],
+)
+async def test_caller_metadata_with_brownout_like_names_is_served(team, metadata):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+
+    applied = await request(handler, make_auth(team), "budget-lab-primary", metadata)
+
+    assert disclosed(applied)["outcome"] == "served"
 
 
 async def test_a_forged_field_is_overwritten_rather_than_refused(team):
@@ -478,36 +491,65 @@ async def test_a_gateway_setting_violation_refuses_with_its_rule(team):
     )
 
 
-async def test_a_fallback_removed_from_the_gateway_refuses_with_its_rule(team):
+def broken_pairing(kind: str) -> tuple[FakeGateway, str]:
+    lab = FakeGateway.from_lab_config()
+    match kind:
+        case "removed":
+            return lab.without_group("budget-lab-degraded"), "route-served"
+        case "unpriced":
+            unpriced = ModelGroup(
+                name="budget-lab-degraded",
+                input_cost_per_token=None,
+                output_cost_per_token=None,
+                data_classes=("internal",),
+            )
+            return lab.with_group(unpriced), "route-priced"
+        case "leaky":
+            pii_primary = ModelGroup(
+                name="budget-lab-primary",
+                input_cost_per_token=0.0001,
+                output_cost_per_token=0.001,
+                data_classes=("customer_pii",),
+            )
+            return lab.with_group(pii_primary), "fallback-data-class"
+        case _:
+            raise AssertionError(f"unknown pairing breakage {kind}")
+
+
+@pytest.mark.parametrize("kind", ["removed", "unpriced", "leaky"])
+async def test_a_broken_pairing_never_touches_a_request_below_the_threshold(team, kind):
     sink = RecordingSink()
-    gateway = FakeGateway.from_lab_config().without_group("budget-lab-degraded")
+    gateway, _ = broken_pairing(kind)
     handler = build_handler(team, sink, spend=10.0, gateway=gateway)
 
-    error = await refused_with(handler, make_auth(team), "budget-lab-primary")
+    applied = await request(handler, make_auth(team), "budget-lab-primary")
 
-    assert error.detail["rule"] == "route-served"
-    assert error.detail["subject"] == "budget-lab-degraded"
+    assert applied["model"] == "budget-lab-primary"
+    assert disclosed(applied)["outcome"] == "served"
+    assert sink.incidents == []
 
 
-async def test_a_fallback_with_a_less_restricted_data_class_refuses(team):
-    leaky = ModelGroup(
-        name="budget-lab-degraded",
-        input_cost_per_token=0.00005,
-        output_cost_per_token=0.0005,
-        data_classes=("internal",),
+@pytest.mark.parametrize("kind", ["removed", "unpriced", "leaky"])
+async def test_a_broken_pairing_keeps_the_primary_and_pages_the_platform(team, kind):
+    sink = RecordingSink()
+    gateway, rule = broken_pairing(kind)
+    permissions = RecordingPermissions(FixedPermissions(Permission.PERMITTED))
+    handler = build_handler(
+        team, sink, spend=950.0, gateway=gateway, permissions=permissions
     )
-    pii_primary = ModelGroup(
-        name="budget-lab-primary",
-        input_cost_per_token=0.0001,
-        output_cost_per_token=0.001,
-        data_classes=("customer_pii",),
-    )
-    gateway = FakeGateway.from_lab_config().with_group(leaky).with_group(pii_primary)
-    handler = build_handler(team, RecordingSink(), spend=10.0, gateway=gateway)
 
-    error = await refused_with(handler, make_auth(team), "budget-lab-primary")
+    applied = await request(handler, make_auth(team), "budget-lab-primary")
 
-    assert error.detail["rule"] == "fallback-data-class"
+    assert applied["model"] == "budget-lab-primary"
+    assert disclosed(applied)["outcome"] == "rejected"
+    assert disclosed(applied)["degradation_reason"] == "fallback_rejected"
+    assert [event.rejection for event in sink.fallback_rejections] == [
+        Rejection.FALLBACK_RULE_VIOLATED
+    ]
+    assert [
+        (incident.reason, incident.detail["rule"]) for incident in sink.incidents
+    ] == [("gateway_rule_violated", rule)]
+    assert permissions.checked == []
 
 
 async def test_claims_carry_the_team_and_the_policy_epoch(team):

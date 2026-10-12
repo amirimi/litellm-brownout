@@ -12,7 +12,9 @@ from . import bridge, settings, transitions
 from .events import EventLog
 from .manifest import Manifest, RoutePolicy, TeamPolicy
 from .policy import (
+    Decision,
     Facts,
+    Pairing,
     Permission,
     Rejected,
     Rejection,
@@ -30,7 +32,7 @@ from .ports import (
     ResetSchedule,
     SpendCounter,
 )
-from .refusals import Refusal, RefusalReason, RuleId
+from .refusals import Refusal, RefusalReason, RuleId, Violation
 from .rules import GroupLookup, ModelGroup, is_priced, route_rules, settings_rules
 
 logger: Final = logging.getLogger("brownout")
@@ -141,12 +143,22 @@ class BrownoutHandler(CustomLogger):
         window: str,
     ) -> dict:
         decision: Final = decide(Facts(team=team, route=route, spend_usd=spend_usd))
+        broken_pairing: Final = self._broken_pairing(decision, route)
+        pairing: Pairing | None = None
         permission: Permission | None = None
         if isinstance(decision.wants, WantsDegrade):
-            permission = self._permissions.check(caller, decision.wants.target)
-        outcome: Final = resolve(decision, permission)
+            if broken_pairing:
+                pairing = Pairing.BROKEN
+            else:
+                pairing = Pairing.USABLE
+                permission = self._permissions.check(caller, decision.wants.target)
+        outcome: Final = resolve(decision, pairing, permission)
         applied: Final = bridge.apply(data, outcome, self._guardrails)
         published = transitions.request_transitions(team, window, decision, outcome)
+        published.extend(
+            _pairing_incident(team, window, violation)
+            for violation in broken_pairing[:1]
+        )
         if (
             isinstance(outcome, Rejected)
             and outcome.rejection is Rejection.ENTITLEMENT_CHECK_UNAVAILABLE
@@ -192,7 +204,7 @@ class BrownoutHandler(CustomLogger):
             self._key_without_budget(caller, team),
             self._priced(model, team, groups),
             _ceiling_matches(caller, team),
-            self._gateway_rules(team, route, groups),
+            self._settings_rules(team),
         )
         for refusal in checks:
             if refusal is not None:
@@ -265,12 +277,15 @@ class BrownoutHandler(CustomLogger):
             incident_subject=subject,
         )
 
-    def _gateway_rules(
-        self, team: TeamPolicy, route: RoutePolicy, groups: GroupLookup
-    ) -> Refusal | None:
-        violations = settings_rules(self._gateway.settings()) + route_rules(
-            self._manifest, route, groups
-        )
+    def _broken_pairing(
+        self, decision: Decision, route: RoutePolicy
+    ) -> list[Violation]:
+        if not isinstance(decision.wants, WantsDegrade):
+            return []
+        return route_rules(self._manifest, route, _memoised(self._gateway.model_group))
+
+    def _settings_rules(self, team: TeamPolicy) -> Refusal | None:
+        violations = settings_rules(self._gateway.settings())
         if not violations:
             return None
         first = violations[0]
@@ -300,6 +315,21 @@ class BrownoutHandler(CustomLogger):
         )
 
 
+def _pairing_incident(
+    team: TeamPolicy, window: str, violation: Violation
+) -> transitions.Transition:
+    return transitions.incident(
+        RefusalReason.GATEWAY_RULE_VIOLATED.value,
+        f"{violation.rule.value}:{violation.subject}",
+        window,
+        {
+            "team_id": team.team_id,
+            "subject": violation.subject,
+            "rule": violation.rule.value,
+        },
+    )
+
+
 def _memoised(lookup: GroupLookup) -> GroupLookup:
     found: dict[str, ModelGroup | None] = {}
 
@@ -317,8 +347,7 @@ def _caller_routing(refused_keys: list[str]) -> Refusal:
         reason=RefusalReason.CALLER_ROUTING_NOT_PERMITTED,
         message=(
             "This route is governed by brownout, which selects its own degradation "
-            "target. Caller-supplied routing and reserved brownout metadata are refused "
-            "rather than ignored."
+            "target. Caller-supplied fallback lists are refused rather than ignored."
         ),
         detail={"refused": refused_keys},
         incident_subject=None,

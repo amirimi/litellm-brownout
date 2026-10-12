@@ -120,15 +120,21 @@ def test_safe_settings_pass():
     assert settings_rules(SAFE_SETTINGS) == []
 
 
-def test_native_alerting_and_a_missing_redis_are_file_violations():
+def test_native_budget_alerts_and_a_missing_redis_are_file_violations():
     gateway = GatewayFile(
-        groups={}, settings=SAFE_SETTINGS, native_alerting=True, redis_configured=False
+        groups={},
+        settings=SAFE_SETTINGS,
+        native_budget_alerts=True,
+        redis_configured=False,
     )
 
-    assert [violation.rule for violation in file_rules(manifest(), gateway)] == [
-        RuleId.NO_NATIVE_ALERTING,
+    violations = file_rules(manifest(), gateway)
+
+    assert [violation.rule for violation in violations] == [
+        RuleId.NO_NATIVE_BUDGET_ALERTS,
         RuleId.REDIS_CONFIGURED,
     ]
+    assert "Redis cache" in violations[1].message
 
 
 @pytest.mark.parametrize(

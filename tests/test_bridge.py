@@ -266,8 +266,6 @@ def test_caller_routing_keys_are_named():
         "content_policy_fallbacks",
         "context_window_fallbacks",
         "fallbacks",
-        "metadata.X-Brownout-Anything",
-        "metadata.degraded_from",
     ]
 
 

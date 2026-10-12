@@ -42,7 +42,6 @@ SPEND_LOGS_METADATA_KEY: Final = "spend_logs_metadata"
 FIELD_KEY: Final = "brownout"
 OUTCOME_REFUSED: Final = "refused"
 OUTCOME_DEGRADED: Final = "degraded"
-RESERVED_METADATA_PREFIX: Final = "x-brownout-"
 CALLER_ROUTING_KEYS: Final = (
     "fallbacks",
     "context_window_fallbacks",
@@ -427,18 +426,7 @@ def _degradation_reason(outcome: Outcome) -> str | None:
 
 
 def caller_routing_keys(data: dict) -> list[str]:
-    found: list[str] = [key for key in CALLER_ROUTING_KEYS if key in data]
-    for container in METADATA_CONTAINERS:
-        metadata = data.get(container)
-        if not isinstance(metadata, dict):
-            continue
-        found.extend(
-            f"{container}.{key}"
-            for key in metadata
-            if str(key).lower().startswith(RESERVED_METADATA_PREFIX)
-            or key == "degraded_from"
-        )
-    return sorted(found)
+    return sorted(key for key in CALLER_ROUTING_KEYS if key in data)
 
 
 def apply(data: dict, outcome: Outcome, guardrails: Guardrails) -> dict:
