@@ -14,7 +14,7 @@ uv sync
 uv run pytest -m "not e2e"
 ```
 
-The unit and seam suites hold 252 tests and need no Redis or gateway. One boundary seam skips on
+The unit and seam suites hold 274 tests and need no Redis or gateway. One boundary seam skips on
 each release, because the shrink and refuse-whole seams split by release. `decide` and `resolve` are
 pure functions tested with plain values. Every outside dependency of the pipeline sits behind a
 protocol in `src/brownout/ports.py`, so the gateway tests inject fakes, and the permission and
@@ -26,7 +26,7 @@ plugin depends on, such as the signature of a private helper, the shape of a res
 guardrails merging before the pre-call hook. A LiteLLM release that changes one of them fails with
 that behaviour's name.
 
-The end-to-end sequence holds 5 tests and runs on mock routes. It spends no provider money and
+The end-to-end sequence holds 8 tests and runs on mock routes. It spends no provider money and
 still exercises real reservations, a real Redis counter and the native ceiling. It reads the
 plugin's announcements from `docker compose logs litellm` and the request facts from LiteLLM's
 `/spend/logs`. Real-provider
