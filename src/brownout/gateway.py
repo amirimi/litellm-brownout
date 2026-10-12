@@ -129,7 +129,7 @@ class BrownoutHandler(CustomLogger):
         request_headers: dict[str, str] | None = None,
         litellm_call_info: dict[str, Any] | None = None,
     ) -> dict[str, str] | None:
-        return bridge.headers(data, litellm_call_info)
+        return bridge.headers(data, response, litellm_call_info)
 
     async def _govern(
         self,

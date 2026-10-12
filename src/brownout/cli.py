@@ -13,7 +13,6 @@ import yaml
 from .manifest import Manifest, ManifestError
 from .refusals import Violation
 from .rules import (
-    ROUTER_FALLBACK_KEYS,
     GatewayFile,
     GatewaySettings,
     ModelGroup,
@@ -51,7 +50,6 @@ def check(gateway_config: Path, manifest_path: Path) -> list[Violation]:
 
 def gateway_file(config: Mapping[str, Any]) -> GatewayFile:
     general: Final = config.get("general_settings") or {}
-    router_settings: Final = config.get("router_settings") or {}
     deployments_by_group: dict[str, list[Mapping[str, Any]]] = {}
     for deployment in config.get("model_list") or []:
         deployments_by_group.setdefault(str(deployment["model_name"]), []).append(
@@ -67,9 +65,6 @@ def gateway_file(config: Mapping[str, Any]) -> GatewayFile:
             is True,
             disable_budget_reservation=general.get("disable_budget_reservation")
             is True,
-            router_fallback_keys=tuple(
-                key for key in ROUTER_FALLBACK_KEYS if router_settings.get(key)
-            ),
         ),
         native_alerting=bool(general.get("alerting")),
         redis_configured=bool(general.get("coordination_redis")),

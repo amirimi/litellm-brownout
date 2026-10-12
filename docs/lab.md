@@ -8,14 +8,15 @@ change one thing at a time.
 The plugin needs no install step. `docker-compose.yml` mounts `src/brownout` at `/app/plugins`,
 which is on `PYTHONPATH`, and `config/config.yaml` names the handler in
 `callbacks: ["brownout.gateway.handler"]`, which LiteLLM imports at startup. The routes in
-`config/config.yaml` answer with `mock_response`. The `langfuse` and `datadog_metrics` callbacks it
-names run without valid credentials and never fail a request.
+`config/config.yaml` answer with `mock_response`, and the config names no logging callback, so the
+lab sends nothing off the machine.
 
 ## 1. Start the stack and create a fresh team
 
 Copy `.env.example` to `.env` once, then run these commands. Its passwords and master key are
-placeholders, and every port the stack publishes binds to `127.0.0.1`, so the lab is reachable only
-from the machine it runs on. Change both before exposing it anywhere else.
+placeholders. The stack publishes the gateway on port 4000 and Redis on port 16379, both bound to
+`127.0.0.1`, so the lab is reachable only from the machine it runs on and leaves the default Redis
+port free. Change the credentials and the bindings before exposing it anywhere else.
 
 ```bash
 docker compose up -d --wait
@@ -56,13 +57,14 @@ curl -s "localhost:4000/spend/logs?request_id=$ID" -H "Authorization: Bearer $LI
 
 ```bash
 docker compose logs -f --no-log-prefix --since 1m litellm | sed -un 's/.*brownout \({.*}\)$/\1/p' | jq -c '{event, scope, route, served_route, tier, degrade_at, rejection}'
-watch -n1 'uv run python -c "from tests.support import lab_spend_counter; print(lab_spend_counter(\"budget-lab\"))"'
+watch -n1 'docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning GET spend:team:budget-lab'
 watch -n1 'docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "brownout:*"'
 ```
 
 The first shows the transitions the plugin announces on the gateway log, the second the dollar
 counter LiteLLM keeps for the team, and the third the plugin's once-per-window claims in Redis. The
-third needs `.env` loaded in its shell.
+second and third need `.env` loaded in their shells. The counter prints nothing once LiteLLM lets the
+key expire.
 
 ## 4. Drain the envelope
 
@@ -70,8 +72,9 @@ third needs `.env` loaded in its shell.
 for i in $(seq 1 70); do ask; done
 ```
 
-On the last measured run, request 37 was the first downgrade, request 51 the first to carry tier 90,
-and request 57 took LiteLLM's native 429 with $0.966 settled against a $0.0408 estimate. Expect the
+On the last measured run, on LiteLLM 1.104.2, request 38 was the first downgrade, request 51 the
+first to carry tier 90, and request 57 took LiteLLM's native 429 with $0.967 settled against a
+$0.0408 estimate. Expect the
 numbers to move slightly between runs.
 
 ```
@@ -92,5 +95,5 @@ x-brownout-degradation-reason: degrade_tier_reached
 | A broken manifest | Set `budget_duration: "2d"` and restart | The container restarts in a loop, and `docker compose logs litellm` shows `ManifestError` naming `duration-tumbles` |
 | A route tier | Add `warn_tiers: [50]` under `budget-lab-strict`, restart, then send requests to `budget-lab-strict` past 50% | A `brownout_tier_crossed` announcement with `scope: route` and an `x-brownout-route-tier: 50` header |
 | An older LiteLLM | Run `LITELLM_TAG=v1.95.1 docker compose up -d --wait` and repeat the drain | The gateway logs the `supported-litellm` boundary warning at startup. Requests that no longer fit are served with shrunk holds until no headroom is left. On the last measured run on 1.95.1 the 429 came at request 61 instead of 57, with $1.008 settled |
-| A newer LiteLLM | Run `LITELLM_TAG=v1.104.2 docker compose up -d --wait` and repeat the drain | The same sequence on another release line. From 1.104 the refusal is a 422 unless `budget_exceeded_status_code: 429` is set under `litellm_settings` |
+| The 422 default | Remove `budget_exceeded_status_code: 429` from `config/config.yaml` and run `docker compose restart litellm` | LiteLLM 1.104 refuses the exhausted budget with a 422 instead of a 429 |
 | The file rules | Run `uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml`, then add `alerting: ["slack"]` under `general_settings` and run it again | The second run exits non-zero naming `no-native-alerting` |

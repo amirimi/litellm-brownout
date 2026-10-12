@@ -44,7 +44,7 @@ FIELD_KEYS: Final = frozenset(
 
 def lab_redis_url() -> str:
     host: Final = os.getenv("LAB_REDIS_HOST", "localhost")
-    port: Final = os.getenv("LAB_REDIS_PORT", "6379")
+    port: Final = os.getenv("LAB_REDIS_PORT", "16379")
     password: Final = os.getenv("REDIS_PASSWORD", "")
     if password:
         credentials = f":{password}@"
@@ -294,7 +294,7 @@ def disclosed(data: dict) -> dict[str, Any]:
 
 async def headers_for(handler: BrownoutHandler, applied: dict) -> dict[str, str]:
     result = await handler.async_post_call_response_headers_hook(
-        data=applied, user_api_key_dict=None, response=None
+        data=applied, user_api_key_dict=None, response=object()
     )
     assert result is not None
     return result

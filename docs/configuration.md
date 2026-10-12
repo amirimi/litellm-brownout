@@ -50,6 +50,7 @@ general_settings:
 
 litellm_settings:
   callbacks: ["brownout.gateway.handler"]
+  budget_exceeded_status_code: 429
 
 model_list:
   - model_name: route-chat
@@ -78,15 +79,21 @@ model_list:
 | `fail_closed_budget_enforcement: true` | Decides the envelope boundary for the whole gateway, read from `general_settings` alone ([`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)). On, a worst case that does not fit the remaining headroom is refused whole at authentication ([`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)), and so is a reservation that cannot be written or a spend figure that cannot be verified. LiteLLM 1.95.1 to 1.100 lack the first refusal and shrink the hold to the headroom instead. Rule `fail-closed-on` requires it |
 | `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's claims reuse the same Redis, so one crossing is one event across every replica. Rule `redis-configured` requires it in `brownout check` |
 | `callbacks` | The dotted path to the handler `src/brownout/gateway.py` builds at import |
+| `budget_exceeded_status_code: 429` | Keeps LiteLLM's budget refusal a 429 from 1.104, whose default is a 422 (`litellm/__init__.py:404` in 1.104.2). Releases before 1.104 ignore it and refuse with a 429 anyway. Run on the 1.104.2 lab image |
 | `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. A deployment without them is priced from LiteLLM's cost map. Rules `route-priced` and `model-priced` refuse a model with neither |
 | `model_info.data_class` | Read for a route that declares a fallback and for the fallback. Every deployment of the group declares the same class, from the manifest's `data_class_order`. Rules `data-class-declared` and `fallback-data-class` |
 
-Three keys must stay absent. `general_settings.alerting` would make LiteLLM's hardcoded 85% and 95%
+Two keys must stay absent. `general_settings.alerting` would make LiteLLM's hardcoded 85% and 95%
 alerter a second owner of tier events, which rule `no-native-alerting` refuses.
-`router_settings.fallbacks`, or its context-window and content-policy variants, would move a
-request to another model group after the disclosure header was decided, which rule
-`no-router-fallbacks` refuses. `general_settings.disable_budget_reservation` would remove the hold
-from every budget on the gateway, which rule `reservation-on` refuses.
+`general_settings.disable_budget_reservation` would remove the hold from every budget on the
+gateway, which rule `reservation-on` refuses.
+
+Router fallbacks may stay in the config, and they never apply to governed chat completions. On every
+governed request the plugin sets `fallbacks`, `context_window_fallbacks` and
+`content_policy_fallbacks` to empty lists. LiteLLM's router prefers a request's own list to its
+configured one, and it merges key and team `router_settings` only for keys the request does not
+already hold, so gateway, `default_fallbacks`, key, team and caller fallbacks all stay inert.
+Failover between deployments of one model group, by `order` and cooldown, still works.
 
 ## Create the team
 
@@ -168,7 +175,6 @@ the gateway settings.
 | `fallback-data-class` | A fallback is at least as restricted as its route | Check, request |
 | `fail-closed-on` | `fail_closed_budget_enforcement` is `true` | Check, request |
 | `reservation-on` | `disable_budget_reservation` is absent or `false` | Check, request |
-| `no-router-fallbacks` | No `fallbacks`, `context_window_fallbacks` or `content_policy_fallbacks` | Check, request |
 | `no-native-alerting` | `general_settings.alerting` is absent | Check |
 | `redis-configured` | `coordination_redis` is set | Check |
 | `no-caller-routing` | The caller sent no routing fields or reserved metadata | Request |

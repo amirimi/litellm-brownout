@@ -6,15 +6,29 @@
 
 A team has $500 for the week, and at $450 its routine Q&A moves to a smaller model while code review keeps its primary.
 
+It governs `/v1/chat/completions` and passes every other endpoint through untouched.
+
 </div>
+
+## Who this is for
+
+Brownout fits a LiteLLM gateway that budgets teams and can meet these requirements across the whole
+gateway, because the callback governs every chat completion it serves.
+
+- Every key that sends chat traffic belongs to a team the manifest lists.
+- No key carries a budget of its own.
+- LiteLLM's built-in budget alerting is off.
+- `fail_closed_budget_enforcement` is on and Redis is configured.
+- LiteLLM runs a release from 1.95.1 to 1.104, pinned by image tag.
 
 ## Install
 
 The plugin is a Python package, `brownout`, that you mount into the stock LiteLLM image. It is
 tested on LiteLLM 1.95.1 to 1.104. Clone the repository to get the package, the example config and a
 lab stack. The lab needs Docker Compose, Python 3.12+, [uv](https://docs.astral.sh/uv/), `curl` and
-`jq`. The first `docker compose up` pulls the LiteLLM image, about 1.2 GB, so the first start can
-take several minutes.
+`jq`. The first `docker compose up` pulls the LiteLLM image, about 1.2 GB, and the first `uv run`
+builds a local environment of about 680 MB and 117 packages, so the first start can take several
+minutes.
 
 ```bash
 git clone https://github.com/amk9978/litellm-brownout.git
@@ -33,6 +47,13 @@ primary route that downgrades at 75%.
 docker compose up -d --wait
 set -a; source .env; set +a
 KEY=$(uv run python lab/setup_lab.py | tail -1)
+[ -n "$KEY" ] || echo "lab/setup_lab.py printed no key. Fix the error above before the loop."
+```
+
+`lab/setup_lab.py` creates a fresh lab team and prints its key, which takes about 11 seconds. Once
+it has printed a key, send the requests.
+
+```bash
 for i in $(seq 1 60); do
   curl -s -D - -o /dev/null localhost:4000/v1/chat/completions \
     -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
@@ -41,8 +62,7 @@ for i in $(seq 1 60); do
 done
 ```
 
-`lab/setup_lab.py` creates a fresh lab team and prints its key, which takes about 11 seconds.
-Early requests are served by `budget-lab-primary`. Around request 37 the team passes 75% and
+Early requests are served by `budget-lab-primary`. Around request 38 the team passes 75% and
 responses switch to the fallback model.
 
 ```
@@ -70,8 +90,8 @@ route's `degrade_at` percentage, requests for that route are served by its fallb
 response headers tell the caller. When the next request's worst-case cost no longer fits the budget,
 LiteLLM 1.101 and newer refuse it with a 429. LiteLLM 1.95.1 to 1.100 instead keep admitting
 requests with their holds shrunk to the remaining headroom until none is left, so a window can close
-above the budget. From LiteLLM 1.104 the refusal is a 422 by default, and
-`budget_exceeded_status_code: 429` under `litellm_settings` restores the 429. The $500 team above
+above the budget. From LiteLLM 1.104 the refusal is a 422 by default, and the minimal gateway config
+below sets `budget_exceeded_status_code: 429` under `litellm_settings` to keep it a 429. The $500 team above
 warns at 75% and 90%, and its Q&A route degrades at 90%.
 
 | Team spend | Q&A route | Code review route | Signal |
@@ -112,10 +132,11 @@ rules in your CI, and the gateway runs the request rules on every governed reque
 | No user, organisation, end-user or tag budget blocks first | LiteLLM refuses before any tier fires | Documented, not checked |
 | No stacked team `budget_limits` | A daily limit inside a weekly one hits with no brownout first | Documented, not checked |
 | The team's model list includes each fallback | The primary serves and a `brownout_fallback_rejected` event fires | The permission check |
-| `fail_closed_budget_enforcement` is on, reservations are on, and no router fallbacks are set | 503 and a platform incident | `fail-closed-on`, `reservation-on`, `no-router-fallbacks` |
+| `fail_closed_budget_enforcement` is on and reservations are on | 503 and a platform incident | `fail-closed-on`, `reservation-on` |
+| A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
 | LiteLLM's built-in alerting is off and Redis is configured | `brownout check` fails | `no-native-alerting`, `redis-configured` |
 | Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | 503 and a platform incident, or `brownout check` fails | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
-| Only chat completions are governed | Embeddings, images and audio pass through untouched | Documented |
+| Only chat completions are governed | Embeddings, images, audio, `/v1/messages` and `/v1/responses` pass through untouched, at full price and without headers | Documented |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade | Documented, not checked |
 | LiteLLM is 1.95.1 or newer | The gateway refuses to start. It warns on 1.95.1 to 1.100, whose boundary can close a window above the budget, and past the tested 1.104 | `supported-litellm` |
@@ -157,12 +178,17 @@ general_settings:
 
 litellm_settings:
   callbacks: ["brownout.gateway.handler"]
+  budget_exceeded_status_code: 429
 ```
+
+`budget_exceeded_status_code` keeps LiteLLM's budget refusal a 429 from 1.104, whose default is a
+422. Releases before 1.104 ignore it and refuse with a 429 anyway.
 
 Every model group the manifest names needs input and output prices, either on its deployments or
 from LiteLLM's cost map. A route with a fallback and the fallback itself also need a
-`model_info.data_class` from the manifest's `data_class_order`. Leave `general_settings.alerting`,
-`router_settings.fallbacks` and `disable_budget_reservation` out of the gateway config. Each
+`model_info.data_class` from the manifest's `data_class_order`. Leave `general_settings.alerting`
+and `disable_budget_reservation` out of the gateway config. Router fallbacks may stay, and they
+never apply to governed chat completions. Each
 LiteLLM team needs the manifest's budget and duration and a model list that includes the fallback,
 and its keys carry no budget of their own. The [configuration reference](docs/configuration.md)
 explains every setting and gives the `curl` calls that create a team and key.
@@ -210,10 +236,12 @@ at any level stops the manifest from loading, so a typo such as `degrade_At` fai
 ## Notes
 
 - **Supported LiteLLM:** 1.95.1 and newer, tested up to 1.104. The plugin imports three private LiteLLM helpers, so `src/brownout/bridge.py` refuses to start below the floor and warns past the tested ceiling. LiteLLM 1.95.1 to 1.100 shrink an over-budget reservation to the remaining headroom instead of refusing it. A window can then close above the envelope, by at most one request's cost under serial traffic, and the handler logs a warning at startup. Run 1.101 or newer for the hard boundary. [CONTRIBUTING.md](CONTRIBUTING.md) explains how a new release joins the range.
+- **Pin the image tag:** a LiteLLM release that renames one of the three private helpers stops the gateway at startup. Pin the image tag and upgrade only to a release the weekly `litellm matrix` workflow has passed.
 - **Image dependencies:** the LiteLLM images for 1.95.1 to 1.99.4 and for 1.101.0 ship PyJWT 2.13.0, urllib3 2.7.0, multidict 6.7.1 and oauthlib 3.3.1, which carry known advisories. The 1.100.5, 1.101.6, 1.102.4, 1.103.4 and 1.104.2 images ship fixed releases. On 1.95 to 1.99, upgrade those packages in your own image or move to a fixed patch.
 - **Test the fallback first:** the plugin checks that a fallback is served, priced, cleared for the data class and callable by the key and team. Context size, tools, structured output and modalities stay unchecked, so try the fallback on your workload before real traffic. A dearer fallback is allowed, and it reaches LiteLLM's 429 sooner.
+- **Redis is on the request path:** under `fail_closed_budget_enforcement`, LiteLLM refuses every budgeted request on the gateway while it cannot write a reservation to Redis, before the plugin runs. Losing the plugin's claim keys repeats every announcement in the current window. Run Redis with failover, persistence and the `noeviction` eviction policy.
 - **Reporting trust:** the request facts are authoritative on every request the plugin handles. On a request LiteLLM refuses before the plugin runs, a caller can forge them, and LiteLLM attributes that request to the caller's own team. Build team dashboards on the facts and platform alerts on the `brownout` log line. The [enforcement reference](docs/enforcement.md#request-facts-and-announcements) covers both channels.
-- **Failures refuse the request:** a broken assumption from the table above returns a 503 naming its rule id and raises a platform incident. The [enforcement reference](docs/enforcement.md) lists every failure mode, header, event and metric.
+- **Failures refuse the request:** a broken assumption from the table above returns a 503 naming its rule id and raises a platform incident. The [enforcement reference](docs/enforcement.md) lists every failure mode, header and announcement.
 - **LiteLLM owns the hard limit:** on LiteLLM 1.101 and newer, `fail_closed_budget_enforcement` decides whether a window may close above its budget. The trade-off is set out under [the envelope boundary](docs/enforcement.md#the-envelope-boundary).
 - **Known limitations:** the [design notes](docs/design.md#known-limitations) list them.
 - **Field reports:** trying it on a real workload? [Open an issue](https://github.com/amk9978/litellm-brownout/issues) with the model pair, budget window, threshold, LiteLLM version and whether the fallback stayed useful. Leave keys and private prompts out.

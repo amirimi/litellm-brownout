@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Amir Karimi" }]
 requires-python = ">=3.12"
 dependencies = [
-    "litellm[proxy]==1.95.1",
+    "litellm[proxy]>=1.95.1,<1.105",
     "pyyaml>=6.0",
 ]
 
@@ -28,6 +28,9 @@ dev = [
     "ruff>=0.16",
     "mypy>=1.14",
 ]
+
+[tool.uv]
+constraint-dependencies = ["litellm==1.95.1"]
 
 [tool.uv.build-backend]
 module-name = "brownout"

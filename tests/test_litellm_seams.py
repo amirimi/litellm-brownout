@@ -142,6 +142,22 @@ def test_seam_before_1_101_an_over_budget_hold_is_shrunk():
     assert "_resize_applied_reservation(" in ast.unparse(policy)
 
 
+@pytest.mark.parametrize(
+    "key", ["fallbacks", "context_window_fallbacks", "content_policy_fallbacks"]
+)
+def test_seam_a_request_fallback_list_replaces_the_routers_own(key):
+    source = (LITELLM_ROOT / "router.py").read_text(encoding="utf-8")
+
+    assert f'kwargs.get("{key}", self.{key})' in source
+    assert f'kwargs.pop("{key}", self.{key})' in source
+
+
+def test_seam_key_and_team_router_settings_skip_keys_the_request_holds():
+    source = (LITELLM_ROOT / "proxy/route_llm_request.py").read_text(encoding="utf-8")
+
+    assert "if key in override_settings and key not in data:" in source
+
+
 def test_seam_the_authenticated_object_carries_the_fields_the_plugin_reads():
     fields = set(UserAPIKeyAuth.model_fields)
 

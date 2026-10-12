@@ -67,24 +67,29 @@ tokens.
 
 ## Failure modes
 
-Every failure direction is closed. A request the plugin cannot govern is refused, and the refusal
-names its rule.
+Every governed chat request fails closed. A chat request the plugin cannot govern is refused, and
+the refusal names its rule. Other endpoints pass through untouched, as the last row of the table
+says.
 
 | Condition | Response |
 |---|---|
-| Route reaches its declared threshold | Serve the declared fallback with tier and degradation headers, and raise one `brownout_route_degraded` event per route per window |
+| Route reaches its declared threshold | Serve the declared fallback with tier and degradation headers, and announce `brownout_route_degraded` once per route per window |
+| A router fallback is configured for the gateway, a key or a team | Ignored on every governed request, because the plugin empties `fallbacks`, `context_window_fallbacks` and `content_policy_fallbacks` before dispatch. Failover between deployments of one route still works |
+| The route the plugin chose returns a provider error | The caller receives the provider's error, and nothing retries the primary |
 | Team reaches 100% of its budget | LiteLLM's budget refusal at reservation time, a 429 up to 1.103 and a 422 by default from 1.104. Setting `litellm_settings.budget_exceeded_status_code: 429` restores the 429, as run on the 1.104.2 lab image. The plugin never sees that request |
-| Caller supplies `fallbacks`, `mock_testing_fallbacks`, any `x-brownout-*` key or `degraded_from` in `metadata` or `litellm_metadata` | 400 `caller_routing_not_permitted`, rule `no-caller-routing`, naming the refused keys |
+| Caller supplies `fallbacks`, `context_window_fallbacks`, `content_policy_fallbacks`, `mock_testing_fallbacks`, any `x-brownout-*` key or `degraded_from` in `metadata` or `litellm_metadata` | 400 `caller_routing_not_permitted`, rule `no-caller-routing`, naming the refused keys |
 | Key has no team, or its team is absent from the manifest | 503 `team_not_in_manifest`, rule `team-in-manifest`, plus a platform incident |
 | Key carries its own `max_budget` | 503 `key_has_own_budget`, rule `key-has-no-budget`, plus a platform incident |
 | Requested model has no price | 503 `unpriced_model`, rule `model-priced`, plus a platform incident |
 | Runtime `team.max_budget` drifts from `envelope_usd` | 503 `budget_ceiling_drift`, rule `ceiling-matches-envelope`, plus a platform incident |
 | A gateway setting or a fallback pairing breaks a rule | 503 `gateway_rule_violated` naming the rule and its subject, plus a platform incident |
 | Spend counter unreadable | 503 `spend_counter_unreadable`, rule `spend-readable`, plus a platform incident |
-| Caller's key or team may not call the fallback | Serve the primary, disclose `fallback_rejected`, and raise one `brownout_fallback_rejected` event per route and rejection per window |
-| Permission check itself cannot run | Serve the primary, raise a platform incident and a `brownout_fallback_rejected` event |
+| Caller's key or team may not call the fallback | Serve the primary, disclose `fallback_rejected`, and announce `brownout_fallback_rejected` once per route and rejection per window |
+| Permission check itself cannot run | Serve the primary, and announce a platform incident and `brownout_fallback_rejected` |
+| LiteLLM cannot write a reservation to Redis | LiteLLM refuses every budgeted request on the gateway, governed or not, before the plugin runs, because `fail_closed_budget_enforcement` is on. Run Redis with failover |
 | Redis unavailable for a claim | Deduplication falls back to per-replica and says so in the log |
-| Non-chat call type (embeddings, images) | Passed through untouched |
+| Redis loses the plugin's claim keys, through a flush or eviction | Every announcement in the current window repeats once. Run Redis with persistence and the `noeviction` policy |
+| Non-chat call type (embeddings, images, audio) or `/v1/messages` and `/v1/responses` | Passed through untouched, at full price and without headers |
 
 A caller-supplied `spend_logs_metadata.brownout` is removed without an error on every request the
 plugin sees, chat or not, before anything reads it. On a governed request the plugin then writes its
@@ -92,7 +97,10 @@ own.
 
 ## Response headers
 
-The post-call hook builds these headers from the request's facts on the success path.
+The post-call hook builds these headers from the request's facts. When the provider call fails, the
+hook omits `x-brownout-route-served` and `x-brownout-deployment-id`, because nothing served, and
+keeps the headers that describe the decision. LiteLLM's own budget refusal carries no header,
+because LiteLLM refuses it during authentication, before the plugin writes the request's facts.
 
 | Header | Present | Value |
 |---|---|---|

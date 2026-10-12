@@ -23,7 +23,6 @@ PAIR = RoutePolicy(route="primary", fallback="cheaper", degrade_at=90, warn_tier
 SAFE_SETTINGS = GatewaySettings(
     fail_closed_budget_enforcement=True,
     disable_budget_reservation=False,
-    router_fallback_keys=(),
 )
 
 
@@ -110,10 +109,6 @@ def test_a_route_without_a_fallback_needs_only_to_be_served_and_priced():
         (
             replace(SAFE_SETTINGS, disable_budget_reservation=True),
             RuleId.RESERVATION_ON,
-        ),
-        (
-            replace(SAFE_SETTINGS, router_fallback_keys=("fallbacks",)),
-            RuleId.NO_ROUTER_FALLBACKS,
         ),
     ],
 )
