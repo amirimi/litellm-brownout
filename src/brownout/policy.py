@@ -13,9 +13,15 @@ class Permission(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+class Pairing(StrEnum):
+    USABLE = "usable"
+    BROKEN = "broken"
+
+
 class Rejection(StrEnum):
     OUTSIDE_CALLER_ALLOWLIST = "outside_caller_allowlist"
     ENTITLEMENT_CHECK_UNAVAILABLE = "entitlement_check_unavailable"
+    FALLBACK_RULE_VIOLATED = "fallback_rule_violated"
 
 
 @dataclass(frozen=True)
@@ -90,34 +96,51 @@ def decide(facts: Facts) -> Decision:
     )
 
 
-def resolve(decision: Decision, permission: Permission | None) -> Outcome:
+def resolve(
+    decision: Decision, pairing: Pairing | None, permission: Permission | None
+) -> Outcome:
     match decision.wants:
         case Admit():
+            assert pairing is None, "an admitted route needs no pairing result"
             assert permission is None, "an admitted route needs no permission check"
             return Served(decision.route)
-        case WantsDegrade(target=target, degrade_at=degrade_at):
-            assert permission is not None, "a downgrade needs a permission answer"
-            match permission:
-                case Permission.PERMITTED:
-                    return Degraded(decision.route, target, degrade_at)
-                case Permission.DENIED:
-                    return Rejected(
-                        decision.route,
-                        target,
-                        degrade_at,
-                        Rejection.OUTSIDE_CALLER_ALLOWLIST,
+        case WantsDegrade() as wants:
+            assert pairing is not None, "a downgrade needs a pairing result"
+            match pairing:
+                case Pairing.BROKEN:
+                    assert permission is None, (
+                        "a broken pairing needs no permission check"
                     )
-                case Permission.UNAVAILABLE:
-                    return Rejected(
-                        decision.route,
-                        target,
-                        degrade_at,
-                        Rejection.ENTITLEMENT_CHECK_UNAVAILABLE,
+                    return _rejected(decision, wants, Rejection.FALLBACK_RULE_VIOLATED)
+                case Pairing.USABLE:
+                    assert permission is not None, (
+                        "a downgrade needs a permission answer"
                     )
+                    return _permitted(decision, wants, permission)
                 case _:
-                    assert_never(permission)
+                    assert_never(pairing)
         case _:
             assert_never(decision.wants)
+
+
+def _permitted(
+    decision: Decision, wants: WantsDegrade, permission: Permission
+) -> Outcome:
+    match permission:
+        case Permission.PERMITTED:
+            return Degraded(decision.route, wants.target, wants.degrade_at)
+        case Permission.DENIED:
+            return _rejected(decision, wants, Rejection.OUTSIDE_CALLER_ALLOWLIST)
+        case Permission.UNAVAILABLE:
+            return _rejected(decision, wants, Rejection.ENTITLEMENT_CHECK_UNAVAILABLE)
+        case _:
+            assert_never(permission)
+
+
+def _rejected(
+    decision: Decision, wants: WantsDegrade, rejection: Rejection
+) -> Rejected:
+    return Rejected(decision.route, wants.target, wants.degrade_at, rejection)
 
 
 def served_route(outcome: Outcome) -> str:

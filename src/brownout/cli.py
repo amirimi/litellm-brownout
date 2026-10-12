@@ -66,9 +66,18 @@ def gateway_file(config: Mapping[str, Any]) -> GatewayFile:
             disable_budget_reservation=general.get("disable_budget_reservation")
             is True,
         ),
-        native_alerting=bool(general.get("alerting")),
+        native_budget_alerts=_native_budget_alerts(general),
         redis_configured=bool(general.get("coordination_redis")),
     )
+
+
+def _native_budget_alerts(general: Mapping[str, Any]) -> bool:
+    if not general.get("alerting"):
+        return False
+    alert_types = general.get("alert_types")
+    if alert_types is None:
+        return True
+    return "budget_alerts" in alert_types
 
 
 def litellm_release() -> str:

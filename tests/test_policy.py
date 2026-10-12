@@ -7,6 +7,7 @@ from brownout.policy import (
     Admit,
     Degraded,
     Facts,
+    Pairing,
     Permission,
     Rejected,
     Rejection,
@@ -82,7 +83,7 @@ def test_route_tiers_are_declared_and_reported_separately(team):
 def test_an_admitted_route_is_served_as_requested(team, degrading_route):
     decision = decide(facts_at(team, degrading_route, 10.0))
 
-    assert resolve(decision, None) == Served("budget-lab-primary")
+    assert resolve(decision, None, None) == Served("budget-lab-primary")
 
 
 @pytest.mark.parametrize(
@@ -117,17 +118,51 @@ def test_a_wanted_downgrade_resolves_on_the_permission_answer(
 ):
     decision = decide(facts_at(team, degrading_route, 95.0))
 
-    assert resolve(decision, permission) == expected
+    assert resolve(decision, Pairing.USABLE, permission) == expected
+
+
+def test_a_broken_pairing_keeps_the_primary_without_asking_permission(
+    team, degrading_route
+):
+    decision = decide(facts_at(team, degrading_route, 95.0))
+
+    assert resolve(decision, Pairing.BROKEN, None) == Rejected(
+        "budget-lab-primary",
+        "budget-lab-degraded",
+        90,
+        Rejection.FALLBACK_RULE_VIOLATED,
+    )
 
 
 def test_an_admitted_route_takes_no_permission_answer(team, degrading_route):
     with pytest.raises(AssertionError, match="no permission"):
-        resolve(decide(facts_at(team, degrading_route, 10.0)), Permission.PERMITTED)
+        resolve(
+            decide(facts_at(team, degrading_route, 10.0)), None, Permission.PERMITTED
+        )
 
 
-def test_a_wanted_downgrade_needs_a_permission_answer(team, degrading_route):
+def test_an_admitted_route_takes_no_pairing_result(team, degrading_route):
+    with pytest.raises(AssertionError, match="no pairing"):
+        resolve(decide(facts_at(team, degrading_route, 10.0)), Pairing.USABLE, None)
+
+
+def test_a_wanted_downgrade_needs_a_pairing_result(team, degrading_route):
+    with pytest.raises(AssertionError, match="pairing result"):
+        resolve(decide(facts_at(team, degrading_route, 95.0)), None, None)
+
+
+def test_a_usable_pairing_needs_a_permission_answer(team, degrading_route):
     with pytest.raises(AssertionError, match="permission answer"):
-        resolve(decide(facts_at(team, degrading_route, 95.0)), None)
+        resolve(decide(facts_at(team, degrading_route, 95.0)), Pairing.USABLE, None)
+
+
+def test_a_broken_pairing_takes_no_permission_answer(team, degrading_route):
+    with pytest.raises(AssertionError, match="broken pairing"):
+        resolve(
+            decide(facts_at(team, degrading_route, 95.0)),
+            Pairing.BROKEN,
+            Permission.PERMITTED,
+        )
 
 
 def test_spend_cannot_be_negative(team, degrading_route):

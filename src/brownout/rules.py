@@ -26,7 +26,7 @@ class GatewaySettings:
 class GatewayFile:
     groups: Mapping[str, ModelGroup]
     settings: GatewaySettings
-    native_alerting: bool
+    native_budget_alerts: bool
     redis_configured: bool
 
 
@@ -97,12 +97,15 @@ def settings_rules(settings: GatewaySettings) -> list[Violation]:
 
 def file_rules(manifest: Manifest, gateway: GatewayFile) -> list[Violation]:
     violations = settings_rules(gateway.settings)
-    if gateway.native_alerting:
+    if gateway.native_budget_alerts:
         violations.append(
             Violation(
-                RuleId.NO_NATIVE_ALERTING,
-                "general_settings.alerting",
-                "makes LiteLLM's 85% and 95% alerter a second owner of tier events",
+                RuleId.NO_NATIVE_BUDGET_ALERTS,
+                "general_settings.alert_types",
+                "includes budget_alerts, or is absent while alerting is on, which makes "
+                "LiteLLM's 85% and 95% budget alerter a second owner of tier "
+                "announcements. List the alert types the gateway wants without "
+                "budget_alerts",
             )
         )
     if not gateway.redis_configured:
@@ -110,7 +113,8 @@ def file_rules(manifest: Manifest, gateway: GatewayFile) -> list[Violation]:
             Violation(
                 RuleId.REDIS_CONFIGURED,
                 "general_settings.coordination_redis",
-                "is unset, so tier claims deduplicate per replica only",
+                "is unset. The spend counter and the plugin's claims need it, and a Redis "
+                "cache does not provide it on every supported LiteLLM release",
             )
         )
     for team in manifest.teams:

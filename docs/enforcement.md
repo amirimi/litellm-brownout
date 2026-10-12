@@ -77,12 +77,13 @@ says.
 | A router fallback is configured for the gateway, a key or a team | Ignored on every governed request, because the plugin empties `fallbacks`, `context_window_fallbacks` and `content_policy_fallbacks` before dispatch. Failover between deployments of one route still works |
 | The route the plugin chose returns a provider error | The caller receives the provider's error, and nothing retries the primary |
 | Team reaches 100% of its budget | LiteLLM's budget refusal at reservation time, a 429 up to 1.103 and a 422 by default from 1.104. Setting `litellm_settings.budget_exceeded_status_code: 429` restores the 429, as run on the 1.104.2 lab image. The plugin never sees that request |
-| Caller supplies `fallbacks`, `context_window_fallbacks`, `content_policy_fallbacks`, `mock_testing_fallbacks`, any `x-brownout-*` key or `degraded_from` in `metadata` or `litellm_metadata` | 400 `caller_routing_not_permitted`, rule `no-caller-routing`, naming the refused keys |
+| Caller supplies `fallbacks`, `context_window_fallbacks`, `content_policy_fallbacks` or `mock_testing_fallbacks` | 400 `caller_routing_not_permitted`, rule `no-caller-routing`, naming the refused keys |
 | Key has no team, or its team is absent from the manifest | 503 `team_not_in_manifest`, rule `team-in-manifest`, plus a platform incident |
 | Key carries its own `max_budget` | 503 `key_has_own_budget`, rule `key-has-no-budget`, plus a platform incident |
 | Requested model has no price | 503 `unpriced_model`, rule `model-priced`, plus a platform incident |
 | Runtime `team.max_budget` drifts from `envelope_usd` | 503 `budget_ceiling_drift`, rule `ceiling-matches-envelope`, plus a platform incident |
-| A gateway setting or a fallback pairing breaks a rule | 503 `gateway_rule_violated` naming the rule and its subject, plus a platform incident |
+| A gateway setting breaks a rule | 503 `gateway_rule_violated` naming the rule and its subject, plus a platform incident |
+| A fallback pairing breaks a rule after deploy, because the fallback was deleted, unpriced or reclassified | Below `degrade_at`, nothing changes. When a downgrade is wanted, the primary serves, the response discloses `fallback_rejected`, `brownout_fallback_rejected` carries `fallback_rule_violated`, and a `gateway_rule_violated` incident names the rule once per window. The permission check does not run |
 | Spend counter unreadable | 503 `spend_counter_unreadable`, rule `spend-readable`, plus a platform incident |
 | Caller's key or team may not call the fallback | Serve the primary, disclose `fallback_rejected`, and announce `brownout_fallback_rejected` once per route and rejection per window |
 | Permission check itself cannot run | Serve the primary, and announce a platform incident and `brownout_fallback_rejected` |
@@ -198,7 +199,8 @@ A tier event's `scope` is `team` for a team tier and `route` for a route tier, a
 serves its fallback in a window, on its own claim, so a tier that another route crossed first
 cannot hide it.
 
-A rejection is `outside_caller_allowlist` or `entitlement_check_unavailable`. Incident reasons are
+A rejection is `outside_caller_allowlist`, `entitlement_check_unavailable` or
+`fallback_rule_violated`. Incident reasons are
 `team_not_in_manifest`, `key_has_own_budget`, `unpriced_model`, `budget_ceiling_drift`,
 `gateway_rule_violated`, `spend_counter_unreadable` and `entitlement_check_unavailable`, and each
 incident names its rule. Incidents are deduplicated once per window on their own claim key. An

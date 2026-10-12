@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from brownout.cli import gateway_file, main
@@ -52,11 +53,10 @@ def test_a_broken_manifest_fails_with_its_rule_id(tmp_path, capsys):
     assert capsys.readouterr().out.startswith("duration-tumbles\t")
 
 
-def test_a_gateway_config_violation_fails_with_its_rule_id(tmp_path, capsys):
+def check_with_general_settings(tmp_path, extra: dict[str, Any]) -> int:
     config = dict(lab_gateway_config())
-    config["general_settings"] = {**config["general_settings"], "alerting": ["slack"]}
-
-    exit_code = main(
+    config["general_settings"] = {**config["general_settings"], **extra}
+    return main(
         [
             "check",
             "--gateway-config",
@@ -66,8 +66,30 @@ def test_a_gateway_config_violation_fails_with_its_rule_id(tmp_path, capsys):
         ]
     )
 
+
+@pytest.mark.parametrize(
+    "alerting",
+    [
+        {"alerting": ["slack"]},
+        {"alerting": ["slack"], "alert_types": ["llm_exceptions", "budget_alerts"]},
+    ],
+)
+def test_litellm_budget_alerts_fail_with_their_rule_id(tmp_path, capsys, alerting):
+    exit_code = check_with_general_settings(tmp_path, alerting)
+
     assert exit_code == 1
-    assert "no-native-alerting\tgeneral_settings.alerting" in capsys.readouterr().out
+    assert "no-native-budget-alerts\tgeneral_settings.alert_types" in (
+        capsys.readouterr().out
+    )
+
+
+def test_litellm_alerting_without_budget_alerts_passes(tmp_path):
+    exit_code = check_with_general_settings(
+        tmp_path,
+        {"alerting": ["slack"], "alert_types": ["llm_exceptions", "outage_alerts"]},
+    )
+
+    assert exit_code == 0
 
 
 def test_a_deployment_without_explicit_prices_is_priced_from_the_cost_map():
