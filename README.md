@@ -24,7 +24,7 @@ cp .env.example .env
 
 ## Quickstart
 
-The lab runs LiteLLM with the plugin mounted, alongside Postgres, Redis and a small event sink.
+The lab runs LiteLLM with the plugin mounted, alongside Postgres and Redis.
 Those are real processes, and only the model responses and token prices are synthetic, so a run
 spends no provider money. The lab team has a $1.00 budget, warning tiers at 75% and 90%, and a
 primary route that downgrades at 75%.
@@ -54,7 +54,8 @@ x-brownout-degradation-reason: degrade_tier_reached
 ```
 
 Around request 57 LiteLLM answers with its own 429, because the next request no longer fits the
-budget. Run `curl -s localhost:8088/events | jq` to see the events the plugin raised on the way.
+budget. Run `docker compose logs litellm | grep brownout_` to see the transitions the plugin announced
+on the way.
 
 To repeat the run, rerun `lab/setup_lab.py` and the loop. The script deletes and recreates the
 `budget-lab` team and clears its counters and event claims, so point it only at the lab gateway.
@@ -87,10 +88,10 @@ decides on every request and keeps no downgrade state between requests.
 LiteLLM already reserves each request's worst-case cost, counts spend across replicas in Redis and
 enforces the hard limit. The plugin adds four things its configuration cannot express.
 
-- **Tier events at any threshold:** the team and each route declare their own warning tiers. Each raises one event per window, deduplicated across replicas. LiteLLM's built-in alerter is fixed at 85% and 95%.
+- **Tier events at any threshold:** the team and each route declare their own warning tiers. Each is announced once per window on the gateway log, deduplicated across replicas. LiteLLM's built-in alerter is fixed at 85% and 95%.
 - **Downgrade on the team total:** a route declares a fallback and the percentage at which to use it. LiteLLM's [budget fallbacks](https://docs.litellm.ai/docs/proxy/budget_fallbacks) switch only when a key exhausts a per-model budget.
 - **Checked fallbacks:** a fallback must be served, priced and cleared for its route's data class, and the caller's key and team must be allowed to call it.
-- **Caller disclosure:** `x-brownout-*` response headers name the route that served, the tiers reached and the reason for a downgrade.
+- **Caller disclosure:** `x-brownout-*` response headers name the route that served, the tiers reached and the reason for a downgrade. The same facts ride each request's LiteLLM log as `spend_logs_metadata.brownout`, so Langfuse, OpenTelemetry, Prometheus labels, the spend logs and any `CustomLogger` receive them with no plugin setting.
 
 `src/brownout/policy.py` makes every decision in two pure functions. `gateway.py` runs each request
 through the checks and the decision, and `bridge.py` holds everything that touches LiteLLM.
@@ -211,6 +212,7 @@ at any level stops the manifest from loading, so a typo such as `degrade_At` fai
 - **Supported LiteLLM:** 1.95.1 and newer, tested up to 1.104. The plugin imports three private LiteLLM helpers, so `src/brownout/bridge.py` refuses to start below the floor and warns past the tested ceiling. LiteLLM 1.95.1 to 1.100 shrink an over-budget reservation to the remaining headroom instead of refusing it. A window can then close above the envelope, by at most one request's cost under serial traffic, and the handler logs a warning at startup. Run 1.101 or newer for the hard boundary. [CONTRIBUTING.md](CONTRIBUTING.md) explains how a new release joins the range.
 - **Image dependencies:** the LiteLLM images for 1.95.1 to 1.99.4 and for 1.101.0 ship PyJWT 2.13.0, urllib3 2.7.0, multidict 6.7.1 and oauthlib 3.3.1, which carry known advisories. The 1.100.5, 1.101.6, 1.102.4, 1.103.4 and 1.104.2 images ship fixed releases. On 1.95 to 1.99, upgrade those packages in your own image or move to a fixed patch.
 - **Test the fallback first:** the plugin checks that a fallback is served, priced, cleared for the data class and callable by the key and team. Context size, tools, structured output and modalities stay unchecked, so try the fallback on your workload before real traffic. A dearer fallback is allowed, and it reaches LiteLLM's 429 sooner.
+- **Reporting trust:** the request facts are authoritative on every request the plugin handles. On a request LiteLLM refuses before the plugin runs, a caller can forge them, and LiteLLM attributes that request to the caller's own team. Build team dashboards on the facts and platform alerts on the `brownout` log line. The [enforcement reference](docs/enforcement.md#request-facts-and-announcements) covers both channels.
 - **Failures refuse the request:** a broken assumption from the table above returns a 503 naming its rule id and raises a platform incident. The [enforcement reference](docs/enforcement.md) lists every failure mode, header, event and metric.
 - **LiteLLM owns the hard limit:** on LiteLLM 1.101 and newer, `fail_closed_budget_enforcement` decides whether a window may close above its budget. The trade-off is set out under [the envelope boundary](docs/enforcement.md#the-envelope-boundary).
 - **Known limitations:** the [design notes](docs/design.md#known-limitations) list them.

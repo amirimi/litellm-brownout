@@ -9,7 +9,7 @@ from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy._types import UserAPIKeyAuth
 
 from . import bridge, settings, transitions
-from .events import EventEmitter
+from .events import EventLog
 from .manifest import Manifest, RoutePolicy, TeamPolicy
 from .policy import (
     Facts,
@@ -90,7 +90,7 @@ class BrownoutHandler(CustomLogger):
                 bridge.live_router, bridge.live_general_settings
             ),
             claims=bridge.RedisClaimStore(bridge.live_spend_counter_redis),
-            events=EventEmitter(settings.webhook_url(), settings.datadog_sink()),
+            events=EventLog(),
         )
         logger.info(
             "brownout loaded: manifest=%s teams=%s",
@@ -106,14 +106,15 @@ class BrownoutHandler(CustomLogger):
         data: dict,
         call_type: str,
     ) -> dict:
+        bridge.clear_field(data)
         if call_type not in bridge.CHAT_COMPLETION_CALL_TYPES:
             return data
-        bridge.clear_disclosure(data)
         caller: Final = bridge.parse_caller(user_api_key_dict)
         checked: Final = await self._check(caller, data)
         match checked:
             case Refused(refusal=refusal, window=window, ttl_seconds=ttl_seconds):
                 await self._report(refusal, window, ttl_seconds)
+                bridge.write_field(data, bridge.refused_field(data, refusal))
                 raise bridge.http_error(refusal)
             case Checked(team=team, route=route, spend_usd=spend_usd, window=window):
                 return await self._govern(caller, data, team, route, spend_usd, window)
@@ -144,7 +145,7 @@ class BrownoutHandler(CustomLogger):
         if isinstance(decision.wants, WantsDegrade):
             permission = self._permissions.check(caller, decision.wants.target)
         outcome: Final = resolve(decision, permission)
-        applied: Final = bridge.apply(data, team, decision, outcome, self._guardrails)
+        applied: Final = bridge.apply(data, outcome, self._guardrails)
         published = transitions.request_transitions(team, window, decision, outcome)
         if (
             isinstance(outcome, Rejected)
@@ -168,6 +169,7 @@ class BrownoutHandler(CustomLogger):
             transitions.window_ttl(team.budget_duration),
             published,
         )
+        bridge.write_field(applied, bridge.governed_field(team, decision, outcome))
         return applied
 
     async def _check(self, caller: Caller, data: dict) -> Checked | Refused:

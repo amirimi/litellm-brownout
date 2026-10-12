@@ -120,6 +120,30 @@ def resolve(decision: Decision, permission: Permission | None) -> Outcome:
             assert_never(decision.wants)
 
 
+def served_route(outcome: Outcome) -> str:
+    match outcome:
+        case Served(route=route):
+            return route
+        case Degraded(target=target):
+            return target
+        case Rejected(source=source):
+            return source
+        case _:
+            assert_never(outcome)
+
+
+def outcome_name(outcome: Outcome) -> str:
+    match outcome:
+        case Served():
+            return "served"
+        case Degraded():
+            return "degraded"
+        case Rejected():
+            return "rejected"
+        case _:
+            assert_never(outcome)
+
+
 def _wants(route: RoutePolicy, percent_used: float) -> Admit | WantsDegrade:
     if route.degrade_at is None or percent_used < route.degrade_at:
         return Admit()

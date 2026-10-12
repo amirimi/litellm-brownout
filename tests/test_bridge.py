@@ -64,11 +64,7 @@ def test_a_rewrite_keeps_both_routes_guardrails(team, guardrails):
     }
 
     applied = bridge.apply(
-        data,
-        team,
-        decision(WantsDegrade("budget-lab-degraded", 90)),
-        Degraded("budget-lab-primary", "budget-lab-degraded", 90),
-        guardrails,
+        data, Degraded("budget-lab-primary", "budget-lab-degraded", 90), guardrails
     )
 
     assert applied["model"] == "budget-lab-degraded"
@@ -98,9 +94,7 @@ def test_an_admitted_request_is_not_rewritten(team, guardrails):
         "metadata": {"guardrails": [PRIMARY_GUARDRAIL]},
     }
 
-    applied = bridge.apply(
-        data, team, decision(Admit()), Served("budget-lab-primary"), guardrails
-    )
+    applied = bridge.apply(data, Served("budget-lab-primary"), guardrails)
 
     assert applied["model"] == "budget-lab-primary"
     assert applied["metadata"]["guardrails"] == [PRIMARY_GUARDRAIL]
@@ -127,18 +121,21 @@ def test_a_caller_carries_its_key_budget_and_resolved_models(team):
     assert caller.own_hold_usd == 0.0
 
 
+def with_field(field: dict[str, Any]) -> dict[str, Any]:
+    return {"metadata": {"spend_logs_metadata": {"brownout": field}}}
+
+
 def test_headers_carry_only_what_the_decision_has_to_say():
-    data = {
-        "metadata": {
-            "_brownout": {
-                "served_route": "chat-cheap",
-                "degraded_from": "chat",
-                "budget_tier": 90,
-                "route_tier": None,
-                "reason": "degrade_tier_reached",
-            }
+    data = with_field(
+        {
+            "requested_route": "chat",
+            "outcome": "degraded",
+            "served_route": "chat-cheap",
+            "budget_tier": "90",
+            "degradation_reason": "degrade_tier_reached",
+            "utilisation_percent": 91.0,
         }
-    }
+    )
 
     assert bridge.headers(data, {"model_id": "dep-1"}) == {
         "x-brownout-route-served": "chat-cheap",
@@ -148,6 +145,71 @@ def test_headers_carry_only_what_the_decision_has_to_say():
         "x-brownout-degradation-reason": "degrade_tier_reached",
     }
     assert bridge.headers({"metadata": {}}, None) is None
+
+
+def test_a_refused_request_carries_no_disclosure_headers():
+    data = with_field(
+        {"requested_route": "chat", "outcome": "refused", "refusal": "unpriced_model"}
+    )
+
+    assert bridge.headers(data, None) is None
+
+
+def test_the_field_is_written_into_a_fresh_dict():
+    shared = {"cost_center": "k-1"}
+    data: dict[str, Any] = {"metadata": {"spend_logs_metadata": shared}}
+
+    bridge.write_field(data, {"outcome": "served"})
+
+    assert shared == {"cost_center": "k-1"}
+    assert data["metadata"]["spend_logs_metadata"] == {
+        "cost_center": "k-1",
+        "brownout": {"outcome": "served"},
+    }
+
+
+@pytest.mark.parametrize("existing", ["a-string", ["a-list"], None])
+def test_a_spend_logs_metadata_that_is_not_a_dict_is_replaced(existing):
+    data: dict[str, Any] = {"metadata": {"spend_logs_metadata": existing}}
+
+    bridge.write_field(data, {"outcome": "served"})
+
+    assert data["metadata"]["spend_logs_metadata"] == {
+        "brownout": {"outcome": "served"}
+    }
+
+
+def test_a_request_without_metadata_gains_the_field():
+    data: dict[str, Any] = {}
+
+    bridge.write_field(data, {"outcome": "served"})
+
+    assert data == {
+        "metadata": {"spend_logs_metadata": {"brownout": {"outcome": "served"}}}
+    }
+
+
+def test_a_forged_field_is_cleared_from_both_containers_without_mutation():
+    shared = {"brownout": {"outcome": "forged"}, "cost_center": "k-1"}
+    data: dict[str, Any] = {
+        "metadata": {"spend_logs_metadata": shared},
+        "litellm_metadata": {"spend_logs_metadata": {"brownout": {}}},
+    }
+
+    bridge.clear_field(data)
+
+    assert shared == {"brownout": {"outcome": "forged"}, "cost_center": "k-1"}
+    assert data["metadata"]["spend_logs_metadata"] == {"cost_center": "k-1"}
+    assert data["litellm_metadata"]["spend_logs_metadata"] == {}
+
+
+def test_clearing_leaves_a_request_without_the_field_untouched():
+    spend_logs_metadata = {"cost_center": "k-1"}
+    data: dict[str, Any] = {"metadata": {"spend_logs_metadata": spend_logs_metadata}}
+
+    bridge.clear_field(data)
+
+    assert data["metadata"]["spend_logs_metadata"] is spend_logs_metadata
 
 
 def test_caller_routing_keys_are_named():

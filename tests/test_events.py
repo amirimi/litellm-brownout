@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Final
 
-import pytest
-
 from brownout import bridge
-from brownout.events import Event, EventEmitter, IncidentEvent, TierEvent, TierScope
+from brownout.events import EventLog, IncidentEvent, TierEvent, TierScope
 
 TTL_SECONDS: Final = 1209600
 
@@ -86,52 +83,11 @@ async def test_a_redis_lookup_that_raises_counts_as_missing():
     assert await bridge.RedisClaimStore(broken).claim("tier:a", TTL_SECONDS) is True
 
 
-async def test_webhook_and_metric_delivery_start_concurrently(monkeypatch):
-    webhook_started = asyncio.Event()
-    metric_started = asyncio.Event()
+def test_team_events_log_at_warning_and_incidents_at_error(caplog):
+    log = EventLog()
 
-    class CoordinatedSink:
-        async def submit(self, event: Event) -> None:
-            metric_started.set()
-            await asyncio.wait_for(webhook_started.wait(), timeout=0.2)
-
-    emitter = EventEmitter("https://events.invalid", CoordinatedSink())
-
-    async def coordinated_post(payload: dict[str, Any]) -> None:
-        webhook_started.set()
-        await asyncio.wait_for(metric_started.wait(), timeout=0.2)
-
-    monkeypatch.setattr(emitter, "_post", coordinated_post)
-
-    await emitter.emit(tier_event())
-
-    assert webhook_started.is_set() and metric_started.is_set()
-
-
-async def test_a_failed_remote_sink_does_not_fail_the_request(caplog):
-    class FailingSink:
-        async def submit(self, event: Event) -> None:
-            raise RuntimeError("sink unavailable")
-
-    await EventEmitter(None, FailingSink()).emit(tier_event())
-
-    assert "Brownout event remote sink failed" in caplog.text
-
-
-async def test_cancellation_is_not_swallowed_as_a_sink_failure():
-    class CancelledSink:
-        async def submit(self, event: Event) -> None:
-            raise asyncio.CancelledError
-
-    with pytest.raises(asyncio.CancelledError):
-        await EventEmitter(None, CancelledSink()).emit(tier_event())
-
-
-async def test_team_events_log_at_warning_and_incidents_at_error(caplog):
-    emitter = EventEmitter(None, None)
-
-    await emitter.emit(tier_event())
-    await emitter.emit(IncidentEvent(reason="unpriced_model", window="w", detail={}))
+    log.emit(tier_event())
+    log.emit(IncidentEvent(reason="unpriced_model", window="w", detail={}))
 
     assert [record.levelname for record in caplog.records] == ["WARNING", "ERROR"]
     assert all(record.name == "brownout" for record in caplog.records)

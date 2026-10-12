@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import contextlib
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -16,6 +16,7 @@ from brownout.policy import Permission
 from brownout.rules import ModelGroup
 
 from .support import (
+    FIELD_KEYS,
     FailingGuardrails,
     FakeGateway,
     FakeStore,
@@ -24,6 +25,7 @@ from .support import (
     RecordingSink,
     SequenceSchedule,
     build_handler,
+    disclosed,
     headers_for,
     make_auth,
     request,
@@ -112,10 +114,10 @@ async def test_a_request_is_judged_without_its_own_reservation(team):
         handler, make_auth(team, reserved_cost=50.0), "budget-lab-primary"
     )
 
-    disclosed = applied["metadata"]["_brownout"]
+    field = disclosed(applied)
     assert [event.spend_usd for event in sink.tiers] == [900.0, 900.0]
-    assert disclosed["budget_tier"] == 90
-    assert disclosed["served_route"] == "budget-lab-degraded"
+    assert field["budget_tier"] == "90"
+    assert field["served_route"] == "budget-lab-degraded"
 
 
 async def test_a_request_does_not_degrade_on_the_size_of_its_own_hold(team):
@@ -125,10 +127,10 @@ async def test_a_request_does_not_degrade_on_the_size_of_its_own_hold(team):
         handler, make_auth(team, reserved_cost=50.0), "budget-lab-primary"
     )
 
-    disclosed = applied["metadata"]["_brownout"]
-    assert disclosed["served_route"] == "budget-lab-primary"
-    assert disclosed["degraded_from"] is None
-    assert disclosed["budget_tier"] == 75
+    field = disclosed(applied)
+    assert field["served_route"] == "budget-lab-primary"
+    assert field["outcome"] == "served"
+    assert field["budget_tier"] == "75"
     assert applied["model"] == "budget-lab-primary"
 
 
@@ -140,7 +142,7 @@ async def test_holds_from_other_in_flight_requests_still_count(team):
         handler, make_auth(team, reserved_cost=50.0), "budget-lab-primary"
     )
 
-    assert applied["metadata"]["_brownout"]["degraded_from"] == "budget-lab-primary"
+    assert disclosed(applied)["outcome"] == "degraded"
     assert [event.spend_usd for event in sink.tiers] == [930.0, 930.0]
 
 
@@ -169,7 +171,7 @@ async def test_a_request_with_no_reservation_is_judged_on_the_counter_as_read(te
 
     applied = await request(handler, make_auth(team), "budget-lab-primary")
 
-    assert applied["metadata"]["_brownout"]["served_route"] == "budget-lab-degraded"
+    assert disclosed(applied)["served_route"] == "budget-lab-degraded"
 
 
 async def test_a_hold_larger_than_the_counter_floors_at_zero(team):
@@ -180,7 +182,7 @@ async def test_a_hold_larger_than_the_counter_floors_at_zero(team):
         handler, make_auth(team, reserved_cost=50.0), "budget-lab-primary"
     )
 
-    assert applied["metadata"]["_brownout"]["budget_tier"] is None
+    assert "budget_tier" not in disclosed(applied)
     assert sink.tiers == []
 
 
@@ -210,18 +212,143 @@ async def test_caller_supplied_routing_is_refused_rather_than_ignored(
     assert sink.incidents == []
 
 
-async def test_a_forged_disclosure_is_overwritten_rather_than_refused(team):
+async def test_a_forged_field_is_overwritten_rather_than_refused(team):
     handler = build_handler(team, RecordingSink(), spend=10.0)
     forged = {
-        "metadata": {"_brownout": {"served_route": "forged", "degraded_from": "forged"}}
+        "metadata": {
+            "spend_logs_metadata": {
+                "brownout": {"served_route": "forged", "outcome": "degraded"},
+                "cost_center": "c-1",
+            }
+        }
     }
 
     applied = await request(handler, make_auth(team), "budget-lab-primary", forged)
     headers = await headers_for(handler, applied)
 
-    assert applied["metadata"]["_brownout"]["degraded_from"] is None
+    assert disclosed(applied)["outcome"] == "served"
+    assert applied["metadata"]["spend_logs_metadata"]["cost_center"] == "c-1"
     assert "x-brownout-degraded-from" not in headers
     assert headers["x-brownout-route-served"] == "budget-lab-primary"
+
+
+async def test_a_forged_field_on_a_non_chat_call_is_removed(team):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+    forged = {
+        "model": "embedding-model",
+        "input": "hello",
+        "metadata": {"spend_logs_metadata": {"brownout": {"served_route": "forged"}}},
+    }
+
+    data = await handler.async_pre_call_hook(
+        user_api_key_dict=make_auth(team),
+        cache=None,
+        data=forged,
+        call_type="aembedding",
+    )
+
+    assert data["metadata"]["spend_logs_metadata"] == {}
+    assert bridge.headers(data, None) is None
+
+
+async def test_a_governed_request_discloses_only_facts_about_itself(team):
+    handler = build_handler(team, RecordingSink(), spend=930.0)
+
+    applied = await request(handler, make_auth(team), "budget-lab-primary")
+
+    assert disclosed(applied) == {
+        "requested_route": "budget-lab-primary",
+        "outcome": "degraded",
+        "served_route": "budget-lab-degraded",
+        "budget_tier": "90",
+        "degradation_reason": "degrade_tier_reached",
+        "utilisation_percent": 93.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("spend", "auth_change", "model"),
+    [
+        (10.0, {}, "budget-lab-primary"),
+        (930.0, {}, "budget-lab-primary"),
+        (930.0, {"team_models": ["budget-lab-primary"]}, "budget-lab-primary"),
+        (100.0, {}, "never-priced"),
+        (10.0, {"team_max_budget": 1.0}, "budget-lab-primary"),
+    ],
+)
+async def test_the_field_never_names_anything_beyond_its_request(
+    team, spend, auth_change, model
+):
+    handler = build_handler(team, RecordingSink(), spend=spend)
+    auth = make_auth(team)
+    for name, value in auth_change.items():
+        setattr(auth, name, value)
+    data: dict[str, Any] = {"model": model, "messages": []}
+
+    with contextlib.suppress(HTTPException):
+        await handler.async_pre_call_hook(
+            user_api_key_dict=auth, cache=None, data=data, call_type="acompletion"
+        )
+
+    assert set(disclosed(data)) <= FIELD_KEYS
+
+
+async def test_the_keys_own_spend_logs_metadata_is_never_mutated(team):
+    handler = build_handler(team, RecordingSink(), spend=930.0)
+    shared = {"cost_center": "k-1"}
+
+    applied = await request(
+        handler,
+        make_auth(team),
+        "budget-lab-primary",
+        {"metadata": {"spend_logs_metadata": shared}},
+    )
+
+    assert shared == {"cost_center": "k-1"}
+    assert applied["metadata"]["spend_logs_metadata"]["cost_center"] == "k-1"
+
+
+async def test_a_refusal_discloses_its_reason_before_raising(team):
+    handler = build_handler(team, RecordingSink(), spend=100.0)
+    data: dict[str, Any] = {"model": "never-priced", "messages": []}
+
+    with pytest.raises(HTTPException):
+        await handler.async_pre_call_hook(
+            user_api_key_dict=make_auth(team),
+            cache=None,
+            data=data,
+            call_type="acompletion",
+        )
+
+    assert disclosed(data) == {
+        "requested_route": "never-priced",
+        "outcome": "refused",
+        "refusal": "unpriced_model",
+    }
+    assert bridge.headers(data, None) is None
+
+
+async def test_a_caller_routing_refusal_discloses_no_incident(team):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+    data: dict[str, Any] = {
+        "model": "budget-lab-primary",
+        "messages": [],
+        "fallbacks": ["budget-lab-degraded"],
+    }
+
+    with pytest.raises(HTTPException):
+        await handler.async_pre_call_hook(
+            user_api_key_dict=make_auth(team),
+            cache=None,
+            data=data,
+            call_type="acompletion",
+        )
+
+    assert disclosed(data) == {
+        "requested_route": "budget-lab-primary",
+        "outcome": "refused",
+        "refusal": "caller_routing_not_permitted",
+    }
 
 
 async def test_a_non_chat_call_is_passed_through_untouched(team):
@@ -679,34 +806,3 @@ async def test_a_degrade_threshold_raises_no_team_tier_of_its_own(team):
 
     assert [event.tier for event in sink.tiers] == [75]
     assert [event.degrade_at for event in sink.route_degradations] == [85]
-
-
-async def test_every_event_from_one_request_is_delivered_together(team):
-    class CountingSink(RecordingSink):
-        def __init__(self) -> None:
-            super().__init__()
-            self.in_flight = 0
-            self.peak = 0
-
-        async def emit(self, event) -> None:
-            self.in_flight += 1
-            self.peak = max(self.peak, self.in_flight)
-            await asyncio.sleep(0)
-            self.in_flight -= 1
-            await super().emit(event)
-
-    degrading = CountingSink()
-    await request(
-        build_handler(team, degrading, spend=950.0),
-        make_auth(team),
-        "budget-lab-primary",
-    )
-    rejecting = CountingSink()
-    await request(
-        build_handler(team, rejecting, spend=950.0),
-        without_fallback_access(team),
-        "budget-lab-primary",
-    )
-
-    assert degrading.peak == 3
-    assert rejecting.peak == 3

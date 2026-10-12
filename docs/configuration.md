@@ -21,7 +21,7 @@ services:
     command: ["--config", "/app/config/config.yaml", "--port", "4000"]
 ```
 
-The plugin imports `httpx`, `pyyaml`, `fastapi` and `litellm`, all present in the image. Three of
+The plugin imports `pyyaml`, `fastapi` and `litellm`, all present in the image. Three of
 its LiteLLM imports are private helpers (`_can_object_call_model`,
 `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), and all of
 them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.95.1. It
@@ -32,10 +32,10 @@ mount. Installing the built wheel into a custom image is untested.
 | Variable | Default | Purpose |
 |---|---|---|
 | `BROWNOUT_MANIFEST` | `config/manifest.yaml` | Team budgets, tiers and route policies |
-| `BROWNOUT_WEBHOOK_URL` | unset | Every event is also POSTed here as JSON |
-| `DD_API_KEY` | unset | Enables the Datadog metric sink |
-| `DD_SITE` | `datadoghq.com` | Datadog site for the series API |
-| `DD_ENV` | `unknown` | Value of the `env` tag on every series |
+
+The plugin has no delivery settings. Request facts reach whatever logging integrations the gateway
+already runs, and announcements go to the gateway log, as
+[the enforcement reference](enforcement.md#request-facts-and-announcements) describes.
 
 ## Gateway config
 

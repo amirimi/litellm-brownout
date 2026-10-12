@@ -12,6 +12,7 @@ from typing import Final
 import litellm
 import pytest
 from litellm.integrations.custom_logger import CustomLogger
+from litellm.litellm_core_utils import litellm_logging
 from litellm.proxy._types import UserAPIKeyAuth
 from litellm.proxy.auth import auth_checks
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
@@ -47,6 +48,10 @@ def _function_in_source(
 def _parameter_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     arguments = function.args
     return {argument.arg for argument in arguments.args + arguments.kwonlyargs}
+
+
+def test_seam_spend_logs_metadata_reaches_every_logging_integration():
+    assert "spend_logs_metadata" in litellm_logging._STANDARD_LOGGING_METADATA_KEYS
 
 
 def test_seam_the_pre_call_and_header_hooks_keep_their_parameters():

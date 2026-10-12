@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from brownout import bridge
 
-from .support import RecordingSink, build_handler, make_auth, request
+from .support import RecordingSink, build_handler, disclosed, make_auth, request
 
 
 def broken_router() -> None:
@@ -25,7 +25,7 @@ async def test_a_target_outside_the_team_allowlist_is_not_served(team):
     applied, _ = await degrade_with(team, ["budget-lab-primary", "budget-lab-strict"])
 
     assert applied["model"] == "budget-lab-primary"
-    assert applied["metadata"]["_brownout"]["reason"] == "fallback_rejected"
+    assert disclosed(applied)["degradation_reason"] == "fallback_rejected"
 
 
 async def test_a_target_outside_the_key_allowlist_is_not_served(team):
@@ -36,7 +36,7 @@ async def test_a_target_outside_the_key_allowlist_is_not_served(team):
     )
 
     assert applied["model"] == "budget-lab-primary"
-    assert applied["metadata"]["_brownout"]["reason"] == "fallback_rejected"
+    assert disclosed(applied)["degradation_reason"] == "fallback_rejected"
 
 
 async def test_a_key_inheriting_its_team_allowlist_may_be_degraded(team):
@@ -53,7 +53,7 @@ async def test_an_allowlisted_target_is_served(team):
     applied, _ = await degrade_with(team, ["budget-lab-primary", "budget-lab-degraded"])
 
     assert applied["model"] == "budget-lab-degraded"
-    assert applied["metadata"]["_brownout"]["degraded_from"] == "budget-lab-primary"
+    assert disclosed(applied)["outcome"] == "degraded"
 
 
 async def test_an_empty_allowlist_permits_the_target(team):

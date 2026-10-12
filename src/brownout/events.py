@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Final, Protocol, assert_never
-
-import httpx
+from typing import Any, Final, assert_never
 
 from .policy import Rejection
 
 logger: Final = logging.getLogger("brownout")
-
-WEBHOOK_TIMEOUT_SECONDS: Final = 1.0
 
 
 class TierScope(StrEnum):
@@ -130,40 +125,9 @@ class IncidentEvent:
 Event = TierEvent | RouteDegradedEvent | FallbackRejectedEvent | IncidentEvent
 
 
-class MetricSink(Protocol):
-    async def submit(self, event: Event) -> None: ...
-
-
-class EventEmitter:
-    def __init__(self, webhook_url: str | None, metric_sink: MetricSink | None) -> None:
-        self._webhook_url: Final = webhook_url
-        self._metric_sink: Final = metric_sink
-
-    async def emit(self, event: Event) -> None:
-        payload: Final = event.as_payload()
-        _log(event, json.dumps(payload, sort_keys=True))
-        deliveries: list[Awaitable[None]] = [self._post(payload)]
-        if self._metric_sink is not None:
-            deliveries.append(self._metric_sink.submit(event))
-        results: Final = await asyncio.gather(*deliveries, return_exceptions=True)
-        for result in results:
-            if isinstance(result, asyncio.CancelledError):
-                raise result
-            if isinstance(result, Exception):
-                logger.error(
-                    "Brownout event remote sink failed",
-                    exc_info=(type(result), result, result.__traceback__),
-                )
-
-    async def _post(self, payload: dict[str, Any]) -> None:
-        if not self._webhook_url:
-            return
-        try:
-            async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT_SECONDS) as client:
-                response = await client.post(self._webhook_url, json=payload)
-                response.raise_for_status()
-        except Exception:
-            logger.exception("Brownout event delivery to %s failed", self._webhook_url)
+class EventLog:
+    def emit(self, event: Event) -> None:
+        _log(event, json.dumps(event.as_payload(), sort_keys=True))
 
 
 def _log(event: Event, line: str) -> None:

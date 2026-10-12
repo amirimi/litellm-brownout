@@ -28,6 +28,18 @@ from brownout.rules import GatewaySettings, ModelGroup
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 CONFIG_DIR: Final = REPO_ROOT / "config"
 DATA_CLASS_ORDER: Final = ("internal", "customer_pii")
+FIELD_KEYS: Final = frozenset(
+    {
+        "requested_route",
+        "outcome",
+        "served_route",
+        "budget_tier",
+        "route_tier",
+        "degradation_reason",
+        "utilisation_percent",
+        "refusal",
+    }
+)
 
 
 def lab_redis_url() -> str:
@@ -98,7 +110,7 @@ class RecordingSink:
         self.fallback_rejections: list[FallbackRejectedEvent] = []
         self.incidents: list[IncidentEvent] = []
 
-    async def emit(self, event: Event) -> None:
+    def emit(self, event: Event) -> None:
         self.events.append(event)
         match event:
             case TierEvent():
@@ -274,6 +286,10 @@ async def request(
     return await handler.async_pre_call_hook(
         user_api_key_dict=auth, cache=None, data=data, call_type="acompletion"
     )
+
+
+def disclosed(data: dict) -> dict[str, Any]:
+    return data["metadata"]["spend_logs_metadata"]["brownout"]
 
 
 async def headers_for(handler: BrownoutHandler, applied: dict) -> dict[str, str]:

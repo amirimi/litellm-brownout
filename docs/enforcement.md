@@ -5,9 +5,10 @@ reserves the request's worst-case cost on the team's Redis counter and refuses t
 that worst case does not fit. LiteLLM 1.95.1 to 1.100 shrink the hold to fit instead, as
 [the envelope boundary](#the-envelope-boundary) sets out. The plugin's pre-call hook then runs the request rules,
 reads the counter, decides, checks the caller's permission only if it wants a downgrade, rewrites
-the request if the downgrade is allowed, and publishes its events. The provider answers, the
-plugin's post-call hook sets the disclosure headers, and LiteLLM reconciles the hold to the actual
-cost.
+the request if the downgrade is allowed, announces any claimed transition on the gateway log, and
+writes the request's facts into its LiteLLM metadata. The provider answers, the plugin's post-call
+hook sets the disclosure headers from those facts, LiteLLM reconciles the hold to the actual cost,
+and every LiteLLM logging integration receives the facts with the request's log.
 
 ## The spend figure a tier compares
 
@@ -85,15 +86,13 @@ names its rule.
 | Redis unavailable for a claim | Deduplication falls back to per-replica and says so in the log |
 | Non-chat call type (embeddings, images) | Passed through untouched |
 
-An inbound `_brownout` key in request metadata is dropped without an error. The plugin rewrites
-that key authoritatively on every request, and nothing reads a forged value.
-
-A team reaching its own tier is an event with owner `team`. Enforcement becoming unavailable is the
-page-worthy condition, and those events carry owner `platform`.
+A caller-supplied `spend_logs_metadata.brownout` is removed without an error on every request the
+plugin sees, chat or not, before anything reads it. On a governed request the plugin then writes its
+own.
 
 ## Response headers
 
-The post-call hook sets these headers on the success path.
+The post-call hook builds these headers from the request's facts on the success path.
 
 | Header | Present | Value |
 |---|---|---|
@@ -104,15 +103,63 @@ The post-call hook sets these headers on the success path.
 | `x-brownout-degraded-from` | when degraded | The route the caller asked for |
 | `x-brownout-degradation-reason` | when a downgrade was wanted | `degrade_tier_reached` or `fallback_rejected` |
 
-## Events and metrics
+## Request facts and announcements
 
-Every event is a structured log line on the `brownout` logger, with team-owned events at warning
-and incidents at error. With `BROWNOUT_WEBHOOK_URL` set, the same payload is POSTed with a
-one-second timeout. With `DD_API_KEY` set, series go to the Datadog v2 API directly. Remote
-delivery is concurrent and best-effort. A failed sink cannot fail the request, and a failed
-delivery is dropped without a retry. Events are published after the request is rewritten and
-before it is dispatched, so an event describes the routing decision before any provider has
-answered. Every event a request produces goes out in one concurrent round.
+The plugin reports through two channels and owns no delivery code of its own. Each governed request
+carries facts about itself into LiteLLM's logging, so every integration the gateway already runs
+receives them. Each transition the plugin claims for a team's window is announced once on the
+gateway log.
+
+| Kind | Channel | Written by | Read by |
+|---|---|---|---|
+| A fact about one request | `metadata.spend_logs_metadata.brownout` on the request | The plugin on every request it handles | Every LiteLLM logging integration, the spend logs and the response headers |
+| An announcement about a team's window | The `brownout` logger on gateway stdout | The plugin only | Whoever reads the gateway's logs, which is where platform alerts belong |
+
+### Request facts
+
+LiteLLM copies `spend_logs_metadata` into the payload every logging callback receives, and into its
+spend logs. The plugin writes one `brownout` entry there and keeps any other keys the caller, the
+key or the team put beside it.
+
+| Key | Value | Present |
+|---|---|---|
+| `requested_route` | The model group the caller asked for | Always |
+| `outcome` | `served`, `degraded`, `rejected` or `refused` | Always |
+| `served_route` | The group the decision routes to | Unless `refused` |
+| `budget_tier`, `route_tier` | The highest tier reached, as a string such as `"75"` | When a tier is reached |
+| `degradation_reason` | `degrade_tier_reached` or `fallback_rejected` | When a downgrade was wanted |
+| `utilisation_percent` | The team's spend as a percentage of its envelope, a number | When the spend was read |
+| `refusal` | The refusal reason, such as `key_has_own_budget` | When `refused` |
+
+The entry describes its own request and nothing else. It carries no team, no window and no other
+route's state, because every integration already attributes the request to a team through LiteLLM's
+`user_api_key_team_id`.
+
+The entry is authoritative on every request the plugin handles. LiteLLM gives a plugin no logging
+field that callers cannot write, so on a request LiteLLM refuses before the plugin runs, such as a
+budget refusal or a rate limit, the entry is whatever the caller sent. LiteLLM attributes that
+request to the caller's own key and team, so a forged entry misleads only the team that owns the
+forging key. Build team dashboards and team alerts on the entry, and never platform alerts.
+
+A team derives window-level alerts in its own tool from these facts.
+
+- **A `CustomLogger`:** read `kwargs["standard_logging_object"]["metadata"]["spend_logs_metadata"]["brownout"]` in `async_log_success_event` and `async_log_failure_event`.
+- **Prometheus:** set `custom_prometheus_metadata_labels: ["metadata.brownout.outcome", "metadata.brownout.served_route"]` under `litellm_settings` with LiteLLM's `prometheus` callback. LiteLLM flattens `spend_logs_metadata` into the label lookup, so the path omits it. Labels keep string values only, which is why tiers are strings. Verified on 1.95.1 and 1.101.0. Caller metadata of the same name merges first and the plugin's entry overrides it, so on a request the plugin does not govern a caller's `metadata.brownout` can surface as a label for that caller's team.
+- **A log-based monitor:** count `outcome:degraded` grouped by `requested_route`, or alert when `budget_tier` reaches `75` grouped by LiteLLM's team field.
+
+Order-based failover logs one request twice, a failure for the attempt that failed and a success for
+the one that served. Both logs carry the same entry, so per-request counts follow LiteLLM's own
+semantics. A `CustomLogger` that runs after brownout and replaces `spend_logs_metadata` wholesale
+drops the entry for that request.
+
+### Announcements
+
+Each transition the plugin claims is one JSON line on the `brownout` logger, team events at warning
+and incidents at error. The claim key holds it to once per window across every replica. The line is
+written when the pre-call hook claims it, before the request is dispatched. The plugin JSON-encodes
+every value, so nothing a caller sends can break out of a line. Match alerts on the logger name
+`brownout`, never on the text, because LiteLLM at debug verbosity can log request bodies containing
+the same words.
 
 ```json
 {"event": "brownout_tier_crossed", "owner": "team", "team_id": "team-a",
@@ -141,29 +188,16 @@ answered. Every event a request produces goes out in one concurrent round.
 A tier event's `scope` is `team` for a team tier and `route` for a route tier, and its `outcome` is
 `served`, `degraded` or `rejected`. A route raises `brownout_route_degraded` the first time it
 serves its fallback in a window, on its own claim, so a tier that another route crossed first
-cannot hide it. The team that calls the route alerts on the metric filtered to that route.
-
-```
-sum:brownout.route_degraded{route:route-chat}.as_count() > 0
-```
+cannot hide it.
 
 A rejection is `outside_caller_allowlist` or `entitlement_check_unavailable`. Incident reasons are
 `team_not_in_manifest`, `key_has_own_budget`, `unpriced_model`, `budget_ceiling_drift`,
 `gateway_rule_violated`, `spend_counter_unreadable` and `entitlement_check_unavailable`, and each
-incident names its rule. Incidents are deduplicated once per window on their own claim key.
+incident names its rule. Incidents are deduplicated once per window on their own claim key. An
+incident is the page-worthy condition, and it reaches only the log line.
 
 An `unpriced_model` incident is keyed on the model only when the model is a group the gateway's
 config declares, because that is a gap in pricing. Any other name is the caller's choice, so it
 raises at most one incident per team per window. Keyed on the name, a key holder could raise an
 unbounded number of platform incidents by inventing model names. The incident's
 `model_group_served` field says which case it was, and the caller gets the same 503 either way.
-
-| Metric | Type | Tags |
-|---|---|---|
-| `brownout.tier_crossed` | count | `env`, `service:brownout`, `team`, `tier`, `scope`, `outcome`, and `route` for route scope |
-| `brownout.envelope_utilisation` | gauge | `env`, `service:brownout`, `team`, sampled at team tiers |
-| `brownout.route_degraded` | count | `env`, `service:brownout`, `team`, `route`, `served_route` |
-| `brownout.fallback_rejected` | count | `env`, `service:brownout`, `team`, `route`, `rejection` |
-| `brownout.incident` | count | `env`, `service:brownout`, `reason`, and `team` when the incident names one |
-
-Numbers and tags are all that reach Datadog, and `tests/test_datadog.py` pins that on the wire.
