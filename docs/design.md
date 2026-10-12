@@ -92,7 +92,7 @@ Two pieces of work remain.
 
 - A request blocked at the native ceiling carries no platform header. LiteLLM wraps the
   response-headers hook in a try/except that swallows, and runs it on success only, so the signal
-  for that request lives in the 429 body. A response middleware seam would close this.
+  for that request lives in the body of LiteLLM's budget refusal. A response middleware seam would close this.
 - The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
   suite and has yet to be driven through a live gateway.
 

@@ -63,7 +63,7 @@ LITELLM_TAG=v1.104.2 docker compose up -d --wait
 LAB_REQUIRE_STACK=1 uv run --no-sync pytest -m e2e
 ```
 
-A new release joins the range when all three suites pass on it. The end-to-end sequence accepts
-LiteLLM's budget refusal as a 429 or a 422, because 1.104 changed the default code to 422. Add it to the workflow's matrix and
-raise `TESTED_CEILING`. A seam failure names the LiteLLM behaviour that changed, and the fix belongs
+A new release joins the range when all three suites pass on it. Add the release to the workflow's
+matrix and raise `TESTED_CEILING`. The end-to-end sequence accepts LiteLLM's budget refusal as a
+429 or a 422, because 1.104 changed the default code to 422. A seam failure names the LiteLLM behaviour that changed, and the fix belongs
 in `src/brownout/bridge.py`, the only module that touches LiteLLM's internals.

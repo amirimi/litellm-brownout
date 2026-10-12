@@ -78,5 +78,5 @@ x-brownout-degradation-reason: degrade_tier_reached
 | LiteLLM's boundary ahead of the tier | Drain with `ask 200` | The 429 arrives near 80%, because the larger worst case no longer fits, and a degrade tier at 90 never fires |
 | A broken manifest | Set `budget_duration: "2d"` and restart | The container restarts in a loop, and `docker compose logs litellm` shows `ManifestError` naming `duration-tumbles` |
 | A route tier | Add `warn_tiers: [50]` under `budget-lab-strict`, restart, then send requests to `budget-lab-strict` past 50% | A `brownout_tier_crossed` event with `scope: route` and an `x-brownout-route-tier: 50` header |
-| A newer LiteLLM | Run `LITELLM_TAG=v1.104.2 docker compose up -d --wait` and repeat the drain | The same sequence on another release line |
+| A newer LiteLLM | Run `LITELLM_TAG=v1.104.2 docker compose up -d --wait` and repeat the drain | The same sequence on another release line. From 1.104 the refusal is a 422 unless `budget_exceeded_status_code: 429` is set under `litellm_settings` |
 | The file rules | Run `uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml`, then add `alerting: ["slack"]` under `general_settings` and run it again | The second run exits non-zero naming `no-native-alerting` |
