@@ -37,21 +37,22 @@ Stage 4 is where the plugin decides, and its position sets three constraints.
 ## Modules
 
 A request passes through four layers in this order. The bridge turns LiteLLM's request into plain
-facts, the request rules refuse anything the plugin cannot govern, the pure core decides, and the
-bridge applies the decision while the transitions are claimed and published.
+facts, the request rules refuse anything the plugin cannot govern, and the pure core decides. The
+bridge then applies the decision, the transitions are claimed and announced on the log, and the
+bridge writes the request's facts into its LiteLLM metadata.
 
 | Module | Holds | Imports LiteLLM |
 |---|---|---|
-| `policy.py` | `decide` and `resolve`, the only place a threshold is compared | No |
+| `policy.py` | `decide` and `resolve`, the only place a threshold is compared, and the names of each outcome | No |
 | `manifest.py` | The manifest types and loader, with strict keys and the accepted windows | No |
 | `rules.py` | Every rule as a function of plain values, shared by `brownout check` and the request path | No |
 | `refusals.py` | Rule ids and the closed `Refusal` type | No |
 | `ports.py` | Protocols for every outside dependency, and the `Caller` facts | No |
-| `transitions.py` | Window ids, claim keys and one claim-then-emit function | No |
-| `events.py`, `datadog.py` | Event types, webhook delivery and metric series | No |
+| `transitions.py` | Window ids, claim keys and one claim-then-announce function | No |
+| `events.py` | Event types and the `brownout` log line | No |
 | `settings.py` | Environment variables | No |
 | `cli.py` | `brownout check` | Its cost map only |
-| `bridge.py` | Every LiteLLM touchpoint, including the three private helpers and the version check | Yes |
+| `bridge.py` | Every LiteLLM touchpoint, including the three private helpers, the version check and the request facts field | Yes |
 | `gateway.py` | The two hooks, the request pipeline and the one place a refusal becomes an `HTTPException` | Through the bridge |
 
 The permission check runs only when `decide` wants a downgrade, because it is the one check whose
@@ -83,7 +84,7 @@ differs on the supported releases before 1.101.0.
 | Validated fallback selection | Nothing native checks that a target is priced, cleared for the primary's data class, and callable by the caller's key and team |
 | A refusal for a model LiteLLM cannot price | LiteLLM returns `None` for an unpriced model and skips reservation entirely ([`proxy/spend_tracking/budget_reservation.py:236`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236)) |
 | Rules over LiteLLM's own config, run in CI and on every request | LiteLLM validates its settings one at a time and has no notion of the assumptions a plugin makes about them |
-| Caller disclosure | No native header carries the served route or the route it degraded from |
+| Caller disclosure | No native header or logging field carries the served route or the route it degraded from |
 | Guardrail re-merge after a rewrite | The merge runs at stage 3 keyed on the requested model, so a stage 4 rewrite would drop the target's guardrails |
 | Versioned, cross-replica deduplication | Each claim carries team, policy epoch, window and transition, so an approved policy change re-arms its transitions |
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC
@@ -15,7 +14,15 @@ from .events import (
     TierScope,
 )
 from .manifest import WINDOW_SECONDS, TeamPolicy
-from .policy import Decision, Degraded, Outcome, Rejected, Served
+from .policy import (
+    Decision,
+    Degraded,
+    Outcome,
+    Rejected,
+    Served,
+    outcome_name,
+    served_route,
+)
 from .ports import ClaimStore, EventSink, ResetSchedule
 
 
@@ -44,13 +51,13 @@ def request_transitions(
     team: TeamPolicy, window: str, decision: Decision, outcome: Outcome
 ) -> list[Transition]:
     prefix: Final = f"{team.team_id}:{team.policy_epoch}:{window}"
-    served_route: Final = _served_route(outcome)
-    outcome_name: Final = _outcome_name(outcome)
+    served: Final = served_route(outcome)
+    name: Final = outcome_name(outcome)
     transitions = [
         Transition(
             key=f"tier:{prefix}:team:{tier}",
             event=_tier_event(
-                team, window, TierScope.TEAM, decision, tier, served_route, outcome_name
+                team, window, TierScope.TEAM, decision, tier, served, name
             ),
         )
         for tier in decision.team_tiers
@@ -64,8 +71,8 @@ def request_transitions(
                 TierScope.ROUTE,
                 decision,
                 tier,
-                served_route,
-                outcome_name,
+                served,
+                name,
             ),
         )
         for tier in decision.route_tiers
@@ -119,12 +126,9 @@ async def publish(
     ttl_seconds: int,
     transitions: Sequence[Transition],
 ) -> None:
-    claimed = [
-        transition.event
-        for transition in transitions
-        if await store.claim(transition.key, ttl_seconds)
-    ]
-    await asyncio.gather(*(sink.emit(event) for event in claimed))
+    for transition in transitions:
+        if await store.claim(transition.key, ttl_seconds):
+            sink.emit(transition.event)
 
 
 def _tier_event(
@@ -133,8 +137,8 @@ def _tier_event(
     scope: TierScope,
     decision: Decision,
     tier: int,
-    served_route: str,
-    outcome_name: str,
+    served: str,
+    name: str,
 ) -> TierEvent:
     return TierEvent(
         team_id=team.team_id,
@@ -143,32 +147,8 @@ def _tier_event(
         scope=scope,
         route=decision.route,
         tier=tier,
-        served_route=served_route,
-        outcome=outcome_name,
+        served_route=served,
+        outcome=name,
         spend_usd=decision.spend_usd,
         envelope_usd=team.envelope_usd,
     )
-
-
-def _served_route(outcome: Outcome) -> str:
-    match outcome:
-        case Served(route=route):
-            return route
-        case Degraded(target=target):
-            return target
-        case Rejected(source=source):
-            return source
-        case _:
-            assert_never(outcome)
-
-
-def _outcome_name(outcome: Outcome) -> str:
-    match outcome:
-        case Served():
-            return "served"
-        case Degraded():
-            return "degraded"
-        case Rejected():
-            return "rejected"
-        case _:
-            assert_never(outcome)

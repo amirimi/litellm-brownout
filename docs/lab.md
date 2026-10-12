@@ -9,7 +9,7 @@ The plugin needs no install step. `docker-compose.yml` mounts `src/brownout` at 
 which is on `PYTHONPATH`, and `config/config.yaml` names the handler in
 `callbacks: ["brownout.gateway.handler"]`, which LiteLLM imports at startup. The routes in
 `config/config.yaml` answer with `mock_response`. The `langfuse` and `datadog_metrics` callbacks it
-names run against the placeholder keys in `.env.example` without failing a request.
+names run without valid credentials and never fail a request.
 
 ## 1. Start the stack and create a fresh team
 
@@ -21,11 +21,10 @@ from the machine it runs on. Change both before exposing it anywhere else.
 docker compose up -d --wait
 set -a; source .env; set +a
 KEY=$(uv run python lab/setup_lab.py | tail -1)
-curl -s -X DELETE localhost:8088/events
 ```
 
-`lab/setup_lab.py` resets the lab team in about 11 seconds, and the `DELETE` empties the event
-sink. Rerun this step before every experiment, because the lab team and its claims carry over.
+`lab/setup_lab.py` resets the lab team and its claims in about 11 seconds. Rerun this step before
+every experiment, because the lab team and its claims carry over.
 
 ## 2. Send one request
 
@@ -40,16 +39,30 @@ ask
 An `x-brownout-route-served` header proves the plugin is in the path. The image logs at a level that
 hides the plugin's own load message, so the header is the load check.
 
+The same facts reach every LiteLLM logging integration through `spend_logs_metadata`. LiteLLM's own
+spend logs are one of them, keyed by the response's id and written in batches.
+
+```bash
+ID=$(curl -s localhost:4000/v1/chat/completions -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"budget-lab-primary","messages":[{"role":"user","content":"hi"}],"max_tokens":40}' \
+  | jq -r .id)
+sleep 15
+curl -s "localhost:4000/spend/logs?request_id=$ID" -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  | jq -c '.[0].metadata.spend_logs_metadata.brownout'
+```
+
 ## 3. Watch three views
 
 ```bash
-watch -n1 'curl -s localhost:8088/events | jq -c ".events[] | {event, scope, route, served_route, tier, degrade_at, rejection}"'
+docker compose logs -f --no-log-prefix --since 1m litellm | sed -un 's/.*brownout \({.*}\)$/\1/p' | jq -c '{event, scope, route, served_route, tier, degrade_at, rejection}'
 watch -n1 'uv run python -c "from tests.support import lab_spend_counter; print(lab_spend_counter(\"budget-lab\"))"'
 watch -n1 'docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "brownout:*"'
 ```
 
-The first shows the plugin's events, the second the dollar counter LiteLLM keeps for the team, and
-the third the plugin's once-per-window claims in Redis. The third needs `.env` loaded in its shell.
+The first shows the transitions the plugin announces on the gateway log, the second the dollar
+counter LiteLLM keeps for the team, and the third the plugin's once-per-window claims in Redis. The
+third needs `.env` loaded in its shell.
 
 ## 4. Drain the envelope
 
@@ -73,11 +86,11 @@ x-brownout-degradation-reason: degrade_tier_reached
 
 | Experiment | How | What you see |
 |---|---|---|
-| A refused downgrade | Create a key limited to the primary with `NARROW=$(curl -s localhost:4000/key/generate -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' -d '{"team_id":"budget-lab","models":["budget-lab-primary"]}' \| jq -r .key)`, drain past 75% with `$KEY`, then run `ask 40 $NARROW` | The primary serves with `x-brownout-degradation-reason: fallback_rejected`, and a `brownout_fallback_rejected` event carries `outside_caller_allowlist` |
+| A refused downgrade | Create a key limited to the primary with `NARROW=$(curl -s localhost:4000/key/generate -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' -d '{"team_id":"budget-lab","models":["budget-lab-primary"]}' \| jq -r .key)`, drain past 75% with `$KEY`, then run `ask 40 $NARROW` | The primary serves with `x-brownout-degradation-reason: fallback_rejected`, and the gateway log announces `brownout_fallback_rejected` with `outside_caller_allowlist` |
 | A later degrade tier | Set `degrade_at: 90` for `budget-lab-primary` in `config/manifest.yaml` and run `docker compose restart litellm` | The first downgrade arrives about 14 requests later |
 | LiteLLM's boundary ahead of the tier | Drain with `ask 200` | The 429 arrives near 80%, because the larger worst case no longer fits, and a degrade tier at 90 never fires |
 | A broken manifest | Set `budget_duration: "2d"` and restart | The container restarts in a loop, and `docker compose logs litellm` shows `ManifestError` naming `duration-tumbles` |
-| A route tier | Add `warn_tiers: [50]` under `budget-lab-strict`, restart, then send requests to `budget-lab-strict` past 50% | A `brownout_tier_crossed` event with `scope: route` and an `x-brownout-route-tier: 50` header |
+| A route tier | Add `warn_tiers: [50]` under `budget-lab-strict`, restart, then send requests to `budget-lab-strict` past 50% | A `brownout_tier_crossed` announcement with `scope: route` and an `x-brownout-route-tier: 50` header |
 | An older LiteLLM | Run `LITELLM_TAG=v1.95.1 docker compose up -d --wait` and repeat the drain | The gateway logs the `supported-litellm` boundary warning at startup. Requests that no longer fit are served with shrunk holds until no headroom is left. On the last measured run on 1.95.1 the 429 came at request 61 instead of 57, with $1.008 settled |
 | A newer LiteLLM | Run `LITELLM_TAG=v1.104.2 docker compose up -d --wait` and repeat the drain | The same sequence on another release line. From 1.104 the refusal is a 422 unless `budget_exceeded_status_code: 429` is set under `litellm_settings` |
 | The file rules | Run `uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml`, then add `alerting: ["slack"]` under `general_settings` and run it again | The second run exits non-zero naming `no-native-alerting` |

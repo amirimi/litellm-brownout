@@ -91,7 +91,7 @@ def test_a_served_request_announces_tiers_only(team):
     assert [transition.event.outcome for transition in served] == ["served"]
 
 
-async def test_publishing_emits_each_claim_once(team):
+async def test_publishing_announces_each_claim_once(team):
     store = FakeStore()
     sink = RecordingSink()
     batch = transitions.request_transitions(

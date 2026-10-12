@@ -17,7 +17,16 @@ from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 
 from .manifest import TeamPolicy
-from .policy import Decision, Degraded, Outcome, Permission, Rejected, Served
+from .policy import (
+    Decision,
+    Degraded,
+    Outcome,
+    Permission,
+    Rejected,
+    Served,
+    outcome_name,
+    served_route,
+)
 from .ports import Caller, Guardrails
 from .refusals import Refusal, RefusalReason, RuleId
 from .rules import ROUTER_FALLBACK_KEYS, GatewaySettings, ModelGroup
@@ -29,7 +38,10 @@ REFUSE_WHOLE_FROM: Final = (1, 101, 0)
 TESTED_CEILING: Final = (1, 104)
 
 CHAT_COMPLETION_CALL_TYPES: Final = frozenset({"completion", "acompletion"})
-DISCLOSURE_KEY: Final = "_brownout"
+SPEND_LOGS_METADATA_KEY: Final = "spend_logs_metadata"
+FIELD_KEY: Final = "brownout"
+OUTCOME_REFUSED: Final = "refused"
+OUTCOME_DEGRADED: Final = "degraded"
 RESERVED_METADATA_PREFIX: Final = "x-brownout-"
 CALLER_ROUTING_KEYS: Final = ("fallbacks", "mock_testing_fallbacks")
 METADATA_CONTAINERS: Final = ("metadata", "litellm_metadata")
@@ -333,11 +345,85 @@ def requested_model(data: dict) -> str:
     return str(data.get("model") or "")
 
 
-def clear_disclosure(data: dict) -> None:
+def clear_field(data: dict) -> None:
     for container in METADATA_CONTAINERS:
         metadata = data.get(container)
-        if isinstance(metadata, dict):
-            metadata.pop(DISCLOSURE_KEY, None)
+        if not isinstance(metadata, dict):
+            continue
+        spend_logs_metadata = metadata.get(SPEND_LOGS_METADATA_KEY)
+        if isinstance(spend_logs_metadata, dict) and FIELD_KEY in spend_logs_metadata:
+            metadata[SPEND_LOGS_METADATA_KEY] = {
+                key: value
+                for key, value in spend_logs_metadata.items()
+                if key != FIELD_KEY
+            }
+
+
+def write_field(data: dict, field: dict[str, Any]) -> None:
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        data["metadata"] = metadata
+    existing: Final = metadata.get(SPEND_LOGS_METADATA_KEY)
+    if isinstance(existing, dict):
+        metadata[SPEND_LOGS_METADATA_KEY] = {**existing, FIELD_KEY: field}
+    else:
+        metadata[SPEND_LOGS_METADATA_KEY] = {FIELD_KEY: field}
+
+
+def read_field(data: dict) -> dict[str, Any] | None:
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    spend_logs_metadata = metadata.get(SPEND_LOGS_METADATA_KEY)
+    if not isinstance(spend_logs_metadata, dict):
+        return None
+    field = spend_logs_metadata.get(FIELD_KEY)
+    if not isinstance(field, dict):
+        return None
+    return field
+
+
+def governed_field(
+    team: TeamPolicy, decision: Decision, outcome: Outcome
+) -> dict[str, Any]:
+    field: dict[str, Any] = {
+        "requested_route": decision.route,
+        "outcome": outcome_name(outcome),
+        "served_route": served_route(outcome),
+    }
+    optional = {
+        "budget_tier": decision.budget_tier,
+        "route_tier": decision.route_tier,
+        "degradation_reason": _degradation_reason(outcome),
+    }
+    field.update(
+        {key: str(value) for key, value in optional.items() if value is not None}
+    )
+    field["utilisation_percent"] = round(
+        decision.spend_usd / team.envelope_usd * 100.0, 4
+    )
+    return field
+
+
+def refused_field(data: dict, refusal: Refusal) -> dict[str, Any]:
+    return {
+        "requested_route": requested_model(data),
+        "outcome": OUTCOME_REFUSED,
+        "refusal": refusal.reason.value,
+    }
+
+
+def _degradation_reason(outcome: Outcome) -> str | None:
+    match outcome:
+        case Served():
+            return None
+        case Degraded():
+            return REASON_DEGRADED
+        case Rejected():
+            return REASON_REJECTED
+        case _:
+            assert_never(outcome)
 
 
 def caller_routing_keys(data: dict) -> list[str]:
@@ -355,51 +441,33 @@ def caller_routing_keys(data: dict) -> list[str]:
     return sorted(found)
 
 
-def apply(
-    data: dict,
-    team: TeamPolicy,
-    decision: Decision,
-    outcome: Outcome,
-    guardrails: Guardrails,
-) -> dict:
-    served: str
-    degraded_from: str | None
-    reason: str | None
+def apply(data: dict, outcome: Outcome, guardrails: Guardrails) -> dict:
     match outcome:
-        case Served(route=route):
-            served, degraded_from, reason = route, None, None
-        case Degraded(source=source, target=target):
+        case Served() | Rejected():
+            return data
+        case Degraded(target=target):
             data["model"] = target
-            data = guardrails.remerge(data)
-            served, degraded_from, reason = target, source, REASON_DEGRADED
-        case Rejected(source=source):
-            served, degraded_from, reason = source, None, REASON_REJECTED
+            return guardrails.remerge(data)
         case _:
             assert_never(outcome)
-    data.setdefault("metadata", {})[DISCLOSURE_KEY] = {
-        "served_route": served,
-        "degraded_from": degraded_from,
-        "budget_tier": decision.budget_tier,
-        "route_tier": decision.route_tier,
-        "reason": reason,
-        "team_id": team.team_id,
-    }
-    return data
 
 
 def headers(
     data: dict, litellm_call_info: dict[str, Any] | None
 ) -> dict[str, str] | None:
-    disclosure = (data.get("metadata") or {}).get(DISCLOSURE_KEY)
-    if not isinstance(disclosure, dict):
+    field = read_field(data)
+    if field is None or "served_route" not in field:
         return None
-    result = {HEADER_ROUTE_SERVED: str(disclosure["served_route"])}
+    degraded_from = None
+    if field.get("outcome") == OUTCOME_DEGRADED:
+        degraded_from = field.get("requested_route")
+    result = {HEADER_ROUTE_SERVED: str(field["served_route"])}
     optional = {
         HEADER_DEPLOYMENT_ID: (litellm_call_info or {}).get("model_id"),
-        HEADER_BUDGET_TIER: disclosure.get("budget_tier"),
-        HEADER_ROUTE_TIER: disclosure.get("route_tier"),
-        HEADER_DEGRADED_FROM: disclosure.get("degraded_from"),
-        HEADER_DEGRADATION_REASON: disclosure.get("reason"),
+        HEADER_BUDGET_TIER: field.get("budget_tier"),
+        HEADER_ROUTE_TIER: field.get("route_tier"),
+        HEADER_DEGRADED_FROM: degraded_from,
+        HEADER_DEGRADATION_REASON: field.get("degradation_reason"),
     }
     result.update(
         {name: str(value) for name, value in optional.items() if value is not None}

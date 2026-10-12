@@ -20,13 +20,8 @@ services:
       LANGFUSE_HOST: ${LANGFUSE_HOST}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
-      DD_API_KEY: ${DD_API_KEY}
-      DD_SITE: ${DD_SITE}
-      DD_ENV: ${DD_ENV}
-      DD_SERVICE: ${DD_SERVICE}
       PYTHONPATH: /app/plugins
       BROWNOUT_MANIFEST: /app/config/manifest.yaml
-      BROWNOUT_WEBHOOK_URL: http://event-sink:8080/events
     volumes:
       - ./src/brownout:/app/plugins/brownout:ro
       - ./config:/app/config:ro
@@ -42,22 +37,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      event-sink:
-        condition: service_healthy
-
-  event-sink:
-    image: python:3.12-slim
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8088:8080"
-    volumes:
-      - ./lab/event_sink.py:/app/event_sink.py:ro
-    command: ["python", "/app/event_sink.py"]
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/events', timeout=3).status == 200 else 1)\""]
-      interval: 3s
-      timeout: 3s
-      retries: 20
 
   db:
     image: postgres:16
