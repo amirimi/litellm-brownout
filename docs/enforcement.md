@@ -70,7 +70,7 @@ names its rule.
 | Condition | Response |
 |---|---|
 | Route reaches its declared threshold | Serve the declared fallback with tier and degradation headers, and raise one `brownout_route_degraded` event per route per window |
-| Team reaches 100% of its budget | LiteLLM's budget refusal at reservation time, a 429 up to 1.103 and a 422 by default from 1.104. `litellm_settings.budget_exceeded_status_code` sets it, read in the 1.104.2 source (`litellm/__init__.py:404`) and not yet run. The plugin never sees that request |
+| Team reaches 100% of its budget | LiteLLM's budget refusal at reservation time, a 429 up to 1.103 and a 422 by default from 1.104. Setting `litellm_settings.budget_exceeded_status_code: 429` restores the 429, as run on the 1.104.2 lab image. The plugin never sees that request |
 | Caller supplies `fallbacks`, `mock_testing_fallbacks`, any `x-brownout-*` key or `degraded_from` in `metadata` or `litellm_metadata` | 400 `caller_routing_not_permitted`, rule `no-caller-routing`, naming the refused keys |
 | Key has no team, or its team is absent from the manifest | 503 `team_not_in_manifest`, rule `team-in-manifest`, plus a platform incident |
 | Key carries its own `max_budget` | 503 `key_has_own_budget`, rule `key-has-no-budget`, plus a platform incident |
