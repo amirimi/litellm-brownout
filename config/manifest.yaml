@@ -33,3 +33,4 @@ teams:
         fallback: budget-lab-degraded
         degrade_at: 75
       budget-lab-strict: {}
+      budget-lab-failing: {}

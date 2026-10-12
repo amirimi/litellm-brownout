@@ -159,7 +159,7 @@ def _delete_matching(client: Any, pattern: str) -> int:
 
 def _redis_url_from_environment() -> str:
     host = os.getenv("LAB_REDIS_HOST", "localhost")
-    port = os.getenv("LAB_REDIS_PORT", "6379")
+    port = os.getenv("LAB_REDIS_PORT", "16379")
     password = os.getenv("REDIS_PASSWORD", "")
     if password:
         credentials = f":{password}@"

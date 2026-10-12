@@ -7,12 +7,6 @@ from math import isfinite
 from .manifest import Manifest, RoutePolicy
 from .refusals import RuleId, Violation
 
-ROUTER_FALLBACK_KEYS = (
-    "fallbacks",
-    "context_window_fallbacks",
-    "content_policy_fallbacks",
-)
-
 
 @dataclass(frozen=True)
 class ModelGroup:
@@ -26,7 +20,6 @@ class ModelGroup:
 class GatewaySettings:
     fail_closed_budget_enforcement: bool
     disable_budget_reservation: bool
-    router_fallback_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -99,14 +92,6 @@ def settings_rules(settings: GatewaySettings) -> list[Violation]:
                 "that concurrent requests all pass",
             )
         )
-    violations.extend(
-        Violation(
-            RuleId.NO_ROUTER_FALLBACKS,
-            f"router_settings.{key}",
-            "moves a governed request to a model group the disclosure header does not name",
-        )
-        for key in settings.router_fallback_keys
-    )
     return violations
 
 

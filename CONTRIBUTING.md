@@ -53,9 +53,9 @@ Brownout supports LiteLLM 1.95.1 and newer. `SUPPORTED_FLOOR`, `REFUSE_WHOLE_FRO
 `TESTED_CEILING` in `src/brownout/bridge.py` hold the range and the budget boundary. Below the floor
 the handler refuses to start. On 1.95.1 to 1.100 it warns that LiteLLM shrinks an over-budget
 reservation instead of refusing it, and past the ceiling it warns that the release is untested. The
-floor moves only by a decision recorded in a spec. Releases before 1.95 differ in the guardrail
-merge and in the helpers the bridge calls, 1.95.0 carries a LiteLLM security advisory, and releases
-before 1.84 place no reservation at all.
+floor moves only by a decision recorded in the pull request that moves it. Releases before 1.95
+differ in the guardrail merge and in the helpers the bridge calls, 1.95.0 carries a LiteLLM security
+advisory, and releases before 1.84 place no reservation at all.
 
 `pyproject.toml` pins the floor, so the ci workflow runs the unit and seam suites on it. The
 `litellm matrix` workflow runs every suite against the latest patch of each supported release line,
@@ -64,7 +64,7 @@ follow the release under test. To run one release line by hand, install it into 
 environment and point the lab at the matching image.
 
 ```bash
-uv pip install "litellm[proxy]==1.104.2"
+uv pip install --no-config "litellm[proxy]==1.104.2"
 uv run --no-sync pytest -m "not e2e"
 LITELLM_TAG=v1.104.2 docker compose up -d --wait
 LAB_REQUIRE_STACK=1 uv run --no-sync pytest -m e2e

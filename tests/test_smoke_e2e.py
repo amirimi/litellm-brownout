@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Final, assert_never
 
@@ -21,6 +21,7 @@ GATEWAY: Final = os.getenv("LITELLM_GATEWAY", "http://localhost:4000")
 LAB_TEAM_ID: Final = "budget-lab"
 LAB_ROUTE: Final = "budget-lab-primary"
 DEGRADED_ROUTE: Final = "budget-lab-degraded"
+FAILING_ROUTE: Final = "budget-lab-failing"
 LAB_ENVELOPE_USD: Final = 1.0
 LAB_PRIMARY_WORST_CASE_USD: Final = 0.0408
 MAX_TOKENS: Final = 40
@@ -73,6 +74,14 @@ class Observation:
     blocked_status: int | None = None
     blocked_body: str = ""
     first_degraded_response_id: str | None = None
+    disclosure_mismatches: list[tuple[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Answer:
+    status_code: int
+    headers: dict[str, str]
+    body: str
 
 
 @dataclass(frozen=True)
@@ -128,7 +137,34 @@ def forged(lab_run: LabRun) -> ForgedRequest:
 
 
 @pytest.fixture(scope="module")
-def drained(lab_run: LabRun, forged: ForgedRequest) -> Observation:
+def team_fallback(lab_run: LabRun) -> Answer:
+    _set_team_router_settings(
+        {"fallbacks": [{FAILING_ROUTE: [LAB_ROUTE]}]},
+    )
+    try:
+        return _ask(lab_run.key, {"model": FAILING_ROUTE})
+    finally:
+        _set_team_router_settings({})
+
+
+@pytest.fixture(scope="module")
+def caller_fallback(lab_run: LabRun) -> Answer:
+    return _ask(
+        lab_run.key,
+        {
+            "model": LAB_ROUTE,
+            "context_window_fallbacks": [{LAB_ROUTE: [DEGRADED_ROUTE]}],
+        },
+    )
+
+
+@pytest.fixture(scope="module")
+def drained(
+    lab_run: LabRun,
+    forged: ForgedRequest,
+    team_fallback: Answer,
+    caller_fallback: Answer,
+) -> Observation:
     with httpx.Client(base_url=GATEWAY, timeout=REQUEST_TIMEOUT_SECONDS) as client:
         return _drive_to_exhaustion(client, lab_run.key)
 
@@ -152,6 +188,35 @@ def _require_zero_start() -> None:
         f"the lab did not start from zero, the Redis counter holds ${counter:.4f}. "
         "The recorded row and the counter are different figures, and only the counter "
         "carries reservations, so both have to be clear before the sequence means anything"
+    )
+
+
+def _set_team_router_settings(router_settings: dict[str, Any]) -> None:
+    response = httpx.post(
+        f"{GATEWAY}/team/update",
+        headers=_admin_headers(),
+        json={"team_id": LAB_TEAM_ID, "router_settings": router_settings},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+
+def _ask(key: str, overrides: dict[str, Any]) -> Answer:
+    response = httpx.post(
+        f"{GATEWAY}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}"},
+        json={
+            "model": LAB_ROUTE,
+            "max_tokens": MAX_TOKENS,
+            "messages": [{"role": "user", "content": "hi"}],
+            **overrides,
+        },
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    return Answer(
+        status_code=response.status_code,
+        headers={name.lower(): value for name, value in response.headers.items()},
+        body=response.text,
     )
 
 
@@ -184,6 +249,10 @@ def _drive_to_exhaustion(client: httpx.Client, key: str) -> Observation:
 
         response.raise_for_status()
         headers = {name.lower(): value for name, value in response.headers.items()}
+        served = headers.get("x-brownout-route-served", "")
+        group = headers.get("x-litellm-model-group", "")
+        if served != group:
+            observed.disclosure_mismatches.append((served, group))
         if (
             observed.first_degraded_headers is None
             and "x-brownout-degraded-from" in headers
@@ -380,3 +449,29 @@ def test_a_forged_field_is_replaced_on_a_request_the_plugin_handles(
     assert spend_logs_metadata["brownout"]["outcome"] == "served"
     assert spend_logs_metadata["brownout"]["served_route"] == LAB_ROUTE
     assert set(spend_logs_metadata["brownout"]) <= FIELD_KEYS
+
+
+@requires_stack
+def test_every_served_route_header_names_the_group_litellm_served(
+    drained: Observation,
+) -> None:
+    assert drained.disclosure_mismatches == []
+
+
+@requires_stack
+def test_a_team_router_fallback_never_moves_a_governed_request(
+    team_fallback: Answer,
+) -> None:
+    assert team_fallback.status_code != 200, (
+        "the failing route answered, so the team's router fallback served the request"
+    )
+    assert "x-brownout-route-served" not in team_fallback.headers
+    assert int(team_fallback.headers.get("x-litellm-attempted-fallbacks", "0")) == 0
+
+
+@requires_stack
+def test_caller_sent_context_window_fallbacks_are_refused(
+    caller_fallback: Answer,
+) -> None:
+    assert caller_fallback.status_code == 400
+    assert "caller_routing_not_permitted" in caller_fallback.body

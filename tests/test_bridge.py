@@ -6,7 +6,15 @@ import litellm
 import pytest
 
 from brownout import bridge
-from brownout.policy import Admit, Decision, Degraded, Served, WantsDegrade
+from brownout.policy import (
+    Admit,
+    Decision,
+    Degraded,
+    Rejected,
+    Rejection,
+    Served,
+    WantsDegrade,
+)
 from brownout.refusals import Refusal, RefusalReason, RuleId
 
 from .support import make_auth
@@ -121,6 +129,9 @@ def test_a_caller_carries_its_key_budget_and_resolved_models(team):
     assert caller.own_hold_usd == 0.0
 
 
+SERVED_RESPONSE: Final = object()
+
+
 def with_field(field: dict[str, Any]) -> dict[str, Any]:
     return {"metadata": {"spend_logs_metadata": {"brownout": field}}}
 
@@ -137,14 +148,45 @@ def test_headers_carry_only_what_the_decision_has_to_say():
         }
     )
 
-    assert bridge.headers(data, {"model_id": "dep-1"}) == {
+    assert bridge.headers(data, SERVED_RESPONSE, {"model_id": "dep-1"}) == {
         "x-brownout-route-served": "chat-cheap",
         "x-brownout-deployment-id": "dep-1",
         "x-brownout-budget-tier": "90",
         "x-brownout-degraded-from": "chat",
         "x-brownout-degradation-reason": "degrade_tier_reached",
     }
-    assert bridge.headers({"metadata": {}}, None) is None
+    assert bridge.headers({"metadata": {}}, SERVED_RESPONSE, None) is None
+
+
+def test_a_failed_request_never_claims_a_route_served():
+    data = with_field(
+        {
+            "requested_route": "chat",
+            "outcome": "degraded",
+            "served_route": "chat-cheap",
+            "budget_tier": "90",
+            "degradation_reason": "degrade_tier_reached",
+        }
+    )
+
+    assert bridge.headers(data, None, {"model_id": "dep-1"}) == {
+        "x-brownout-budget-tier": "90",
+        "x-brownout-degraded-from": "chat",
+        "x-brownout-degradation-reason": "degrade_tier_reached",
+    }
+
+
+def test_a_failed_request_with_nothing_to_disclose_carries_no_headers():
+    data = with_field(
+        {
+            "requested_route": "chat",
+            "outcome": "served",
+            "served_route": "chat",
+            "utilisation_percent": 10.0,
+        }
+    )
+
+    assert bridge.headers(data, None, None) is None
 
 
 def test_a_refused_request_carries_no_disclosure_headers():
@@ -152,7 +194,7 @@ def test_a_refused_request_carries_no_disclosure_headers():
         {"requested_route": "chat", "outcome": "refused", "refusal": "unpriced_model"}
     )
 
-    assert bridge.headers(data, None) is None
+    assert bridge.headers(data, SERVED_RESPONSE, None) is None
 
 
 def test_the_field_is_written_into_a_fresh_dict():
@@ -215,14 +257,48 @@ def test_clearing_leaves_a_request_without_the_field_untouched():
 def test_caller_routing_keys_are_named():
     data = {
         "fallbacks": ["x"],
+        "context_window_fallbacks": ["y"],
+        "content_policy_fallbacks": ["z"],
         "metadata": {"X-Brownout-Anything": 1, "degraded_from": "y", "ordinary": 2},
     }
 
     assert bridge.caller_routing_keys(data) == [
+        "content_policy_fallbacks",
+        "context_window_fallbacks",
         "fallbacks",
         "metadata.X-Brownout-Anything",
         "metadata.degraded_from",
     ]
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        Served("budget-lab-primary"),
+        Degraded("budget-lab-primary", "budget-lab-degraded", 90),
+        Rejected(
+            "budget-lab-primary",
+            "budget-lab-degraded",
+            90,
+            Rejection.OUTSIDE_CALLER_ALLOWLIST,
+        ),
+    ],
+)
+def test_every_governed_request_has_its_fallbacks_emptied(guardrails, outcome):
+    team_settings = {"fallbacks": [{"budget-lab-primary": ["elsewhere"]}]}
+    data = {
+        "model": "budget-lab-primary",
+        "messages": [],
+        "metadata": {},
+        "router_settings_override": team_settings,
+    }
+
+    applied = bridge.apply(data, outcome, guardrails)
+
+    assert applied["fallbacks"] == []
+    assert applied["context_window_fallbacks"] == []
+    assert applied["content_policy_fallbacks"] == []
+    assert applied["router_settings_override"] == team_settings
 
 
 @pytest.mark.parametrize(
@@ -334,7 +410,6 @@ def test_the_live_gateway_state_reads_prices_classes_and_settings():
     settings = state.settings()
     assert settings.fail_closed_budget_enforcement is True
     assert settings.disable_budget_reservation is False
-    assert settings.router_fallback_keys == ("fallbacks",)
 
 
 def test_the_gateway_state_without_a_router_serves_nothing():
@@ -342,4 +417,3 @@ def test_the_gateway_state_without_a_router_serves_nothing():
 
     assert state.model_group("anything") is None
     assert state.serves("anything", "team-a") is False
-    assert state.settings().router_fallback_keys == ()

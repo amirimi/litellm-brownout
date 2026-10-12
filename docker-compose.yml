@@ -1,6 +1,6 @@
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.101.0}
+    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.104.2}
     restart: unless-stopped
     ports:
       - "127.0.0.1:4000:4000"
@@ -17,9 +17,6 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       LITELLM_ENVIRONMENT: development
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
-      LANGFUSE_HOST: ${LANGFUSE_HOST}
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       PYTHONPATH: /app/plugins
       BROWNOUT_MANIFEST: /app/config/manifest.yaml
     volumes:
@@ -41,8 +38,6 @@ services:
   db:
     image: postgres:16
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:5432:5432"
     env_file:
       - .env
     environment:
@@ -61,7 +56,7 @@ services:
     image: redis:7
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:16379:6379"
     command:
       [
         "redis-server",

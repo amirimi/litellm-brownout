@@ -191,6 +191,8 @@ async def test_a_hold_larger_than_the_counter_floors_at_zero(team):
     [
         {"fallbacks": ["budget-lab-degraded"]},
         {"mock_testing_fallbacks": True},
+        {"context_window_fallbacks": [{"budget-lab-primary": ["budget-lab-degraded"]}]},
+        {"content_policy_fallbacks": [{"budget-lab-primary": ["budget-lab-degraded"]}]},
         {"metadata": {"x-brownout-route-served": "something-expensive"}},
         {"metadata": {"degraded_from": "something-expensive"}},
         {"litellm_metadata": {"x-brownout-budget-tier": "10"}},
@@ -248,7 +250,7 @@ async def test_a_forged_field_on_a_non_chat_call_is_removed(team):
     )
 
     assert data["metadata"]["spend_logs_metadata"] == {}
-    assert bridge.headers(data, None) is None
+    assert bridge.headers(data, object(), None) is None
 
 
 async def test_a_governed_request_discloses_only_facts_about_itself(team):
@@ -325,7 +327,7 @@ async def test_a_refusal_discloses_its_reason_before_raising(team):
         "outcome": "refused",
         "refusal": "unpriced_model",
     }
-    assert bridge.headers(data, None) is None
+    assert bridge.headers(data, object(), None) is None
 
 
 async def test_a_caller_routing_refusal_discloses_no_incident(team):

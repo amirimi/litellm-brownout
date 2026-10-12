@@ -29,7 +29,7 @@ from .policy import (
 )
 from .ports import Caller, Guardrails
 from .refusals import Refusal, RefusalReason, RuleId
-from .rules import ROUTER_FALLBACK_KEYS, GatewaySettings, ModelGroup
+from .rules import GatewaySettings, ModelGroup
 
 logger: Final = logging.getLogger("brownout")
 
@@ -43,7 +43,17 @@ FIELD_KEY: Final = "brownout"
 OUTCOME_REFUSED: Final = "refused"
 OUTCOME_DEGRADED: Final = "degraded"
 RESERVED_METADATA_PREFIX: Final = "x-brownout-"
-CALLER_ROUTING_KEYS: Final = ("fallbacks", "mock_testing_fallbacks")
+CALLER_ROUTING_KEYS: Final = (
+    "fallbacks",
+    "context_window_fallbacks",
+    "content_policy_fallbacks",
+    "mock_testing_fallbacks",
+)
+NEUTRALISED_FALLBACK_KEYS: Final = (
+    "fallbacks",
+    "context_window_fallbacks",
+    "content_policy_fallbacks",
+)
 METADATA_CONTAINERS: Final = ("metadata", "litellm_metadata")
 REASON_DEGRADED: Final = "degrade_tier_reached"
 REASON_REJECTED: Final = "fallback_rejected"
@@ -243,21 +253,11 @@ class LiteLLMGatewayState:
 
     def settings(self) -> GatewaySettings:
         general = self._general_settings()
-        router = self._router()
-        configured: list[str] = []
-        if router is not None:
-            declared = {
-                "fallbacks": router.fallbacks,
-                "context_window_fallbacks": router.context_window_fallbacks,
-                "content_policy_fallbacks": router.content_policy_fallbacks,
-            }
-            configured = [key for key in ROUTER_FALLBACK_KEYS if declared[key]]
         return GatewaySettings(
             fail_closed_budget_enforcement=general.get("fail_closed_budget_enforcement")
             is True,
             disable_budget_reservation=general.get("disable_budget_reservation")
             is True,
-            router_fallback_keys=tuple(configured),
         )
 
 
@@ -442,6 +442,8 @@ def caller_routing_keys(data: dict) -> list[str]:
 
 
 def apply(data: dict, outcome: Outcome, guardrails: Guardrails) -> dict:
+    for key in NEUTRALISED_FALLBACK_KEYS:
+        data[key] = []
     match outcome:
         case Served() | Rejected():
             return data
@@ -453,7 +455,7 @@ def apply(data: dict, outcome: Outcome, guardrails: Guardrails) -> dict:
 
 
 def headers(
-    data: dict, litellm_call_info: dict[str, Any] | None
+    data: dict, response: Any, litellm_call_info: dict[str, Any] | None
 ) -> dict[str, str] | None:
     field = read_field(data)
     if field is None or "served_route" not in field:
@@ -461,17 +463,20 @@ def headers(
     degraded_from = None
     if field.get("outcome") == OUTCOME_DEGRADED:
         degraded_from = field.get("requested_route")
-    result = {HEADER_ROUTE_SERVED: str(field["served_route"])}
-    optional = {
-        HEADER_DEPLOYMENT_ID: (litellm_call_info or {}).get("model_id"),
+    disclosed: dict[str, Any] = {
         HEADER_BUDGET_TIER: field.get("budget_tier"),
         HEADER_ROUTE_TIER: field.get("route_tier"),
         HEADER_DEGRADED_FROM: degraded_from,
         HEADER_DEGRADATION_REASON: field.get("degradation_reason"),
     }
-    result.update(
-        {name: str(value) for name, value in optional.items() if value is not None}
-    )
+    if response is not None:
+        disclosed[HEADER_ROUTE_SERVED] = field["served_route"]
+        disclosed[HEADER_DEPLOYMENT_ID] = (litellm_call_info or {}).get("model_id")
+    result: Final = {
+        name: str(value) for name, value in disclosed.items() if value is not None
+    }
+    if not result:
+        return None
     return result
 
 

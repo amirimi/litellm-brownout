@@ -34,7 +34,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: uv pip install "litellm[proxy]==${{ matrix.litellm }}"
+      - run: uv pip install --no-config "litellm[proxy]==${{ matrix.litellm }}"
       - run: uv run --no-sync pytest -m "not e2e"
       - run: cp .env.example .env
       - run: docker compose up -d --wait

@@ -17,7 +17,6 @@ class RuleId(StrEnum):
     FAIL_CLOSED_ON = "fail-closed-on"
     RESERVATION_ON = "reservation-on"
     NO_NATIVE_ALERTING = "no-native-alerting"
-    NO_ROUTER_FALLBACKS = "no-router-fallbacks"
     REDIS_CONFIGURED = "redis-configured"
     SUPPORTED_LITELLM = "supported-litellm"
     NO_CALLER_ROUTING = "no-caller-routing"
