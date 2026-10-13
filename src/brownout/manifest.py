@@ -6,8 +6,7 @@ from math import isfinite
 from pathlib import Path
 from typing import Any, Final
 
-import yaml
-
+from .inputs import load_yaml
 from .refusals import RuleId
 
 HOUR_SECONDS: Final = 3600
@@ -109,7 +108,7 @@ class Manifest:
 
     @classmethod
     def from_file(cls, path: str | Path) -> Manifest:
-        return cls.from_document(str(path), _load_yaml(path))
+        return cls.from_document(str(path), load_yaml(Path(path)))
 
     @classmethod
     def from_document(cls, source: str, document: Any) -> Manifest:
@@ -291,11 +290,3 @@ def _require_known_keys(
 
 def _schema(source: str, message: str) -> ManifestError:
     return ManifestError(RuleId.MANIFEST_SCHEMA, f"{source}: {message}")
-
-
-def _load_yaml(path: str | Path) -> Any:
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return yaml.safe_load(handle)
-    except FileNotFoundError:
-        raise _schema(str(path), "manifest file not found") from None

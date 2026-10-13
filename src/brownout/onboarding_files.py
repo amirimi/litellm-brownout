@@ -4,9 +4,11 @@ import difflib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from io import StringIO
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Final, assert_never
 
+from .inputs import Mark, positioned
 from .onboarding import (
     AppendSetting,
     ConfigChange,
@@ -21,10 +23,6 @@ DEFAULT_INDENT: Final = 2
 DEFAULT_SEQUENCE_INDENT: Final = 4
 
 
-class DocumentError(Exception):
-    pass
-
-
 @dataclass
 class YamlDocument:
     data: Any
@@ -37,12 +35,18 @@ def yaml_runtime() -> ModuleType:
     return ruamel.yaml
 
 
-def load_document(text: str) -> YamlDocument:
+def load_document(source: Path, text: str) -> YamlDocument:
     runtime: Final = yaml_runtime()
     try:
-        _, sequence_indent, dash_offset = runtime.util.load_yaml_guess_indent(text)
+        return _parse(runtime, text)
     except runtime.YAMLError as error:
-        raise _positioned(runtime, error) from error
+        raise positioned(
+            source, _problem(runtime, error), _mark(runtime, error)
+        ) from None
+
+
+def _parse(runtime: ModuleType, text: str) -> YamlDocument:
+    _, sequence_indent, dash_offset = runtime.util.load_yaml_guess_indent(text)
     renderer: Final = runtime.YAML()
     renderer.preserve_quotes = True
     renderer.width = LINE_WIDTH
@@ -51,13 +55,7 @@ def load_document(text: str) -> YamlDocument:
         sequence=sequence_indent or DEFAULT_SEQUENCE_INDENT,
         offset=dash_offset or DEFAULT_INDENT,
     )
-    try:
-        data = renderer.load(text)
-    except runtime.YAMLError as error:
-        raise _positioned(runtime, error) from error
-    if data is None:
-        data = runtime.comments.CommentedMap()
-    return YamlDocument(data=data, renderer=renderer)
+    return YamlDocument(data=renderer.load(text), renderer=renderer)
 
 
 def dump_document(document: YamlDocument) -> str:
@@ -90,10 +88,12 @@ def append_teams(document: YamlDocument, entries: Iterable[TeamEntry]) -> None:
 
 
 def new_manifest_document(entries: Iterable[TeamEntry]) -> YamlDocument:
-    document: Final = load_document("")
+    runtime: Final = yaml_runtime()
+    document: Final = _parse(runtime, "")
+    document.data = runtime.comments.CommentedMap()
     document.data["version"] = MANIFEST_VERSION
     document.data["teams"] = {entry.team_id: entry.document() for entry in entries}
-    return load_document(dump_document(document))
+    return _parse(runtime, dump_document(document))
 
 
 def to_plain(document: YamlDocument | Any) -> Any:
@@ -113,18 +113,13 @@ def unified_diff(before: str, after: str, name: str) -> str:
     )
 
 
-def _positioned(runtime: ModuleType, error: Exception) -> DocumentError:
+def _problem(runtime: ModuleType, error: Exception) -> str:
     if isinstance(error, runtime.constructor.DuplicateKeyError):
-        problem = "has a duplicate key"
-    else:
-        problem = "is not valid YAML"
-    mark: Final = _mark(runtime, error)
-    if mark is None:
-        return DocumentError(problem)
-    return DocumentError(f"{problem} at line {mark.line + 1}, column {mark.column + 1}")
+        return "has a duplicate key"
+    return "is not valid YAML"
 
 
-def _mark(runtime: ModuleType, error: Exception) -> Any:
+def _mark(runtime: ModuleType, error: Exception) -> Mark | None:
     if not isinstance(error, runtime.error.MarkedYAMLError):
         return None
     if error.problem_mark is not None:

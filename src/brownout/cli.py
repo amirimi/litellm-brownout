@@ -11,12 +11,12 @@ from typing import Any, Final
 
 import httpx
 import litellm
-import yaml
 from litellm.proxy._types import hash_token
 from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
 
 from . import settings
 from .gateway_api import GatewayReadError, GatewaySnapshot, read_gateway
+from .inputs import DocumentError, load_yaml, mapping, read_text
 from .manifest import Manifest, ManifestError
 from .onboarding import (
     ConfigChange,
@@ -35,7 +35,6 @@ from .onboarding import (
     violation_findings,
 )
 from .onboarding_files import (
-    DocumentError,
     YamlDocument,
     append_teams,
     apply_config_changes,
@@ -157,7 +156,7 @@ def init(
         return UNREADY
     try:
         prepared = _prepare(options, client, default_alert_types, own_token)
-    except (OSError, DocumentError, GatewayReadError) as error:
+    except (DocumentError, GatewayReadError) as error:
         print(
             f"init could not read its inputs or the gateway: {error}", file=sys.stderr
         )
@@ -174,8 +173,8 @@ def init(
 def _check_command(arguments: argparse.Namespace) -> int:
     try:
         violations = check(arguments.gateway_config, arguments.manifest)
-    except yaml.YAMLError as error:
-        print(_unreadable_yaml(arguments.gateway_config, error), file=sys.stderr)
+    except DocumentError as error:
+        print(error, file=sys.stderr)
         return UNREADY
     for violation in violations:
         print(f"{violation.rule}\t{violation.subject}\t{violation.message}")
@@ -184,15 +183,6 @@ def _check_command(arguments: argparse.Namespace) -> int:
         return 1
     print(f"brownout check passed on LiteLLM {litellm_release()}")
     return 0
-
-
-def _unreadable_yaml(path: Path, error: yaml.YAMLError) -> str:
-    mark = None
-    if isinstance(error, yaml.MarkedYAMLError):
-        mark = error.problem_mark or error.context_mark
-    if mark is None:
-        return f"{path} is not valid YAML"
-    return f"{path} is not valid YAML at line {mark.line + 1}, column {mark.column + 1}"
 
 
 def _taken_outputs(options: InitOptions) -> list[Path]:
@@ -214,12 +204,10 @@ def _prepare(
     default_alert_types: Sequence[str],
     own_token: str,
 ) -> Prepared:
-    config_document: Final = _load_document(
-        options.gateway_config, options.gateway_config.read_text(encoding="utf-8")
+    config_document: Final = load_document(
+        options.gateway_config, read_text(options.gateway_config)
     )
-    config: Final = to_plain(config_document)
-    if not isinstance(config, dict):
-        raise DocumentError(f"{options.gateway_config} is not a YAML mapping")
+    config: Final = mapping(options.gateway_config, to_plain(config_document))
     existing: Final = _existing_manifest(options.manifest)
     snapshot: Final = read_gateway(client, _key_page_progress)
     changes: Final = config_plan(config, default_alert_types)
@@ -240,13 +228,6 @@ def _prepare(
     )
 
 
-def _load_document(path: Path, text: str) -> YamlDocument:
-    try:
-        return load_document(text)
-    except DocumentError as error:
-        raise DocumentError(f"{path} {error}") from error
-
-
 def _existing_manifest(path: Path | None) -> Manifest | None:
     if path is None:
         return None
@@ -259,8 +240,8 @@ def _manifest_documents(
     known: Final = frozenset(existing.team_ids if existing is not None else ())
     entries: Final = team_entries(snapshot.teams, known)
     if options.manifest is not None:
-        text = options.manifest.read_text(encoding="utf-8")
-        document = _load_document(options.manifest, text)
+        text = read_text(options.manifest)
+        document = load_document(options.manifest, text)
         append_teams(document, entries)
         return text, document
     if not entries:
@@ -294,8 +275,12 @@ def _findings(
                 file_rules(written, gateway_file(to_plain(config_document)))
             )
         )
-    findings.append(admin_keys_notice())
+    findings.append(admin_keys_notice(_own_key_teamless(snapshot, own_token)))
     return findings
+
+
+def _own_key_teamless(snapshot: GatewaySnapshot, own_token: str) -> bool:
+    return any(key.token == own_token and key.team_id is None for key in snapshot.keys)
 
 
 def _key_page_progress(page: int, total: int) -> None:
@@ -382,7 +367,9 @@ def check(gateway_config: Path, manifest_path: Path) -> list[Violation]:
         manifest = Manifest.from_file(manifest_path)
     except ManifestError as error:
         return [Violation(error.rule, str(manifest_path), str(error))]
-    return file_rules(manifest, gateway_file(_load_yaml(gateway_config)))
+    return file_rules(
+        manifest, gateway_file(mapping(gateway_config, load_yaml(gateway_config)))
+    )
 
 
 def gateway_file(config: Mapping[str, Any]) -> GatewayFile:
@@ -470,14 +457,6 @@ def _highest_known(values: list[float | None]) -> float | None:
     if len(known) != len(values) or not known:
         return None
     return max(known)
-
-
-def _load_yaml(path: Path) -> Mapping[str, Any]:
-    with open(path, encoding="utf-8") as handle:
-        document = yaml.safe_load(handle)
-    if not isinstance(document, dict):
-        return {}
-    return document
 
 
 if __name__ == "__main__":

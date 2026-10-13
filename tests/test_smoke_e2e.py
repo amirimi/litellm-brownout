@@ -41,6 +41,10 @@ DECLARED_ANNOUNCEMENTS: Final = frozenset(
     {"brownout_tier_crossed", "brownout_route_degraded", "brownout_incident"}
 )
 LOG_SETTLE_SECONDS: Final = 10.0
+INIT_LITELLM_MODE: Final = "PRODUCTION"
+ENVIRONMENT_PROBE: Final = (
+    "import os\nimport brownout.cli\nprint('LITELLM_MASTER_KEY' in os.environ)\n"
+)
 SPEND_LOG_WAIT_SECONDS: Final = 30.0
 POLL_INTERVAL_SECONDS: Final = 1.0
 
@@ -531,13 +535,41 @@ def init_key(lab_run: LabRun) -> Iterator[str]:
     )
 
 
-def _run_init(arguments: list[str], key: str) -> InitRun:
+def _init_environment(key: str) -> dict[str, str]:
     environment = {
         name: value
         for name, value in os.environ.items()
         if name != "LITELLM_MASTER_KEY"
     }
     environment["BROWNOUT_INIT_KEY"] = key
+    environment["LITELLM_MODE"] = INIT_LITELLM_MODE
+    return environment
+
+
+@pytest.mark.parametrize(
+    ("mode", "loaded"),
+    [("DEV", "True"), (INIT_LITELLM_MODE, "False")],
+)
+def test_init_runs_without_the_master_key_from_the_lab_env_file(
+    tmp_path: Path, mode: str, loaded: str
+) -> None:
+    probe = tmp_path / "probe.py"
+    probe.write_text(ENVIRONMENT_PROBE, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(probe)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env={**_init_environment("unused"), "LITELLM_MODE": mode},
+        check=True,
+    )
+
+    assert result.stdout.strip() == loaded
+
+
+def _run_init(arguments: list[str], key: str) -> InitRun:
+    environment = _init_environment(key)
     result = subprocess.run(
         [
             sys.executable,

@@ -306,9 +306,38 @@ def test_a_missing_redis_violation_carries_the_block_to_add():
 def test_only_the_admin_keys_notice_leaves_init_ready():
     blocking = Finding(RuleId.MODEL_PRICED, "mystery", "has no price", (), True)
 
-    assert admin_keys_notice().blocking is False
-    assert exit_code([admin_keys_notice()]) == 0
-    assert exit_code([admin_keys_notice(), blocking]) == 1
+    assert admin_keys_notice(True).blocking is False
+    assert exit_code([admin_keys_notice(True)]) == 0
+    assert exit_code([admin_keys_notice(True), blocking]) == 1
+
+
+@pytest.mark.parametrize(
+    ("own_key_teamless", "subject", "detail"),
+    [
+        (
+            True,
+            "admin keys",
+            (
+                "the master key and the key init runs with have no team, so chat "
+                "calls made with them will be refused. Send chat traffic with team keys"
+            ),
+        ),
+        (
+            False,
+            "master key",
+            (
+                "the master key has no team, so chat calls made with it will be "
+                "refused. Send chat traffic with team keys"
+            ),
+        ),
+    ],
+)
+def test_the_admin_keys_notice_names_the_init_key_only_when_it_has_no_team(
+    own_key_teamless, subject, detail
+):
+    notice = admin_keys_notice(own_key_teamless)
+
+    assert (notice.subject, notice.detail) == (subject, detail)
 
 
 @pytest.mark.parametrize(
@@ -358,3 +387,13 @@ def test_the_key_init_runs_with_is_left_to_the_admin_keys_notice():
     findings = key_findings((own, other), GATEWAY, "hash-init")
 
     assert [finding.subject for finding in findings] == ["hash-other"]
+
+
+def test_the_key_init_runs_with_still_answers_for_its_own_budget():
+    own = LiteLLMKey("hash-init", "init", None, ("max_budget",))
+
+    findings = key_findings((own,), GATEWAY, "hash-init")
+
+    assert [(f.rule, f.subject) for f in findings] == [
+        (RuleId.KEY_HAS_NO_BUDGET, "init")
+    ]

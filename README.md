@@ -48,25 +48,29 @@ one request.
 
 ### 1. Prepare
 
-`init` reads the gateway with a read-only key. These commands create one for a new
-`proxy_admin_viewer` user and run `init`.
+`init` reads the gateway with a read-only key. These commands, for bash or zsh, create one for a
+new `proxy_admin_viewer` user called `brownout-init` and run `init`.
 
 ```bash
-LITELLM_MASTER_KEY=sk-...
-export BROWNOUT_INIT_KEY=$(curl -s http://localhost:4000/user/new \
+read -rs LITELLM_MASTER_KEY && typeset +x LITELLM_MASTER_KEY
+BROWNOUT_INIT_KEY=$(curl -sSf http://localhost:4000/user/new \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"user_role": "proxy_admin_viewer"}' | jq -r .key)
+  -d '{"user_id": "brownout-init", "user_role": "proxy_admin_viewer"}' | jq -er .key) \
+  && export BROWNOUT_INIT_KEY
 uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
 ```
 
-The master key stays unexported, so `uvx` and the packages it installs never see it. Run these from
-a shell that exports no other secret, such as a provider key.
+The first line waits, without a prompt, for you to paste the master key. It keeps the key off the
+screen, out of shell history and unexported, so `uvx` and the packages it installs never receive it
+from the shell. Run these from a shell that exports no other secret, such as a provider key. If
+`curl` fails, the key stays unset and `init` refuses to start. A second run of the block fails at
+`curl`, because the user already exists.
 
 `init` lists every request brownout would refuse once enabled. Typical findings are keys without a
 team, keys with a budget of their own, and teams or models without a budget or a price. Each finding
 prints the command or the config lines that resolve it, with a placeholder for any value only you can
-choose. Resolve them and rerun `init` until it exits `0`. Only then add `--write`, which refuses to
-overwrite an existing file.
+choose. Resolve them and rerun only the `init` line, which reuses `$BROWNOUT_INIT_KEY`, until it
+exits `0`. Only then add `--write`, which refuses to overwrite an existing file.
 
 `--write` creates two files and leaves your config as it was.
 
@@ -78,10 +82,14 @@ overwrite an existing file.
   `budget_exceeded_status_code: 429` and derives `coordination_redis` from a Redis cache if you have
   one.
 
-Check both files.
+Check both files, then delete the `brownout-init` user, which deletes its key too. The same delete
+recovers a key lost with a closed shell before you run the block again.
 
 ```bash
 uvx --from litellm-brownout brownout check --gateway-config brownout.config.yaml --manifest brownout.yaml
+curl -sSf http://localhost:4000/user/delete \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"user_ids": ["brownout-init"]}'
 ```
 
 ### 2. Install
