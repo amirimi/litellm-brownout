@@ -82,7 +82,11 @@ as the original. The manifest, which holds no secrets, prints as a diff.
 
 Each finding prints as `rule-id<TAB>subject<TAB>detail`, followed by the command or the YAML lines
 that resolve it. A value only the operator can choose, such as a team's budget, is left as a
-placeholder in angle brackets, so the command fails until it is filled in.
+placeholder in angle brackets, and LiteLLM refuses the command until it is filled in. A team id's
+placeholder sits inside its JSON quotes, as in `"team_id": "<YOUR TEAM ID>"`, because LiteLLM
+refuses a team that does not exist. A budget's placeholder stands bare, because a budget is a
+number. A duration's placeholder also stands bare and asks for the quotes, because LiteLLM 1.95.1
+stores a duration it cannot parse.
 
 | Exit code | Meaning |
 |---|---|

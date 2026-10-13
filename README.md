@@ -26,9 +26,10 @@ other endpoint passes through untouched.
   per-model budget.
 - **Checked fallbacks.** A fallback must be served, priced, cleared for the route's data class and
   callable by the caller's key and team. A fallback that fails a check leaves the primary serving.
-- **Disclosure.** `x-brownout-*` response headers name the model that served and the reason for a
-  downgrade. The same facts reach LiteLLM's spend logs and every logging integration the gateway
-  runs, such as Langfuse or OpenTelemetry.
+- **Disclosure.** `x-brownout-*` response headers name the model group that served and the reason
+  for a downgrade. The response body's `model` keeps the name the caller asked for, so a caller reads
+  `x-brownout-route-served` to learn what answered. The same facts reach LiteLLM's spend logs and
+  every logging integration the gateway runs, such as Langfuse or OpenTelemetry.
 
 ## Requirements
 

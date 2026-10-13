@@ -116,7 +116,12 @@ def test_a_team_with_a_rejected_duration_is_a_tumbles_finding():
     assert [(f.rule, f.subject) for f in findings] == [
         (RuleId.DURATION_TUMBLES, "biweekly")
     ]
-    assert "budget_duration" in findings[0].resolution[0]
+    command = findings[0].resolution[0]
+    assert (
+        '"budget_duration": <YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">' in command
+    )
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(json_body(command))
 
 
 def test_teamless_and_self_budgeted_keys_are_findings_with_runnable_commands():
@@ -134,7 +139,10 @@ def test_teamless_and_self_budgeted_keys_are_findings_with_runnable_commands():
         (RuleId.TEAM_IN_MANIFEST, "hash-b"),
         (RuleId.KEY_HAS_NO_BUDGET, "capped"),
     ]
-    assert "<YOUR TEAM>" in findings[0].resolution[0]
+    assert json.loads(json_body(findings[0].resolution[0])) == {
+        "key": "hash-b",
+        "team_id": "<YOUR TEAM ID>",
+    }
     assert json.loads(json_body(findings[1].resolution[0])) == {
         "key": "hash-c",
         "max_budget": None,
