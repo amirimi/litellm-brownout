@@ -355,16 +355,24 @@ def _caller_routing(refused_keys: list[str]) -> Refusal:
 
 
 def _ungoverned(team_id: str | None) -> Refusal:
-    subject = team_id
-    if subject is None:
-        subject = "<missing>"
+    if team_id is None:
+        return _ungoverned_refusal(
+            "<missing>",
+            "This key belongs to no team. Brownout governs team budgets only, so its "
+            "spend cannot be governed.",
+        )
+    return _ungoverned_refusal(
+        team_id,
+        "This key's team declares no budget in the brownout manifest, so its spend "
+        "cannot be governed.",
+    )
+
+
+def _ungoverned_refusal(subject: str, message: str) -> Refusal:
     return Refusal(
         rule=RuleId.TEAM_IN_MANIFEST,
         reason=RefusalReason.TEAM_NOT_IN_MANIFEST,
-        message=(
-            "This key's team declares no budget in the brownout manifest, so its spend "
-            "cannot be governed."
-        ),
+        message=message,
         detail={"team_id": subject},
         incident_subject=subject,
     )

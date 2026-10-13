@@ -113,7 +113,7 @@ says.
 | Spend counter unreadable | 503 `spend_counter_unreadable`, rule `spend-readable`, plus a platform incident |
 | Caller's key or team may not call the fallback | Serve the primary, disclose `fallback_rejected`, and announce `brownout_fallback_rejected` once per route and rejection per window |
 | Permission check itself cannot run | Serve the primary, and announce a platform incident and `brownout_fallback_rejected` |
-| LiteLLM cannot write a reservation to Redis | LiteLLM refuses every budgeted request on the gateway, governed or not, before the plugin runs, because `fail_closed_budget_enforcement` is on. Run Redis with failover |
+| LiteLLM cannot write a reservation to Redis | LiteLLM refuses every budgeted request on the gateway with a 503, governed or not, before the plugin runs, because `fail_closed_budget_enforcement` is on. Once Redis is back, LiteLLM keeps refusing until its Redis circuit breaker resets after `REDIS_CIRCUIT_BREAKER_RECOVERY_TIMEOUT`, 60 seconds by default. Run Redis with failover |
 | Redis unavailable for a claim | Deduplication falls back to per-replica and says so in the log |
 | Redis loses the plugin's claim keys, through a flush or eviction | Every announcement in the current window repeats once. Run Redis with persistence and the `noeviction` policy |
 | Non-chat call type (embeddings, images, audio) or `/v1/messages` and `/v1/responses` | Passed through untouched, at full price and without headers |

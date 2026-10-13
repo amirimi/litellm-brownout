@@ -424,9 +424,25 @@ async def test_an_aligned_envelope_raises_no_incident(team):
     assert sink.incidents == []
 
 
-@pytest.mark.parametrize("team_id", ["team-nobody-declared", None])
+@pytest.mark.parametrize(
+    ("team_id", "message"),
+    [
+        pytest.param(
+            "team-nobody-declared",
+            "This key's team declares no budget in the brownout manifest, so its "
+            "spend cannot be governed.",
+            id="undeclared-team",
+        ),
+        pytest.param(
+            None,
+            "This key belongs to no team. Brownout governs team budgets only, so its "
+            "spend cannot be governed.",
+            id="no-team",
+        ),
+    ],
+)
 async def test_a_key_outside_the_manifest_fails_closed_and_pages_the_platform(
-    team, team_id
+    team, team_id, message
 ):
     sink = RecordingSink()
     handler = build_handler(team, sink, spend=10.0)
@@ -437,6 +453,7 @@ async def test_a_key_outside_the_manifest_fails_closed_and_pages_the_platform(
 
     assert error.status_code == 503
     assert error.detail["rule"] == "team-in-manifest"
+    assert error.detail["message"] == message
     assert [incident.reason for incident in sink.incidents] == ["team_not_in_manifest"]
 
 

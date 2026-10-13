@@ -216,7 +216,8 @@ such as a refused downgrade and a broken manifest. `docker compose down` stops t
 - Router fallbacks never apply to governed requests. A provider error on the chosen model group
   reaches the caller, while failover between deployments of one group still works.
 - Redis sits on the request path. While LiteLLM cannot write a reservation, it refuses every budgeted
-  request. Run Redis with failover, persistence and the `noeviction` policy.
+  request. Once Redis is back, LiteLLM keeps refusing until its Redis circuit breaker resets, 60
+  seconds by default. Run Redis with failover, persistence and the `noeviction` policy.
 - Brownout imports three private LiteLLM helpers and refuses to start below 1.95.1. A release that
   renames a helper stops the gateway at startup, so pin the image tag and upgrade only to a release
   the weekly `litellm matrix` workflow has passed.
