@@ -1,0 +1,10 @@
+services:
+  litellm:
+    image: brownout-lab-wheel
+    build:
+      context: .
+      dockerfile: lab/Dockerfile.wheel
+      args:
+        LITELLM_TAG: ${LITELLM_TAG:-v1.104.2}
+    volumes: !override
+      - ./config:/app/config:ro

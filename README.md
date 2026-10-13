@@ -23,12 +23,63 @@ gateway, because the callback governs every chat completion it serves.
 
 ## Install
 
-The plugin is a Python package, `brownout`, that you mount into the stock LiteLLM image. It is
-tested on LiteLLM 1.95.1 to 1.104. Clone the repository to get the package, the example config and a
-lab stack. The lab needs Docker Compose, Python 3.12+, [uv](https://docs.astral.sh/uv/), `curl` and
-`jq`. The first `docker compose up` pulls the LiteLLM image, about 1.2 GB, and the first `uv run`
-builds a local environment of about 680 MB and 117 packages, so the first start can take several
-minutes.
+Two steps add brownout to a LiteLLM gateway you already run, on any release from 1.95.1 to 1.104.
+`brownout init` reads the running gateway and prepares the files, then one line installs the package
+into the gateway image.
+
+### 1. Prepare
+
+```bash
+export LITELLM_MASTER_KEY=sk-...
+uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
+```
+
+`init` only reads LiteLLM. It prints what it would write, and `--write` writes it:
+
+- `brownout.yaml`, a manifest with one entry per LiteLLM team that has a budget. Each entry copies the
+  team's budget and window, warns at 75% and 90%, and has no fallback until its owner adds one. With
+  `--manifest yours.yaml`, your manifest stays as written, and `init` appends the teams it lacks and
+  reports where it disagrees with LiteLLM.
+- `brownout.config.yaml`, your gateway config with the changes brownout needs, comments kept. It adds
+  the callback, turns on `fail_closed_budget_enforcement`, takes `budget_alerts` out of
+  `alert_types`, and derives `coordination_redis` from a Redis cache when you have one. Your original
+  config is never touched.
+
+It then lists every request brownout would refuse once enabled, such as keys without a team, keys
+with a budget of their own, and teams or models without a budget or a price. Each one comes with the
+command that resolves it, and the choice that is yours, such as a budget, is left as a placeholder.
+Run `init` again until it exits `0`, then confirm the written files.
+
+```bash
+uvx --from litellm-brownout brownout check --gateway-config brownout.config.yaml --manifest brownout.yaml
+```
+
+### 2. Install
+
+Add one line to the image your gateway already runs. The LiteLLM image ships without `pip`, so the
+line bootstraps it first.
+
+```dockerfile
+FROM docker.litellm.ai/berriai/litellm:v1.104.2
+RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
+```
+
+For a gateway installed with pip, run `pip install --no-deps litellm-brownout==0.1.0` in its
+environment. `--no-deps` keeps pip from replacing the gateway's LiteLLM, and brownout's own startup
+check refuses a release outside its range. Point the gateway at `brownout.config.yaml`, set
+`BROWNOUT_MANIFEST` to the path of `brownout.yaml` inside the container, and restart it.
+
+Once brownout is on, every chat call must come from a key of a team in the manifest. The master key
+has no team, so chat traffic needs team keys.
+
+## Quickstart
+
+The lab runs LiteLLM with the plugin mounted, alongside Postgres and Redis. Those are real processes,
+and only the model responses and token prices are synthetic, so a run spends no provider money and
+you can watch brownout work without a gateway of your own. It needs Docker Compose, Python 3.12+,
+[uv](https://docs.astral.sh/uv/), `curl` and `jq`. The first `docker compose up` pulls the LiteLLM
+image, about 1.2 GB, and the first `uv run` builds a local environment of about 680 MB and 117
+packages, so the first start can take several minutes.
 
 ```bash
 git clone https://github.com/amk9978/litellm-brownout.git
@@ -36,12 +87,8 @@ cd litellm-brownout
 cp .env.example .env
 ```
 
-## Quickstart
-
-The lab runs LiteLLM with the plugin mounted, alongside Postgres and Redis.
-Those are real processes, and only the model responses and token prices are synthetic, so a run
-spends no provider money. The lab team has a $1.00 budget, warning tiers at 75% and 90%, and a
-primary route that downgrades at 75%.
+The lab team has a $1.00 budget, warning tiers at 75% and 90%, and a primary route that downgrades
+at 75%.
 
 ```bash
 docker compose up -d --wait
@@ -127,7 +174,7 @@ rules in your CI, and the gateway runs the request rules on every governed reque
 | Budgets belong to teams, and every governed key belongs to a manifest team | 503 and a platform incident | `team-in-manifest` |
 | Keys carry no budget of their own, whether `max_budget`, `model_max_budget` or `budget_limits` | 503 and a platform incident | `key-has-no-budget` |
 | The team's LiteLLM `max_budget` equals `envelope_usd` | 503 and a platform incident | `ceiling-matches-envelope` |
-| The team's LiteLLM `budget_duration` equals the manifest's | Tier windows drift from LiteLLM's resets | Documented, not checked |
+| The team's LiteLLM `budget_duration` equals the manifest's | Tier windows drift from LiteLLM's resets | `duration-matches`, run by `brownout init` |
 | The window tumbles with LiteLLM's resets | The manifest refuses to load | `duration-tumbles` |
 | No user, organisation, end-user or tag budget blocks first | LiteLLM refuses before any tier fires | Documented, not checked |
 | No stacked team `budget_limits` | A daily limit inside a weekly one hits with no brownout first | Documented, not checked |
@@ -141,11 +188,12 @@ rules in your CI, and the gateway runs the request rules on every governed reque
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade | Documented, not checked |
 | LiteLLM is 1.95.1 or newer | The gateway refuses to start. It warns on 1.95.1 to 1.100, whose boundary can close a window above the budget, and past the tested 1.104 | `supported-litellm` |
 
-## Add it to your gateway
+## Set it up by hand
 
-Four changes wire the plugin into your own gateway. Mount the package into the LiteLLM container,
-point one environment variable at your manifest, name the handler in the gateway config, then
-create each team in LiteLLM to match the manifest.
+`brownout init` makes these changes for you. This section shows what they are, and how to mount the
+source in place of installing the package. Four changes wire the plugin into a gateway. Mount the
+package into the LiteLLM container, point one environment variable at your manifest, name the handler
+in the gateway config, then create each team in LiteLLM to match the manifest.
 
 The callback governs every chat-completion call on the gateway, and a key whose team is missing
 from the manifest gets a 503. On a shared gateway, add every team that sends chat traffic to the
