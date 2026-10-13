@@ -12,6 +12,7 @@ from typing import Any, Final
 import httpx
 import litellm
 import yaml
+from litellm.proxy._types import hash_token
 from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
 
 from . import settings
@@ -21,11 +22,11 @@ from .onboarding import (
     ConfigChange,
     Finding,
     SetSetting,
+    admin_keys_notice,
     config_plan,
     describe_change,
     exit_code,
     key_findings,
-    master_key_notice,
     model_findings,
     nothing_to_govern,
     reconcile_findings,
@@ -111,10 +112,11 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _init_command(arguments: argparse.Namespace) -> int:
-    key: Final = settings.master_key()
+    key: Final = settings.init_key()
     if not key:
         print(
-            "init reads the gateway as an admin, so set LITELLM_MASTER_KEY",
+            "init reads the gateway, so set BROWNOUT_INIT_KEY to a key that can read "
+            "it, such as one for a proxy_admin_viewer user",
             file=sys.stderr,
         )
         return UNREADY
@@ -132,12 +134,18 @@ def _init_command(arguments: argparse.Namespace) -> int:
         timeout=GATEWAY_TIMEOUT_SECONDS,
     ) as client:
         return init(
-            options, client, [alert_type.value for alert_type in DEFAULT_ALERT_TYPES]
+            options,
+            client,
+            [alert_type.value for alert_type in DEFAULT_ALERT_TYPES],
+            hash_token(key),
         )
 
 
 def init(
-    options: InitOptions, client: httpx.Client, default_alert_types: Sequence[str]
+    options: InitOptions,
+    client: httpx.Client,
+    default_alert_types: Sequence[str],
+    own_token: str,
 ) -> int:
     taken: Final = _taken_outputs(options)
     if taken:
@@ -148,7 +156,7 @@ def init(
             )
         return UNREADY
     try:
-        prepared = _prepare(options, client, default_alert_types)
+        prepared = _prepare(options, client, default_alert_types, own_token)
     except (OSError, DocumentError, GatewayReadError) as error:
         print(
             f"init could not read its inputs or the gateway: {error}", file=sys.stderr
@@ -164,7 +172,11 @@ def init(
 
 
 def _check_command(arguments: argparse.Namespace) -> int:
-    violations: Final = check(arguments.gateway_config, arguments.manifest)
+    try:
+        violations = check(arguments.gateway_config, arguments.manifest)
+    except yaml.YAMLError as error:
+        print(_unreadable_yaml(arguments.gateway_config, error), file=sys.stderr)
+        return UNREADY
     for violation in violations:
         print(f"{violation.rule}\t{violation.subject}\t{violation.message}")
     if violations:
@@ -172,6 +184,15 @@ def _check_command(arguments: argparse.Namespace) -> int:
         return 1
     print(f"brownout check passed on LiteLLM {litellm_release()}")
     return 0
+
+
+def _unreadable_yaml(path: Path, error: yaml.YAMLError) -> str:
+    mark = None
+    if isinstance(error, yaml.MarkedYAMLError):
+        mark = error.problem_mark or error.context_mark
+    if mark is None:
+        return f"{path} is not valid YAML"
+    return f"{path} is not valid YAML at line {mark.line + 1}, column {mark.column + 1}"
 
 
 def _taken_outputs(options: InitOptions) -> list[Path]:
@@ -188,7 +209,10 @@ def _taken_outputs(options: InitOptions) -> list[Path]:
 
 
 def _prepare(
-    options: InitOptions, client: httpx.Client, default_alert_types: Sequence[str]
+    options: InitOptions,
+    client: httpx.Client,
+    default_alert_types: Sequence[str],
+    own_token: str,
 ) -> Prepared:
     config_document: Final = _load_document(
         options.gateway_config, options.gateway_config.read_text(encoding="utf-8")
@@ -211,7 +235,7 @@ def _prepare(
         manifest_text=manifest_text,
         manifest_out_text=manifest_out_text,
         findings=_findings(
-            options, existing, snapshot, config_document, manifest_document
+            options, existing, snapshot, config_document, manifest_document, own_token
         ),
     )
 
@@ -250,10 +274,11 @@ def _findings(
     snapshot: GatewaySnapshot,
     config_document: YamlDocument,
     manifest_document: YamlDocument | None,
+    own_token: str,
 ) -> list[Finding]:
     findings: list[Finding] = [
         *team_findings(snapshot.teams, options.gateway),
-        *key_findings(snapshot.keys, options.gateway),
+        *key_findings(snapshot.keys, options.gateway, own_token),
         *model_findings(snapshot.models),
     ]
     if existing is not None:
@@ -269,7 +294,7 @@ def _findings(
                 file_rules(written, gateway_file(to_plain(config_document)))
             )
         )
-    findings.append(master_key_notice())
+    findings.append(admin_keys_notice())
     return findings
 
 

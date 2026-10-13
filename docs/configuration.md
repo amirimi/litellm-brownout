@@ -39,12 +39,12 @@ already runs, and announcements go to the gateway log, as
 
 ## Prepare with `brownout init`
 
-`init` reads a running gateway with the master key, builds or reconciles the manifest, prepares the
+`init` reads a running gateway with a read-only key, builds or reconciles the manifest, prepares the
 gateway config, and lists what brownout would refuse. It issues only `GET` requests to
 `/team/list`, `/key/list` and `/model/info`, and never writes to LiteLLM.
 
 ```bash
-LITELLM_MASTER_KEY=sk-... brownout init --gateway http://localhost:4000 --gateway-config config.yaml --write
+BROWNOUT_INIT_KEY=sk-... brownout init --gateway http://localhost:4000 --gateway-config config.yaml --write
 ```
 
 | Option | Default | Purpose |
@@ -56,8 +56,13 @@ LITELLM_MASTER_KEY=sk-... brownout init --gateway http://localhost:4000 --gatewa
 | `--config-out` | `brownout.config.yaml` | Where the prepared gateway config is written, comments and key order kept |
 | `--write` | off | Write both files. Without it `init` prints the changes and the findings and writes nothing |
 
-The master key comes only from `LITELLM_MASTER_KEY`, so it never lands in shell history. `init`
-refuses to write over an existing file or over one of its inputs. A config with a duplicate key stops
+`init` reads its key only from `BROWNOUT_INIT_KEY`, so the key never lands in shell history. A key
+for a `proxy_admin_viewer` user is enough. On 1.95.1 and 1.104.2 such a key reads all three
+endpoints, sees provider keys in `/model/info` as null, and gets a 403 from any write. The commands
+`init` prints use `$LITELLM_MASTER_KEY`, so the master key stays in the operator's shell and out of
+`init`'s process. `init` finds its own key in `/key/list` and leaves it out of the key findings.
+
+`init` refuses to write over an existing file or over one of its inputs. A config with a duplicate key stops
 it, because LiteLLM's loader silently keeps the last value. Settings saved through LiteLLM's admin UI
 live in its database, so the changes `init` lists cover only the file.
 
@@ -72,7 +77,7 @@ placeholder in angle brackets, so the command fails until it is filled in.
 
 | Exit code | Meaning |
 |---|---|
-| `0` | Ready. The only finding is the notice that the master key cannot make chat calls |
+| `0` | Ready. The only finding is the notice that the admin keys cannot make chat calls |
 | `1` | Findings remain |
 | `2` | The gateway or an input could not be read, an input is invalid, or an output path is taken |
 
@@ -239,8 +244,9 @@ settings.
 uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml
 ```
 
-The command prints one line per violation, as rule id, subject and message, and exits non-zero
-when any rule fails. It reads `config.yaml` as YAML and fills a deployment's missing prices from
+The command prints one line per violation, as rule id, subject and message, and exits `1` when any
+rule fails. A config that is not valid YAML exits `2`, reported by path, line and column only,
+because the offending line can hold a secret. It reads `config.yaml` as YAML and fills a deployment's missing prices from
 LiteLLM's cost map, so it runs without starting a gateway.
 
 ## Fallback checks

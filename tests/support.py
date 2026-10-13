@@ -27,6 +27,7 @@ from brownout.rules import GatewaySettings, ModelGroup
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 CONFIG_DIR: Final = REPO_ROOT / "config"
+SECRET: Final = "SENTINEL-7f3a"
 DATA_CLASS_ORDER: Final = ("internal", "customer_pii")
 FIELD_KEYS: Final = frozenset(
     {
@@ -64,6 +65,31 @@ def lab_spend_counter(team_id: str) -> float:
         return total
     finally:
         client.close()
+
+
+def config_with_inline_secrets(directory: Path) -> Path:
+    config = yaml.safe_load((CONFIG_DIR / "config.yaml").read_text(encoding="utf-8"))
+    general = config["general_settings"]
+    general["master_key"] = f"sk-{SECRET}"
+    general["database_url"] = f"postgresql://llm:{SECRET}@db:5432/litellm"
+    general["alerting"] = ["slack"]
+    general["alert_types"] = ["llm_exceptions", "budget_alerts"]
+    for derived in ("coordination_redis", "fail_closed_budget_enforcement"):
+        general.pop(derived)
+    settings = config["litellm_settings"]
+    settings.pop("callbacks")
+    settings["cache"] = True
+    settings["cache_params"] = {
+        "type": "redis",
+        "host": f"{SECRET}.redis.internal",
+        "port": 6379,
+        "password": SECRET,
+    }
+    for deployment in config["model_list"]:
+        deployment["litellm_params"]["api_key"] = f"sk-{SECRET}"
+    path = directory / "config.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    return path
 
 
 def lab_gateway_config() -> Mapping[str, Any]:

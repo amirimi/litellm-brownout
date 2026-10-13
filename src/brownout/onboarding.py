@@ -101,9 +101,13 @@ def team_findings(teams: Iterable[LiteLLMTeam], gateway: str) -> list[Finding]:
     return [_team_finding(team, gateway) for team in teams if not _governable(team)]
 
 
-def key_findings(keys: Iterable[LiteLLMKey], gateway: str) -> list[Finding]:
+def key_findings(
+    keys: Iterable[LiteLLMKey], gateway: str, own_token: str
+) -> list[Finding]:
     findings: list[Finding] = []
     for key in keys:
+        if key.token == own_token:
+            continue
         subject = key.alias or key.token
         if key.team_id is None:
             findings.append(
@@ -226,12 +230,12 @@ def violation_findings(violations: Iterable[Violation]) -> list[Finding]:
     ]
 
 
-def master_key_notice() -> Finding:
+def admin_keys_notice() -> Finding:
     return Finding(
         RuleId.TEAM_IN_MANIFEST,
-        "master key",
-        "has no team, so chat calls made with it will be refused. Send chat traffic "
-        "with team keys",
+        "admin keys",
+        "the master key and the key init runs with have no team, so chat calls made "
+        "with them will be refused. Send chat traffic with team keys",
         (),
         False,
     )
