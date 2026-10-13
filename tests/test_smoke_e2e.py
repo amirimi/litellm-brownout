@@ -8,12 +8,14 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Final, assert_never
 
 import httpx
 import pytest
 
 from brownout import bridge
+from brownout.manifest import Manifest
 
 from .support import FIELD_KEYS, REPO_ROOT, lab_spend_counter
 
@@ -30,6 +32,9 @@ REQUEST_TIMEOUT_SECONDS: Final = 30.0
 BUDGET_REFUSAL_STATUSES: Final = frozenset({422, 429})
 BUDGET_REFUSAL_MESSAGE: Final = "Budget has been exceeded"
 ANNOUNCEMENT_LINE: Final = re.compile(r"brownout (\{.*\})\s*$")
+FINDING_LINE: Final = re.compile(r"^([a-z-]+)\t([^\t]+)\t")
+LAB_CONFIG: Final = REPO_ROOT / "config" / "config.yaml"
+LAB_MANIFEST: Final = REPO_ROOT / "config" / "manifest.yaml"
 DECLARED_ANNOUNCEMENTS: Final = frozenset(
     {"brownout_tier_crossed", "brownout_route_degraded", "brownout_incident"}
 )
@@ -94,7 +99,7 @@ class ForgedRequest:
 def lab_run() -> LabRun:
     started_at = datetime.now(UTC).isoformat()
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "lab" / "setup_lab.py")],
+        [sys.executable, str(REPO_ROOT / "tests" / "setup_lab.py")],
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
@@ -475,3 +480,187 @@ def test_caller_sent_context_window_fallbacks_are_refused(
 ) -> None:
     assert caller_fallback.status_code == 400
     assert "caller_routing_not_permitted" in caller_fallback.body
+
+
+@dataclass(frozen=True)
+class InitRun:
+    exit_code: int
+    output: str
+
+    @property
+    def findings(self) -> set[tuple[str, str]]:
+        found = set()
+        for line in self.output.splitlines():
+            match = FINDING_LINE.match(line)
+            if match is not None and match.group(2) != "...":
+                found.add((match.group(1), match.group(2)))
+        return found
+
+    def resolution(self, rule: str, subject: str) -> list[str]:
+        lines = self.output.splitlines()
+        start = lines.index(
+            next(line for line in lines if line.startswith(f"{rule}\t{subject}\t"))
+        )
+        resolution = []
+        for line in lines[start + 1 :]:
+            if not line.startswith("    "):
+                break
+            resolution.append(line.strip())
+        return resolution
+
+
+def _run_init(arguments: list[str]) -> InitRun:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "brownout.cli",
+            "init",
+            "--gateway",
+            GATEWAY,
+            *arguments,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    return InitRun(result.returncode, result.stdout)
+
+
+def _run_decision(command: str) -> int:
+    result = subprocess.run(
+        ["bash", "-c", f"{command} -s -o /dev/null -w '%{{http_code}}'"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return int(result.stdout or 0)
+
+
+def _generate_key(body: dict[str, Any]) -> str:
+    response = httpx.post(
+        f"{GATEWAY}/key/generate",
+        headers=_admin_headers(),
+        json=body,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return response.json()["key"]
+
+
+def _delete_keys(keys: list[str]) -> None:
+    httpx.post(
+        f"{GATEWAY}/key/delete",
+        headers=_admin_headers(),
+        json={"keys": keys},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+@requires_stack
+def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findings(
+    lab_run: LabRun, tmp_path: Path
+) -> None:
+    baseline = _run_init(["--gateway-config", str(LAB_CONFIG)])
+    suffix = datetime.now(UTC).strftime("%H%M%S%f")
+    teamless_alias = f"e2e-teamless-{suffix}"
+    capped_alias = f"e2e-capped-{suffix}"
+    teamless_key = _generate_key({"key_alias": teamless_alias})
+    capped_key = _generate_key(
+        {"key_alias": capped_alias, "team_id": LAB_TEAM_ID, "max_budget": 5.0}
+    )
+    try:
+        manifest_out = tmp_path / "brownout.yaml"
+        config_out = tmp_path / "brownout.config.yaml"
+        prepared = _run_init(
+            [
+                "--gateway-config",
+                str(LAB_CONFIG),
+                "--manifest-out",
+                str(manifest_out),
+                "--config-out",
+                str(config_out),
+                "--write",
+            ]
+        )
+
+        assert prepared.exit_code == 1
+        assert ("team-in-manifest", teamless_alias) in prepared.findings
+        assert ("key-has-no-budget", capped_alias) in prepared.findings
+        written = Manifest.from_file(manifest_out).team_policy(LAB_TEAM_ID)
+        assert written is not None
+        assert (written.envelope_usd, written.budget_duration) == (
+            LAB_ENVELOPE_USD,
+            "7d",
+        )
+        checked = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "brownout.cli",
+                "check",
+                "--gateway-config",
+                str(config_out),
+                "--manifest",
+                str(manifest_out),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        assert checked.returncode == 0, checked.stdout
+
+        for rule, subject, filled in [
+            ("team-in-manifest", teamless_alias, LAB_TEAM_ID),
+            ("key-has-no-budget", capped_alias, None),
+        ]:
+            command = prepared.resolution(rule, subject)[0]
+            if filled is not None:
+                command = command.replace("<YOUR TEAM>", json.dumps(filled))
+            assert _run_decision(command) == 200, command
+
+        resolved = _run_init(["--gateway-config", str(LAB_CONFIG)])
+        assert resolved.findings == baseline.findings
+        assert resolved.exit_code == baseline.exit_code
+    finally:
+        _delete_keys([teamless_key, capped_key])
+
+
+@requires_stack
+def test_init_merges_into_an_existing_manifest_and_reports_every_mismatch(
+    lab_run: LabRun, tmp_path: Path
+) -> None:
+    theirs = tmp_path / "theirs.yaml"
+    original = LAB_MANIFEST.read_text(encoding="utf-8")
+    drifted = original.replace(
+        'policy_epoch: "budget-lab-v1"\n    envelope_usd: 1.0\n    budget_duration: "7d"',
+        'policy_epoch: "budget-lab-v1"\n    envelope_usd: 2.0\n    budget_duration: "1d"',
+    )
+    assert drifted != original
+    theirs.write_text(drifted, encoding="utf-8")
+    manifest_out = tmp_path / "brownout.yaml"
+
+    merged = _run_init(
+        [
+            "--gateway-config",
+            str(LAB_CONFIG),
+            "--manifest",
+            str(theirs),
+            "--manifest-out",
+            str(manifest_out),
+            "--config-out",
+            str(tmp_path / "brownout.config.yaml"),
+            "--write",
+        ]
+    )
+
+    assert merged.exit_code == 1
+    assert manifest_out.read_text(encoding="utf-8").startswith(drifted)
+    assert {
+        ("ceiling-matches-envelope", LAB_TEAM_ID),
+        ("duration-matches", LAB_TEAM_ID),
+        ("team-exists", "team-a"),
+        ("team-exists", "team-b"),
+    } <= merged.findings

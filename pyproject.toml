@@ -11,8 +11,10 @@ license-files = ["LICENSE"]
 authors = [{ name = "Amir Karimi" }]
 requires-python = ">=3.12"
 dependencies = [
+    "httpx>=0.28",
     "litellm[proxy]>=1.95.1,<1.105",
     "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
 ]
 
 [project.scripts]
@@ -20,7 +22,6 @@ brownout = "brownout.cli:main"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "redis>=5.0",

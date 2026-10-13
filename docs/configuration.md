@@ -37,6 +37,48 @@ The plugin has no delivery settings. Request facts reach whatever logging integr
 already runs, and announcements go to the gateway log, as
 [the enforcement reference](enforcement.md#request-facts-and-announcements) describes.
 
+## Prepare with `brownout init`
+
+`init` reads a running gateway with the master key, builds or reconciles the manifest, prepares the
+gateway config, and lists what brownout would refuse. It issues only `GET` requests to
+`/team/list`, `/key/list` and `/model/info`, and never writes to LiteLLM.
+
+```bash
+LITELLM_MASTER_KEY=sk-... brownout init --gateway http://localhost:4000 --gateway-config config.yaml --write
+```
+
+| Option | Default | Purpose |
+|---|---|---|
+| `--gateway` | required | The gateway's base URL |
+| `--gateway-config` | required | The config the gateway runs today. `init` reads it and never edits it |
+| `--manifest` | none | An existing manifest to reconcile. Its entries stay as written, and missing LiteLLM teams are appended |
+| `--manifest-out` | `brownout.yaml` | Where the manifest is written |
+| `--config-out` | `brownout.config.yaml` | Where the prepared gateway config is written, comments and key order kept |
+| `--write` | off | Write both files. Without it `init` prints the changes and the findings and writes nothing |
+
+The master key comes only from `LITELLM_MASTER_KEY`, so it never lands in shell history. `init`
+refuses to write over an existing file or over one of its inputs. A config with a duplicate key stops
+it, because LiteLLM's loader silently keeps the last value. Settings saved through LiteLLM's admin UI
+live in its database, so the changes `init` lists cover only the file.
+
+`init` never prints a value it read from the gateway config, because a config can hold secrets
+inline. It lists each config change by its setting name, shows only the values it sets itself, and
+reports an unreadable config by line and column. The prepared config gets the same file permissions
+as the original. The manifest, which holds no secrets, prints as a diff.
+
+Each finding prints as `rule-id<TAB>subject<TAB>detail`, followed by the command or the YAML lines
+that resolve it. A value only the operator can choose, such as a team's budget, is left as a
+placeholder in angle brackets, so the command fails until it is filled in.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Ready. The only finding is the notice that the master key cannot make chat calls |
+| `1` | Findings remain |
+| `2` | The gateway or an input could not be read, an input is invalid, or an output path is taken |
+
+An exit of `0` and a passing `brownout check` on the written files together mean that enabling the
+callback refuses nothing `init` did not list.
+
 ## Gateway config
 
 ```yaml
@@ -103,8 +145,8 @@ Failover between deployments of one model group, by `order` and cooldown, still 
 Every team in the manifest needs a LiteLLM team whose `max_budget` equals `envelope_usd` and whose
 `budget_duration` equals the manifest's, with a model list that includes every declared fallback.
 Keys carry no budget of their own, because a key budget would be a second ceiling the manifest
-knows nothing about. `lab/setup_lab.py` is the reference implementation and sends these two
-requests.
+knows nothing about. `brownout init` prints the request that creates or corrects each team it finds
+missing or drifted. A new team and its key take these two requests.
 
 ```bash
 curl -s localhost:4000/team/new \
@@ -118,7 +160,7 @@ curl -s localhost:4000/key/generate \
 
 The plugin checks the amount and the key budget on every request, and refuses with a 503 and a
 platform incident when either breaks its assumption. The duration is invisible at request time, so
-a drifted `budget_duration` has to be caught wherever the team is rendered.
+`brownout init` reports a drifted `budget_duration` as `duration-matches` before deploy.
 
 ## Team manifest
 
@@ -162,8 +204,8 @@ An unknown key at any level fails rule `manifest-schema` and names the key, so a
 
 ## The rules
 
-Each rule has an id. `brownout check` runs the file rules, and the handler runs the manifest rules
-when it loads. The request rules run on every governed request against LiteLLM's live Router and
+Each rule has an id. `brownout check` runs the file rules, `brownout init` also runs the init rules
+against LiteLLM's live teams, and the handler runs the manifest rules when it loads. The request rules run on every governed request against LiteLLM's live Router and
 settings, and a violation refuses the request. The downgrade rules run against the live Router only
 when a request wants a downgrade, and a violation withholds the downgrade and serves the primary.
 Each rule reads only what its request touches, which is the route, its fallback and the gateway
@@ -188,6 +230,9 @@ settings.
 | `model-priced` | The requested model is priced | Request |
 | `ceiling-matches-envelope` | The team's `max_budget` equals `envelope_usd` | Request |
 | `spend-readable` | The team's spend counter can be read | Request |
+| `duration-matches` | A manifest team's `budget_duration` equals its LiteLLM team's | Init |
+| `team-exists` | Every manifest team exists in LiteLLM | Init |
+| `fallback-in-team-models` | Every fallback is in its team's LiteLLM model list, unless the list allows every model | Init |
 | `supported-litellm` | LiteLLM is 1.95.1 or newer | Load |
 
 ```bash

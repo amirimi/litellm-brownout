@@ -18,6 +18,7 @@ from litellm.proxy.auth import auth_checks
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.spend_tracking import budget_reservation
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
+from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
 
 LITELLM_ROOT: Final = Path(importlib.util.find_spec("litellm").origin).parent
 REFUSE_WHOLE_FROM: Final = (1, 101, 0)
@@ -52,6 +53,10 @@ def _parameter_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[st
 
 def test_seam_spend_logs_metadata_reaches_every_logging_integration():
     assert "spend_logs_metadata" in litellm_logging._STANDARD_LOGGING_METADATA_KEYS
+
+
+def test_seam_litellm_sends_budget_alerts_by_default():
+    assert "budget_alerts" in [alert_type.value for alert_type in DEFAULT_ALERT_TYPES]
 
 
 def test_seam_the_pre_call_and_header_hooks_keep_their_parameters():

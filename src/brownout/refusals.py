@@ -25,6 +25,9 @@ class RuleId(StrEnum):
     MODEL_PRICED = "model-priced"
     CEILING_MATCHES_ENVELOPE = "ceiling-matches-envelope"
     SPEND_READABLE = "spend-readable"
+    DURATION_MATCHES = "duration-matches"
+    TEAM_EXISTS = "team-exists"
+    FALLBACK_IN_TEAM_MODELS = "fallback-in-team-models"
 
 
 @dataclass(frozen=True)

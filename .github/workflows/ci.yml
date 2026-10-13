@@ -47,3 +47,26 @@ jobs:
         run: docker compose logs litellm
       - if: always()
         run: docker compose down -v
+
+  wheel-install:
+    name: composed gateway sequence on the installed wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv build --wheel --out-dir dist
+      - run: cp .env.example .env
+      - run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml up -d --wait --build
+      - name: brownout check runs inside the gateway image
+        run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml exec -T litellm brownout check --gateway-config /app/config/config.yaml --manifest /app/config/manifest.yaml
+      - name: run the sequence
+        run: set -a && . ./.env && set +a && uv run pytest -m e2e
+        env:
+          LAB_REQUIRE_STACK: "1"
+      - if: always()
+        run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml logs litellm
+      - if: always()
+        run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml down -v

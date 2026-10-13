@@ -21,10 +21,10 @@ port free. Change the credentials and the bindings before exposing it anywhere e
 ```bash
 docker compose up -d --wait
 set -a; source .env; set +a
-KEY=$(uv run python lab/setup_lab.py | tail -1)
+KEY=$(uv run python tests/setup_lab.py | tail -1)
 ```
 
-`lab/setup_lab.py` resets the lab team and its claims in about 11 seconds. Rerun this step before
+`tests/setup_lab.py` resets the lab team and its claims in about 11 seconds. Rerun this step before
 every experiment, because the lab team and its claims carry over.
 
 ## 2. Send one request
