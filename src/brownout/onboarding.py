@@ -106,10 +106,8 @@ def key_findings(
 ) -> list[Finding]:
     findings: list[Finding] = []
     for key in keys:
-        if key.token == own_token:
-            continue
         subject = key.alias or key.token
-        if key.team_id is None:
+        if key.team_id is None and key.token != own_token:
             findings.append(
                 Finding(
                     RuleId.TEAM_IN_MANIFEST,
@@ -230,12 +228,21 @@ def violation_findings(violations: Iterable[Violation]) -> list[Finding]:
     ]
 
 
-def admin_keys_notice() -> Finding:
+def admin_keys_notice(own_key_teamless: bool) -> Finding:
+    if own_key_teamless:
+        return Finding(
+            RuleId.TEAM_IN_MANIFEST,
+            "admin keys",
+            "the master key and the key init runs with have no team, so chat calls "
+            "made with them will be refused. Send chat traffic with team keys",
+            (),
+            False,
+        )
     return Finding(
         RuleId.TEAM_IN_MANIFEST,
-        "admin keys",
-        "the master key and the key init runs with have no team, so chat calls made "
-        "with them will be refused. Send chat traffic with team keys",
+        "master key",
+        "the master key has no team, so chat calls made with it will be refused. "
+        "Send chat traffic with team keys",
         (),
         False,
     )

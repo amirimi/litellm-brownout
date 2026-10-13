@@ -48,7 +48,8 @@ gateway config, and lists what brownout would refuse. It issues only `GET` reque
 `/team/list`, `/key/list` and `/model/info`, and never writes to LiteLLM.
 
 ```bash
-BROWNOUT_INIT_KEY=sk-... brownout init --gateway http://localhost:4000 --gateway-config config.yaml --write
+read -rs BROWNOUT_INIT_KEY && export BROWNOUT_INIT_KEY
+brownout init --gateway http://localhost:4000 --gateway-config config.yaml --write
 ```
 
 | Option | Default | Purpose |
@@ -60,11 +61,15 @@ BROWNOUT_INIT_KEY=sk-... brownout init --gateway http://localhost:4000 --gateway
 | `--config-out` | `brownout.config.yaml` | Where the prepared gateway config is written, comments and key order kept |
 | `--write` | off | Write both files. Without it `init` prints the changes and the findings and writes nothing |
 
-`init` reads its key only from `BROWNOUT_INIT_KEY`, so the key never lands in shell history. A key
-for a `proxy_admin_viewer` user is enough. On 1.95.1 and 1.104.2 such a key reads all three
+`read -rs` keeps the key off the screen and out of shell history, and it shows no prompt. `init`
+reads its key only from `BROWNOUT_INIT_KEY`, which keeps the key off `init`'s command line and out
+of the process list. A key for a `proxy_admin_viewer` user is enough. On 1.95.1 and 1.104.2 such a key reads all three
 endpoints, sees provider keys in `/model/info` as null, and gets a 403 from any write. The commands
 `init` prints use `$LITELLM_MASTER_KEY`, so the master key stays in the operator's shell and out of
-`init`'s process. `init` finds its own key in `/key/list` and leaves it out of the key findings.
+`init`'s process. LiteLLM loads the nearest `.env` above its own install directory when `init`
+imports it, so a `.env` there that holds the master key reaches `init`'s process too. `init` finds its
+own key in `/key/list` and raises no team finding for it. A budget on that key is still a finding,
+and the admin-keys notice names the key only when it has no team.
 
 `init` refuses to write over an existing file or over one of its inputs. A config with a duplicate key stops
 it, because LiteLLM's loader silently keeps the last value. Settings saved through LiteLLM's admin UI
@@ -249,8 +254,9 @@ uv run brownout check --gateway-config config/config.yaml --manifest config/mani
 ```
 
 The command prints one line per violation, as rule id, subject and message, and exits `1` when any
-rule fails. A config that is not valid YAML exits `2`, reported by path, line and column only,
-because the offending line can hold a secret. It reads `config.yaml` as YAML and fills a deployment's missing prices from
+rule fails. An input that is missing, unreadable, not UTF-8, not valid YAML or not a YAML mapping
+exits `2`. The message names the file and gives at most a line and column or a byte offset, because
+the offending line can hold a secret. It reads `config.yaml` as YAML and fills a deployment's missing prices from
 LiteLLM's cost map, so it runs without starting a gateway.
 
 ## Fallback checks

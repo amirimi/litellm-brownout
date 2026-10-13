@@ -223,7 +223,7 @@ def test_init_writes_a_manifest_and_config_that_pass_the_check(tmp_path, capsys)
         )
         == 0
     )
-    assert "team-in-manifest\tadmin keys" in capsys.readouterr().out
+    assert "team-in-manifest\tmaster key" in capsys.readouterr().out
 
 
 def test_a_dry_run_writes_nothing_and_still_reports(tmp_path, capsys):
@@ -431,3 +431,109 @@ def test_the_key_init_runs_with_does_not_block_readiness(tmp_path):
     )
 
     assert exit_code == 0
+
+
+def test_a_team_key_running_init_is_left_out_of_the_admin_keys_notice(tmp_path, capsys):
+    own_key = {**TEAM_KEY, "token": INIT_TOKEN}
+
+    init(options(tmp_path), fake_gateway(keys=[own_key]), DEFAULT_ALERTS, INIT_TOKEN)
+
+    notice = next(
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("team-in-manifest\tmaster key\t")
+    )
+    assert "init runs with" not in notice
+
+
+def check_files(config: Path, manifest: Path) -> int:
+    return main(["check", "--gateway-config", str(config), "--manifest", str(manifest)])
+
+
+def test_check_blames_a_malformed_manifest_on_the_manifest(tmp_path, capsys):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("version: [\n", encoding="utf-8")
+
+    exit_code = check_files(LAB_CONFIG, manifest)
+
+    printed = capsys.readouterr()
+    assert exit_code == 2
+    assert printed.err == f"{manifest} is not valid YAML at line 2, column 1\n"
+    assert printed.out == ""
+
+
+def test_check_refuses_a_missing_manifest(tmp_path, capsys):
+    manifest = tmp_path / "missing.yaml"
+
+    exit_code = check_files(LAB_CONFIG, manifest)
+
+    assert exit_code == 2
+    assert capsys.readouterr().err == f"{manifest} was not found\n"
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "problem"),
+    [
+        pytest.param("missing.yaml", None, "was not found", id="missing"),
+        pytest.param(
+            "binary.yaml", b"\xff\n", "is not UTF-8 text at byte 0", id="not-utf8"
+        ),
+        pytest.param("empty.yaml", b"", "is not a YAML mapping", id="empty"),
+        pytest.param("list.yaml", b"- a\n- b\n", "is not a YAML mapping", id="list"),
+    ],
+)
+def test_check_refuses_a_gateway_config_it_cannot_use(
+    tmp_path, capsys, name, content, problem
+):
+    config = tmp_path / name
+    if content is not None:
+        config.write_bytes(content)
+
+    exit_code = check_files(config, LAB_MANIFEST)
+
+    printed = capsys.readouterr()
+    assert exit_code == 2
+    assert printed.err == f"{config} {problem}\n"
+    assert printed.out == ""
+
+
+@pytest.mark.parametrize(
+    ("content", "problem"),
+    [
+        pytest.param(b"\xff\n", "is not UTF-8 text at byte 0", id="not-utf8"),
+        pytest.param(b"", "is not a YAML mapping", id="empty"),
+        pytest.param(b"- a\n", "is not a YAML mapping", id="list"),
+    ],
+)
+def test_init_refuses_a_gateway_config_it_cannot_use(
+    tmp_path, capsys, content, problem
+):
+    config = tmp_path / "config.yaml"
+    config.write_bytes(content)
+
+    exit_code = init(
+        options(tmp_path, gateway_config=config),
+        fake_gateway(),
+        DEFAULT_ALERTS,
+        INIT_TOKEN,
+    )
+
+    assert exit_code == 2
+    assert f"{config} {problem}" in capsys.readouterr().err
+
+
+def test_init_reports_a_malformed_manifest_by_position(tmp_path, capsys):
+    manifest = tmp_path / "theirs.yaml"
+    manifest.write_text("version: [\n", encoding="utf-8")
+
+    exit_code = init(
+        options(tmp_path, manifest=manifest),
+        fake_gateway(),
+        DEFAULT_ALERTS,
+        INIT_TOKEN,
+    )
+
+    assert exit_code == 2
+    assert f"{manifest} is not valid YAML at line 2, column 1" in (
+        capsys.readouterr().err
+    )
