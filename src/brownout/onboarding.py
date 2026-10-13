@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, assert_never
 
 from .gateway_api import LiteLLMKey, LiteLLMModel, LiteLLMTeam
 from .manifest import WINDOW_SECONDS, Manifest, TeamPolicy
@@ -248,10 +248,32 @@ def nothing_to_govern() -> Finding:
     )
 
 
+def describe_change(change: ConfigChange) -> str:
+    match change:
+        case AppendSetting(section=section, key=key, value=value):
+            return f"add {value} to {section}.{key}"
+        case RemoveSetting(section=section, key=key):
+            return f"remove {section}.{key}"
+        case SetSetting(section=section, key=key, value=value):
+            return f"set {section}.{key}{_described_value(value)}"
+        case _:
+            assert_never(change)
+
+
 def exit_code(findings: Iterable[Finding]) -> int:
     if any(finding.blocking for finding in findings):
         return 1
     return 0
+
+
+def _described_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return f" to {str(value).lower()}"
+    if isinstance(value, int):
+        return f" to {value}"
+    if isinstance(value, Mapping):
+        return f" with {', '.join(value)}"
+    return ""
 
 
 def _governable(team: LiteLLMTeam) -> bool:
@@ -432,7 +454,7 @@ def _alert_types(
             "general_settings",
             "alert_types",
             [alert for alert in current if alert != BUDGET_ALERTS],
-            "LiteLLM's other alerts stay on",
+            "drops budget_alerts and keeps LiteLLM's other alerts",
         )
     ]
 

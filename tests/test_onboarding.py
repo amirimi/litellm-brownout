@@ -14,6 +14,7 @@ from brownout.onboarding import (
     SetSetting,
     TeamEntry,
     config_plan,
+    describe_change,
     exit_code,
     key_findings,
     master_key_notice,
@@ -264,7 +265,7 @@ def test_existing_alert_types_lose_only_budget_alerts():
             "general_settings",
             "alert_types",
             ["outage_alerts"],
-            "LiteLLM's other alerts stay on",
+            "drops budget_alerts and keeps LiteLLM's other alerts",
         ),
     )
 
@@ -307,3 +308,43 @@ def test_only_the_master_key_notice_leaves_init_ready():
     assert master_key_notice().blocking is False
     assert exit_code([master_key_notice()]) == 0
     assert exit_code([master_key_notice(), blocking]) == 1
+
+
+@pytest.mark.parametrize(
+    ("change", "described"),
+    [
+        (
+            AppendSetting("litellm_settings", "callbacks", "brownout.gateway.handler"),
+            "add brownout.gateway.handler to litellm_settings.callbacks",
+        ),
+        (
+            RemoveSetting("general_settings", "disable_budget_reservation"),
+            "remove general_settings.disable_budget_reservation",
+        ),
+        (
+            SetSetting(
+                "general_settings", "fail_closed_budget_enforcement", True, None
+            ),
+            "set general_settings.fail_closed_budget_enforcement to true",
+        ),
+        (
+            SetSetting("litellm_settings", "budget_exceeded_status_code", 429, None),
+            "set litellm_settings.budget_exceeded_status_code to 429",
+        ),
+        (
+            SetSetting(
+                "general_settings",
+                "coordination_redis",
+                {"host": "redis.internal", "password": "hunter2"},
+                None,
+            ),
+            "set general_settings.coordination_redis with host, password",
+        ),
+        (
+            SetSetting("general_settings", "alert_types", ["llm_exceptions"], None),
+            "set general_settings.alert_types",
+        ),
+    ],
+)
+def test_a_change_is_described_without_values_read_from_the_config(change, described):
+    assert describe_change(change) == described

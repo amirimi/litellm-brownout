@@ -54,12 +54,17 @@ LITELLM_MASTER_KEY=sk-... brownout init --gateway http://localhost:4000 --gatewa
 | `--manifest` | none | An existing manifest to reconcile. Its entries stay as written, and missing LiteLLM teams are appended |
 | `--manifest-out` | `brownout.yaml` | Where the manifest is written |
 | `--config-out` | `brownout.config.yaml` | Where the prepared gateway config is written, comments and key order kept |
-| `--write` | off | Write both files. Without it `init` prints the diffs and the findings and writes nothing |
+| `--write` | off | Write both files. Without it `init` prints the changes and the findings and writes nothing |
 
 The master key comes only from `LITELLM_MASTER_KEY`, so it never lands in shell history. `init`
 refuses to write over an existing file or over one of its inputs. A config with a duplicate key stops
 it, because LiteLLM's loader silently keeps the last value. Settings saved through LiteLLM's admin UI
-live in its database, so they are outside the config diff.
+live in its database, so the changes `init` lists cover only the file.
+
+`init` never prints a value it read from the gateway config, because a config can hold secrets
+inline. It lists each config change by its setting name, shows only the values it sets itself, and
+reports an unreadable config by line and column. The prepared config gets the same file permissions
+as the original. The manifest, which holds no secrets, prints as a diff.
 
 Each finding prints as `rule-id<TAB>subject<TAB>detail`, followed by the command or the YAML lines
 that resolve it. A value only the operator can choose, such as a team's budget, is left as a

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from .onboarding import (
     Finding,
     SetSetting,
     config_plan,
+    describe_change,
     exit_code,
     key_findings,
     master_key_notice,
@@ -51,6 +53,8 @@ from .rules import (
 )
 
 GATEWAY_TIMEOUT_SECONDS: Final = 30.0
+NEW_FILE_MODE: Final = 0o666
+PERMISSION_BITS: Final = 0o777
 FINDINGS_PER_RULE: Final = 20
 UNREADY: Final = 2
 
@@ -67,7 +71,6 @@ class InitOptions:
 
 @dataclass(frozen=True)
 class Prepared:
-    config_text: str
     config_out_text: str
     changes: tuple[ConfigChange, ...]
     manifest_text: str
@@ -187,8 +190,9 @@ def _taken_outputs(options: InitOptions) -> list[Path]:
 def _prepare(
     options: InitOptions, client: httpx.Client, default_alert_types: Sequence[str]
 ) -> Prepared:
-    config_text: Final = options.gateway_config.read_text(encoding="utf-8")
-    config_document: Final = load_document(config_text)
+    config_document: Final = _load_document(
+        options.gateway_config, options.gateway_config.read_text(encoding="utf-8")
+    )
     config: Final = to_plain(config_document)
     if not isinstance(config, dict):
         raise DocumentError(f"{options.gateway_config} is not a YAML mapping")
@@ -202,7 +206,6 @@ def _prepare(
     if manifest_document is not None:
         manifest_out_text = dump_document(manifest_document)
     return Prepared(
-        config_text=config_text,
         config_out_text=config_out_text,
         changes=changes,
         manifest_text=manifest_text,
@@ -211,6 +214,13 @@ def _prepare(
             options, existing, snapshot, config_document, manifest_document
         ),
     )
+
+
+def _load_document(path: Path, text: str) -> YamlDocument:
+    try:
+        return load_document(text)
+    except DocumentError as error:
+        raise DocumentError(f"{path} {error}") from error
 
 
 def _existing_manifest(path: Path | None) -> Manifest | None:
@@ -226,7 +236,7 @@ def _manifest_documents(
     entries: Final = team_entries(snapshot.teams, known)
     if options.manifest is not None:
         text = options.manifest.read_text(encoding="utf-8")
-        document = load_document(text)
+        document = _load_document(options.manifest, text)
         append_teams(document, entries)
         return text, document
     if not entries:
@@ -269,13 +279,13 @@ def _key_page_progress(page: int, total: int) -> None:
 
 
 def _report(options: InitOptions, prepared: Prepared) -> None:
-    _print_diff(prepared.config_text, prepared.config_out_text, options.config_out)
+    _print_changes(options, prepared.changes)
     for change in prepared.changes:
         if isinstance(change, SetSetting) and change.note:
             print(f"note: {change.section}.{change.key} {change.note}")
     print(
         "note: settings saved through LiteLLM's admin UI live in its database and are "
-        "not in this diff"
+        "not part of these changes"
     )
     if prepared.manifest_out_text is not None:
         _print_diff(
@@ -295,6 +305,15 @@ def _report(options: InitOptions, prepared: Prepared) -> None:
             "ready: enable the callback once brownout check passes on the written files",
             file=sys.stderr,
         )
+
+
+def _print_changes(options: InitOptions, changes: Sequence[ConfigChange]) -> None:
+    if not changes:
+        print(f"{options.config_out}: no changes")
+        return
+    print(f"{options.config_out} changes {options.gateway_config} as follows:")
+    for change in changes:
+        print(f"  {describe_change(change)}")
 
 
 def _print_diff(before: str, after: str, path: Path) -> None:
@@ -319,11 +338,18 @@ def _print_findings(findings: Sequence[Finding]) -> None:
 
 
 def _write(options: InitOptions, prepared: Prepared) -> None:
-    options.config_out.write_text(prepared.config_out_text, encoding="utf-8")
+    source_mode: Final = options.gateway_config.stat().st_mode & PERMISSION_BITS
+    _write_new(options.config_out, prepared.config_out_text, source_mode)
     print(f"wrote {options.config_out}")
     if prepared.manifest_out_text is not None:
-        options.manifest_out.write_text(prepared.manifest_out_text, encoding="utf-8")
+        _write_new(options.manifest_out, prepared.manifest_out_text, NEW_FILE_MODE)
         print(f"wrote {options.manifest_out}")
+
+
+def _write_new(path: Path, text: str, mode: int) -> None:
+    descriptor: Final = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    with open(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
 
 
 def check(gateway_config: Path, manifest_path: Path) -> list[Violation]:

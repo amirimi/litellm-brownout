@@ -322,6 +322,90 @@ def test_a_gateway_with_nothing_to_govern_writes_no_manifest(tmp_path, capsys):
     assert "team-in-manifest\tmanifest\t" in capsys.readouterr().out
 
 
+SECRET: Final = "SENTINEL-7f3a"
+
+
+def config_with_inline_secrets(tmp_path: Path) -> Path:
+    config = yaml.safe_load(LAB_CONFIG.read_text(encoding="utf-8"))
+    general = config["general_settings"]
+    general["master_key"] = f"sk-{SECRET}"
+    general["database_url"] = f"postgresql://llm:{SECRET}@db:5432/litellm"
+    general["alerting"] = ["slack"]
+    general["alert_types"] = ["llm_exceptions", "budget_alerts"]
+    for derived in ("coordination_redis", "fail_closed_budget_enforcement"):
+        general.pop(derived)
+    settings = config["litellm_settings"]
+    settings.pop("callbacks")
+    settings["cache"] = True
+    settings["cache_params"] = {
+        "type": "redis",
+        "host": f"{SECRET}.redis.internal",
+        "port": 6379,
+        "password": SECRET,
+    }
+    config["model_list"][0]["litellm_params"]["api_key"] = f"sk-{SECRET}"
+    return write(tmp_path / "config.yaml", config)
+
+
+@pytest.mark.parametrize("write_files", [False, True])
+def test_init_prints_no_value_from_the_gateway_config(tmp_path, capsys, write_files):
+    chosen = options(
+        tmp_path,
+        gateway_config=config_with_inline_secrets(tmp_path),
+        write=write_files,
+    )
+
+    init(chosen, fake_gateway(), DEFAULT_ALERTS)
+
+    printed = capsys.readouterr()
+    assert SECRET not in printed.out + printed.err
+    assert "  add brownout.gateway.handler to litellm_settings.callbacks" in printed.out
+    assert (
+        "  set general_settings.coordination_redis with host, port, password"
+        in printed.out
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        (
+            f"general_settings:\n  master_key: sk-{SECRET}\n  master_key: sk-{SECRET}\n",
+            "has a duplicate key at line 3, column 3",
+        ),
+        (
+            f'general_settings:\n  master_key: "sk-{SECRET}\n',
+            "is not valid YAML at line 3",
+        ),
+    ],
+)
+def test_an_unreadable_config_is_reported_by_position_only(
+    tmp_path, capsys, text, problem
+):
+    config = tmp_path / "config.yaml"
+    config.write_text(text, encoding="utf-8")
+
+    exit_code = init(
+        options(tmp_path, gateway_config=config), fake_gateway(), DEFAULT_ALERTS
+    )
+
+    error = capsys.readouterr().err
+    assert exit_code == 2
+    assert f"{config} {problem}" in error
+    assert SECRET not in error
+
+
+def test_the_config_copy_keeps_the_source_permissions(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(LAB_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+    config.chmod(0o600)
+    chosen = options(tmp_path, gateway_config=config)
+
+    init(chosen, fake_gateway(), DEFAULT_ALERTS)
+
+    assert chosen.config_out.stat().st_mode & 0o777 == 0o600
+
+
 def test_init_without_a_master_key_exits_two(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
 

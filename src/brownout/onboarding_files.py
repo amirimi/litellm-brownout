@@ -42,7 +42,7 @@ def load_document(text: str) -> YamlDocument:
     try:
         _, sequence_indent, dash_offset = runtime.util.load_yaml_guess_indent(text)
     except runtime.YAMLError as error:
-        raise DocumentError(str(error)) from error
+        raise _positioned(runtime, error) from error
     renderer: Final = runtime.YAML()
     renderer.preserve_quotes = True
     renderer.width = LINE_WIDTH
@@ -54,7 +54,7 @@ def load_document(text: str) -> YamlDocument:
     try:
         data = renderer.load(text)
     except runtime.YAMLError as error:
-        raise DocumentError(str(error)) from error
+        raise _positioned(runtime, error) from error
     if data is None:
         data = runtime.comments.CommentedMap()
     return YamlDocument(data=data, renderer=renderer)
@@ -111,6 +111,25 @@ def unified_diff(before: str, after: str, name: str) -> str:
             tofile=name,
         )
     )
+
+
+def _positioned(runtime: ModuleType, error: Exception) -> DocumentError:
+    if isinstance(error, runtime.constructor.DuplicateKeyError):
+        problem = "has a duplicate key"
+    else:
+        problem = "is not valid YAML"
+    mark: Final = _mark(runtime, error)
+    if mark is None:
+        return DocumentError(problem)
+    return DocumentError(f"{problem} at line {mark.line + 1}, column {mark.column + 1}")
+
+
+def _mark(runtime: ModuleType, error: Exception) -> Any:
+    if not isinstance(error, runtime.error.MarkedYAMLError):
+        return None
+    if error.problem_mark is not None:
+        return error.problem_mark
+    return error.context_mark
 
 
 def _section(document: YamlDocument, name: str) -> Any:
