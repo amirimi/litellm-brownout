@@ -83,10 +83,18 @@ The `release` workflow builds the sdist and the wheel on a `v*` tag, stops when 
 `pyproject.toml`'s version, and publishes to PyPI through trusted publishing. Its publish job is the
 only job in the repository with `id-token: write`, and no PyPI token is stored anywhere.
 
-1. Once, before the first release, register a pending trusted publisher on pypi.org for
-   `amk9978/litellm-brownout`, workflow `release.yml`, environment `pypi`, and create the `pypi`
-   environment in the repository settings.
+1. Once, before the first release, the owner sets up four things.
+   - On pypi.org, a pending trusted publisher for `amk9978/litellm-brownout`, workflow
+     `release.yml`, environment `pypi`.
+   - In the repository settings, a `pypi` environment that requires the owner's review, so no
+     workflow publishes without an approval.
+   - A tag ruleset that lets only the owner create `v*` tags.
+   - Private vulnerability reporting, which SECURITY.md names as the channel.
 2. Set the version in `pyproject.toml`, update the CHANGELOG, and merge.
 3. Tag the merge commit as `v` plus the version and push the tag.
+4. Approve the `publish to PyPI` job in the workflow run.
 
-Running the workflow by hand on a branch builds the artifacts without publishing them.
+Running the workflow by hand on a branch builds the artifacts without publishing them. Every
+workflow pins uv, and `pyproject.toml` pins `uv_build`, to the same release. A new pin names a
+release at least two weeks old, because a compromised release is usually caught and yanked within
+days.

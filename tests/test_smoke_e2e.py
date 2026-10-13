@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any, Final, assert_never
 
 import httpx
 import pytest
+from litellm.proxy._types import hash_token
 
 from brownout import bridge
 from brownout.manifest import Manifest
@@ -509,7 +511,33 @@ class InitRun:
         return resolution
 
 
-def _run_init(arguments: list[str]) -> InitRun:
+@pytest.fixture(scope="module")
+def init_key(lab_run: LabRun) -> Iterator[str]:
+    response = httpx.post(
+        f"{GATEWAY}/user/new",
+        headers=_admin_headers(),
+        json={"user_role": "proxy_admin_viewer"},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    viewer = response.json()
+    yield viewer["key"]
+    _delete_keys([viewer["key"]])
+    httpx.post(
+        f"{GATEWAY}/user/delete",
+        headers=_admin_headers(),
+        json={"user_ids": [viewer["user_id"]]},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+def _run_init(arguments: list[str], key: str) -> InitRun:
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name != "LITELLM_MASTER_KEY"
+    }
+    environment["BROWNOUT_INIT_KEY"] = key
     result = subprocess.run(
         [
             sys.executable,
@@ -523,6 +551,7 @@ def _run_init(arguments: list[str]) -> InitRun:
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
+        env=environment,
         check=False,
     )
     return InitRun(result.returncode, result.stdout)
@@ -560,9 +589,9 @@ def _delete_keys(keys: list[str]) -> None:
 
 @requires_stack
 def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findings(
-    lab_run: LabRun, tmp_path: Path
+    lab_run: LabRun, init_key: str, tmp_path: Path
 ) -> None:
-    baseline = _run_init(["--gateway-config", str(LAB_CONFIG)])
+    baseline = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key)
     suffix = datetime.now(UTC).strftime("%H%M%S%f")
     teamless_alias = f"e2e-teamless-{suffix}"
     capped_alias = f"e2e-capped-{suffix}"
@@ -582,10 +611,12 @@ def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findi
                 "--config-out",
                 str(config_out),
                 "--write",
-            ]
+            ],
+            init_key,
         )
 
         assert prepared.exit_code == 1
+        assert hash_token(init_key) not in {subject for _, subject in prepared.findings}
         assert ("team-in-manifest", teamless_alias) in prepared.findings
         assert ("key-has-no-budget", capped_alias) in prepared.findings
         written = Manifest.from_file(manifest_out).team_policy(LAB_TEAM_ID)
@@ -621,7 +652,7 @@ def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findi
                 command = command.replace("<YOUR TEAM>", json.dumps(filled))
             assert _run_decision(command) == 200, command
 
-        resolved = _run_init(["--gateway-config", str(LAB_CONFIG)])
+        resolved = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key)
         assert resolved.findings == baseline.findings
         assert resolved.exit_code == baseline.exit_code
     finally:
@@ -630,7 +661,7 @@ def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findi
 
 @requires_stack
 def test_init_merges_into_an_existing_manifest_and_reports_every_mismatch(
-    lab_run: LabRun, tmp_path: Path
+    lab_run: LabRun, init_key: str, tmp_path: Path
 ) -> None:
     theirs = tmp_path / "theirs.yaml"
     original = LAB_MANIFEST.read_text(encoding="utf-8")
@@ -653,7 +684,8 @@ def test_init_merges_into_an_existing_manifest_and_reports_every_mismatch(
             "--config-out",
             str(tmp_path / "brownout.config.yaml"),
             "--write",
-        ]
+        ],
+        init_key,
     )
 
     assert merged.exit_code == 1

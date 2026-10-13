@@ -13,11 +13,11 @@ from brownout.onboarding import (
     RemoveSetting,
     SetSetting,
     TeamEntry,
+    admin_keys_notice,
     config_plan,
     describe_change,
     exit_code,
     key_findings,
-    master_key_notice,
     model_findings,
     reconcile_findings,
     team_entries,
@@ -127,6 +127,7 @@ def test_teamless_and_self_budgeted_keys_are_findings_with_runnable_commands():
             LiteLLMKey("hash-c", "capped", "search", ("max_budget",)),
         ),
         GATEWAY,
+        "hash-init",
     )
 
     assert [(f.rule, f.subject) for f in findings] == [
@@ -302,12 +303,12 @@ def test_a_missing_redis_violation_carries_the_block_to_add():
     assert any("<YOUR REDIS HOST>" in line for line in findings[0].resolution)
 
 
-def test_only_the_master_key_notice_leaves_init_ready():
+def test_only_the_admin_keys_notice_leaves_init_ready():
     blocking = Finding(RuleId.MODEL_PRICED, "mystery", "has no price", (), True)
 
-    assert master_key_notice().blocking is False
-    assert exit_code([master_key_notice()]) == 0
-    assert exit_code([master_key_notice(), blocking]) == 1
+    assert admin_keys_notice().blocking is False
+    assert exit_code([admin_keys_notice()]) == 0
+    assert exit_code([admin_keys_notice(), blocking]) == 1
 
 
 @pytest.mark.parametrize(
@@ -348,3 +349,12 @@ def test_only_the_master_key_notice_leaves_init_ready():
 )
 def test_a_change_is_described_without_values_read_from_the_config(change, described):
     assert describe_change(change) == described
+
+
+def test_the_key_init_runs_with_is_left_to_the_admin_keys_notice():
+    own = LiteLLMKey("hash-init", None, None, ())
+    other = LiteLLMKey("hash-other", None, None, ())
+
+    findings = key_findings((own, other), GATEWAY, "hash-init")
+
+    assert [finding.subject for finding in findings] == ["hash-other"]

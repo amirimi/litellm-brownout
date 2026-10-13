@@ -30,9 +30,17 @@ into the gateway image.
 ### 1. Prepare
 
 ```bash
-export LITELLM_MASTER_KEY=sk-...
+LITELLM_MASTER_KEY=sk-...
+export BROWNOUT_INIT_KEY=$(curl -s http://localhost:4000/user/new \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"user_role": "proxy_admin_viewer"}' | jq -r .key)
 uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
 ```
+
+`init` reads the gateway with a key that can only read it, and the first two lines create one for a
+new `proxy_admin_viewer` user. The master key stays a shell variable without `export`, so the
+commands `init` prints can use it while `uvx` and the 110 packages it installs never see it. Run
+`init` from a shell that exports no other secret, such as a provider key.
 
 `init` only reads LiteLLM. It prints what it would write, and `--write` writes it:
 
