@@ -10,12 +10,38 @@ writes the request's facts into its LiteLLM metadata. The provider answers, the 
 hook sets the disclosure headers from those facts, LiteLLM reconciles the hold to the actual cost,
 and every LiteLLM logging integration receives the facts with the request's log.
 
+## Assumptions
+
+Brownout governs team budgets on one LiteLLM gateway. Each assumption below either has a rule that
+enforces it, named by its id, or is documented and left unchecked. `brownout check` runs the file
+rules in CI, and the gateway runs the request rules on every governed request.
+
+| Assumption | When it breaks | Enforced by |
+|---|---|---|
+| Budgets belong to teams, and every governed key belongs to a manifest team | 503 and a platform incident | `team-in-manifest` |
+| Keys carry no budget of their own, whether `max_budget`, `model_max_budget` or `budget_limits` | 503 and a platform incident | `key-has-no-budget` |
+| The team's LiteLLM `max_budget` equals `envelope_usd` | 503 and a platform incident | `ceiling-matches-envelope` |
+| The team's LiteLLM `budget_duration` equals the manifest's | Tier windows drift from LiteLLM's resets | `duration-matches`, run by `brownout init` |
+| The window tumbles with LiteLLM's resets | The manifest refuses to load | `duration-tumbles` |
+| No user, organisation, end-user or tag budget blocks first | LiteLLM refuses before any tier fires | Documented, not checked |
+| No stacked team `budget_limits` | A daily limit inside a weekly one hits with no brownout first | Documented, not checked |
+| The team's model list includes each fallback | The primary serves and a `brownout_fallback_rejected` event fires | The permission check |
+| `fail_closed_budget_enforcement` is on and reservations are on | 503 and a platform incident | `fail-closed-on`, `reservation-on` |
+| A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
+| LiteLLM's budget alerts are off and `coordination_redis` is configured | `brownout check` fails | `no-native-budget-alerts`, `redis-configured` |
+| Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | `brownout check` fails before deploy. A pairing that breaks after deploy withholds the downgrade, so the primary serves and the platform gets an incident | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
+| Only chat completions are governed | Embeddings, images, audio, `/v1/messages` and `/v1/responses` pass through untouched, at full price and without headers | Documented |
+| The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
+| `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade. A request without `max_tokens` reserves the model's whole output | Documented, not checked |
+| LiteLLM is 1.95.1 or newer | The gateway refuses to start. It warns on 1.95.1 to 1.100, whose boundary can close a window above the budget, and past the tested 1.104 | `supported-litellm` |
+
 ## The spend figure a tier compares
 
 Authentication reserves the request's worst-case cost on the team counter. The plugin reads that
 counter, subtracts the request's own hold, divides by the envelope, and compares the percentage
 against three independent lists: the team's `warn_tiers`, the route's `warn_tiers` and the route's
-`degrade_at`. None is merged into another.
+`degrade_at`. None is merged into another. The plugin decides afresh on every request and keeps no
+downgrade state between requests.
 
 The plugin subtracts the request's own hold because the hold is a temporary authorisation and a
 tier measures consumption. A request judged on a counter that includes its own hold would push

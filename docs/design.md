@@ -100,7 +100,7 @@ Two pieces of work remain.
 - The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
   suite and has yet to be driven through a live gateway.
 
-A deployment inherits these limits as the plugin stands. The [assumptions table](../README.md#assumptions)
+A deployment inherits these limits as the plugin stands. The [assumptions table](enforcement.md#assumptions)
 lists the ones a rule enforces.
 
 | Limit | What it means for a deployment |

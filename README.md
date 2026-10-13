@@ -1,33 +1,55 @@
-<div align="center">
-
 # LiteLLM Brownout
 
-**Switch selected routes to cheaper models before the team budget runs out**
+Brownout moves chosen routes on a LiteLLM gateway to cheaper models as a team's budget fills, and
+tells each caller which model answered.
 
-A team has $500 for the week, and at $450 its routine Q&A moves to a smaller model while code review keeps its primary.
+A team has $500 a week. At $450 its Q&A route moves to a smaller model, and its code review route
+keeps the primary until LiteLLM stops the team at $500.
 
-It governs `/v1/chat/completions` and passes every other endpoint through untouched.
+| Team spend | Q&A route | Code review route | Signal |
+|---|---|---|---|
+| Below $375 | Primary | Primary | |
+| $375 to $449.99 | Primary | Primary | 75% warning |
+| $450 and above | Fallback | Primary | 90% warning and downgrade headers |
+| Too little left for the next request | Refused | Refused | LiteLLM's 429 |
 
-</div>
+## What it adds
 
-## Who this is for
+LiteLLM already reserves each request's worst-case cost, counts team spend across replicas in Redis
+and refuses requests past the budget. Brownout adds four things to `/v1/chat/completions`, and every
+other endpoint passes through untouched.
 
-Brownout fits a LiteLLM gateway that budgets teams and can meet these requirements across the whole
-gateway, because the callback governs every chat completion it serves.
+- **Warnings at any percentage.** The team and each route declare their own tiers, and each tier is
+  logged once per window across all replicas. LiteLLM's own budget alerts fire at 85% and 95% only.
+- **A downgrade on the team's total.** A route names a fallback and the percentage at which to use
+  it. LiteLLM's [budget fallbacks][litellm-budget-fallbacks] switch only when a key exhausts a
+  per-model budget.
+- **Checked fallbacks.** A fallback must be served, priced, cleared for the route's data class and
+  callable by the caller's key and team. A fallback that fails a check leaves the primary serving.
+- **Disclosure.** `x-brownout-*` response headers name the model that served and the reason for a
+  downgrade. The same facts reach LiteLLM's spend logs and every logging integration the gateway
+  runs, such as Langfuse or OpenTelemetry.
 
-- Every key that sends chat traffic belongs to a team the manifest lists.
+## Requirements
+
+Brownout governs every chat completion on the gateway, so the whole gateway has to meet these.
+
+- Every key that sends chat traffic belongs to a team in the manifest.
 - No key carries a budget of its own.
-- LiteLLM's built-in budget alerting is off.
-- `fail_closed_budget_enforcement` is on and `coordination_redis` is configured.
+- `fail_closed_budget_enforcement` is on, `coordination_redis` is configured and LiteLLM's budget
+  alerts are off.
 - LiteLLM runs a release from 1.95.1 to 1.104, pinned by image tag.
 
 ## Install
 
-Two steps add brownout to a LiteLLM gateway you already run, on any release from 1.95.1 to 1.104.
-`brownout init` reads the running gateway and prepares the files, then one line installs the package
-into the gateway image.
+`brownout init` reads your running gateway and reports what breaks the requirements. You resolve
+its findings, let it write two files, install the package into the gateway image, and confirm with
+one request.
 
 ### 1. Prepare
+
+`init` reads the gateway with a read-only key. These commands create one for a new
+`proxy_admin_viewer` user and run `init`.
 
 ```bash
 LITELLM_MASTER_KEY=sk-...
@@ -37,26 +59,26 @@ export BROWNOUT_INIT_KEY=$(curl -s http://localhost:4000/user/new \
 uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
 ```
 
-`init` reads the gateway with a key that can only read it, and the first two lines create one for a
-new `proxy_admin_viewer` user. The master key stays a shell variable without `export`, so the
-commands `init` prints can use it while `uvx` and the 110 packages it installs never see it. Run
-`init` from a shell that exports no other secret, such as a provider key.
+The master key stays unexported, so `uvx` and the packages it installs never see it. Run these from
+a shell that exports no other secret, such as a provider key.
 
-`init` only reads LiteLLM. It prints what it would write, and `--write` writes it:
+`init` lists every request brownout would refuse once enabled. Typical findings are keys without a
+team, keys with a budget of their own, and teams or models without a budget or a price. Each finding
+prints the command or the config lines that resolve it, with a placeholder for any value only you can
+choose. Resolve them and rerun `init` until it exits `0`. Only then add `--write`, which refuses to
+overwrite an existing file.
 
-- `brownout.yaml`, a manifest with one entry per LiteLLM team that has a budget. Each entry copies the
-  team's budget and window, warns at 75% and 90%, and has no fallback until its owner adds one. With
-  `--manifest yours.yaml`, your manifest stays as written, and `init` appends the teams it lacks and
-  reports where it disagrees with LiteLLM.
-- `brownout.config.yaml`, your gateway config with the changes brownout needs, comments kept. It adds
-  the callback, turns on `fail_closed_budget_enforcement`, takes `budget_alerts` out of
-  `alert_types`, and derives `coordination_redis` from a Redis cache when you have one. Your original
-  config is never touched.
+`--write` creates two files and leaves your config as it was.
 
-It then lists every request brownout would refuse once enabled, such as keys without a team, keys
-with a budget of their own, and teams or models without a budget or a price. Each one comes with the
-command that resolves it, and the choice that is yours, such as a budget, is left as a placeholder.
-Run `init` again until it exits `0`, then confirm the written files.
+- `brownout.yaml` is the manifest. It has one entry per LiteLLM team with a budget, copies that
+  budget and window, warns at 75% and 90%, and declares no fallback yet. Pass
+  `--manifest yours.yaml` to extend a manifest you already have.
+- `brownout.config.yaml` is your gateway config with comments kept. It adds the callback, turns on
+  `fail_closed_budget_enforcement`, removes `budget_alerts` from `alert_types`, sets
+  `budget_exceeded_status_code: 429` and derives `coordination_redis` from a Redis cache if you have
+  one.
+
+Check both files.
 
 ```bash
 uvx --from litellm-brownout brownout check --gateway-config brownout.config.yaml --manifest brownout.yaml
@@ -64,51 +86,98 @@ uvx --from litellm-brownout brownout check --gateway-config brownout.config.yaml
 
 ### 2. Install
 
-Add one line to the image your gateway already runs. The LiteLLM image ships without `pip`, so the
-line bootstraps it first.
+Add one line to the image your gateway runs. The LiteLLM image ships without `pip`, so the line
+bootstraps it first.
 
 ```dockerfile
 FROM docker.litellm.ai/berriai/litellm:v1.104.2
 RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
 ```
 
-For a gateway installed with pip, run `pip install --no-deps litellm-brownout==0.1.0` in its
-environment. `--no-deps` keeps pip from replacing the gateway's LiteLLM, and brownout's own startup
-check refuses a release outside its range. Point the gateway at `brownout.config.yaml`, set
-`BROWNOUT_MANIFEST` to the path of `brownout.yaml` inside the container, and restart it.
+On a gateway installed with pip, run `pip install --no-deps litellm-brownout==0.1.0` in its
+environment. `--no-deps` keeps pip from replacing the gateway's LiteLLM.
 
-Once brownout is on, every chat call must come from a key of a team in the manifest. The master key
-has no team, so chat traffic needs team keys.
+Point the gateway at `brownout.config.yaml`, set `BROWNOUT_MANIFEST` to the path of `brownout.yaml`
+inside the container, and restart it.
 
-## Quickstart
+### 3. Confirm
 
-The lab runs LiteLLM with the plugin mounted, alongside Postgres and Redis. Those are real processes,
-and only the model responses and token prices are synthetic, so a run spends no provider money and
-you can watch brownout work without a gateway of your own. It needs Docker Compose, Python 3.12+,
-[uv](https://docs.astral.sh/uv/), `curl` and `jq`. The first `docker compose up` pulls the LiteLLM
-image, about 1.2 GB, and the first `uv run` builds a local environment of about 680 MB and 117
-packages, so the first start can take several minutes.
+LiteLLM's default log level hides brownout's load message, so a response header confirms it
+instead. Send one chat request with a key of a team in the manifest.
 
 ```bash
-git clone https://github.com/amk9978/litellm-brownout.git
-cd litellm-brownout
-cp .env.example .env
+curl -s -D - -o /dev/null http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer <A TEAM KEY>" -H "Content-Type: application/json" \
+  -d '{"model": "<A MODEL>", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 20}' \
+  | grep -i '^x-brownout'
 ```
 
-The lab team has a $1.00 budget, warning tiers at 75% and 90%, and a primary route that downgrades
-at 75%.
+The response carries `x-brownout-route-served` with the model group that answered. Brownout refuses
+chat calls made with the master key or the viewer key, because neither belongs to a team.
+
+## Add a fallback
+
+A route degrades only after its owner gives it a fallback. Adding one takes an edit to each file.
+
+In `brownout.yaml`, list the data classes least restricted first and give the route its fallback.
+
+```yaml
+version: "v1"
+data_class_order: [internal, customer_pii]
+teams:
+  team-a:
+    policy_epoch: "team-a-v1"
+    envelope_usd: 500.0
+    budget_duration: "7d"
+    warn_tiers: [75, 90]
+    routes:
+      chat-qa:
+        fallback: chat-qa-small
+        degrade_at: 90
+```
+
+In `brownout.config.yaml`, give every deployment of both model groups a class from that list. The
+fallback's class must be at least as restricted as the route's.
+
+```yaml
+model_list:
+  - model_name: chat-qa
+    litellm_params:
+      model: openai/gpt-4o
+    model_info:
+      data_class: internal
+  - model_name: chat-qa-small
+    litellm_params:
+      model: openai/gpt-4o-mini
+    model_info:
+      data_class: internal
+```
+
+The team's model list in LiteLLM must include the fallback, or the primary keeps serving. Run
+`brownout check` again, then restart the gateway, which reads the manifest only at startup.
+
+Send the fallback the route's real requests before it carries real traffic. After the downgrade it
+receives everything the route sends, including tools, structured output, images and long prompts,
+and brownout checks none of them. With `drop_params: true`, LiteLLM strips what the fallback cannot
+take and still answers 200. Turn `drop_params` off to get an error instead.
+
+LiteLLM reserves each request's worst-case cost before brownout runs, sized on the route the caller
+asked for. A gpt-4o request without `max_tokens` reserves its whole output, about $0.16. On a $0.50
+budget LiteLLM refuses such requests from 67%, before a `degrade_at` of 75% is reached. Set
+`max_tokens`, or keep `degrade_at` below 100% minus the largest reservation's share of the budget.
+
+## Try it locally
+
+The lab runs LiteLLM, Postgres and Redis with brownout mounted and mock model responses, so it spends
+nothing. It needs Docker Compose, Python 3.12+, [uv][uv], `curl` and `jq`. The first start downloads
+about 2 GB.
 
 ```bash
+git clone https://github.com/amk9978/litellm-brownout.git && cd litellm-brownout
+cp .env.example .env
 docker compose up -d --wait
 set -a; source .env; set +a
 KEY=$(uv run python tests/setup_lab.py | tail -1)
-[ -n "$KEY" ] || echo "tests/setup_lab.py printed no key. Fix the error above before the loop."
-```
-
-`tests/setup_lab.py` creates a fresh lab team and prints its key, which takes about 11 seconds. Once
-it has printed a key, send the requests.
-
-```bash
 for i in $(seq 1 60); do
   curl -s -D - -o /dev/null localhost:4000/v1/chat/completions \
     -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
@@ -117,8 +186,7 @@ for i in $(seq 1 60); do
 done
 ```
 
-Early requests are served by `budget-lab-primary`. Around request 38 the team passes 75% and
-responses switch to the fallback model.
+The lab team has $1.00. Around request 38 it passes 75%, and responses switch to the fallback.
 
 ```
 HTTP/1.1 200 OK
@@ -128,180 +196,51 @@ x-brownout-degraded-from: budget-lab-primary
 x-brownout-degradation-reason: degrade_tier_reached
 ```
 
-Around request 57 LiteLLM answers with its own 429, because the next request no longer fits the
-budget. Run `docker compose logs litellm | grep brownout_` to see the transitions the plugin announced
-on the way.
+Around request 57 LiteLLM refuses with a 429. `tests/setup_lab.py` deletes and recreates the
+`budget-lab` team, so run it only against the lab. The [lab walkthrough][lab] has more experiments,
+such as a refused downgrade and a broken manifest. `docker compose down` stops the lab.
 
-To repeat the run, rerun `tests/setup_lab.py` and the loop. The script deletes and recreates the
-`budget-lab` team and clears its counters and event claims, so point it only at the lab gateway.
-`docker compose down` stops the stack. The credentials in `.env.example` are for local development
-only. The [lab walkthrough](docs/lab.md) covers more experiments, such as a refused downgrade and a
-broken manifest.
+## Limits
 
-## How it works
+- Brownout governs `/v1/chat/completions` only. Embeddings, images, audio, `/v1/messages` and
+  `/v1/responses` pass through at full price and without headers.
+- Router fallbacks never apply to governed requests. A provider error on the chosen model group
+  reaches the caller, while failover between deployments of one group still works.
+- Redis sits on the request path. While LiteLLM cannot write a reservation, it refuses every budgeted
+  request. Run Redis with failover, persistence and the `noeviction` policy.
+- Brownout imports three private LiteLLM helpers and refuses to start below 1.95.1. A release that
+  renames a helper stops the gateway at startup, so pin the image tag and upgrade only to a release
+  the weekly `litellm matrix` workflow has passed.
+- On LiteLLM 1.95.1 to 1.100, a window can close above the budget by one request's cost under
+  serial traffic, and by more under concurrent traffic. Run 1.101 or newer for a hard limit.
+- A request that breaks a requirement gets a 503 naming the rule. The [enforcement
+  reference][enforcement] lists every assumption, failure mode, header and event.
 
-A team's spend passes the thresholds its manifest declares. Each warning tier raises one event. At a
-route's `degrade_at` percentage, requests for that route are served by its fallback model, and the
-response headers tell the caller. When the next request's worst-case cost no longer fits the budget,
-LiteLLM 1.101 and newer refuse it with a 429. LiteLLM 1.95.1 to 1.100 instead keep admitting
-requests with their holds shrunk to the remaining headroom until none is left, so a window can close
-above the budget. From LiteLLM 1.104 the refusal is a 422 by default, and the minimal gateway config
-below sets `budget_exceeded_status_code: 429` under `litellm_settings` to keep it a 429. The $500 team above
-warns at 75% and 90%, and its Q&A route degrades at 90%.
+The [design notes][limitations] list the remaining limitations. If you run brownout on a real
+workload, [open an issue][issues] with the model pair, budget window, threshold, LiteLLM version and
+whether the fallback stayed useful.
 
-| Team spend | Q&A route | Code review route | Signal |
-|---|---|---|---|
-| Below $375 | Primary | Primary | |
-| $375 to $449.99 | Primary | Primary | 75% warning |
-| $450 and above | Fallback, when the caller may use it | Primary | 90% warning, a route-degraded event and downgrade headers |
-| Too little headroom for the requested route's worst case | Refused | Refused | LiteLLM's 429 |
+## Documentation
 
-Spend here is LiteLLM's team counter, minus the current request's own reservation. The counter
-includes other requests' outstanding reservations, so it runs ahead of settled spend. The plugin
-decides on every request and keeps no downgrade state between requests.
-
-LiteLLM already reserves each request's worst-case cost, counts spend across replicas in Redis and
-enforces the hard limit. The plugin adds four things its configuration cannot express.
-
-- **Tier events at any threshold:** the team and each route declare their own warning tiers. Each is announced once per window on the gateway log, deduplicated across replicas. LiteLLM's built-in alerter is fixed at 85% and 95%.
-- **Downgrade on the team total:** a route declares a fallback and the percentage at which to use it. LiteLLM's [budget fallbacks](https://docs.litellm.ai/docs/proxy/budget_fallbacks) switch only when a key exhausts a per-model budget.
-- **Checked fallbacks:** a fallback must be served, priced and cleared for its route's data class, and the caller's key and team must be allowed to call it.
-- **Caller disclosure:** `x-brownout-*` response headers name the route that served, the tiers reached and the reason for a downgrade. The same facts ride each request's LiteLLM log as `spend_logs_metadata.brownout`, so Langfuse, OpenTelemetry, Prometheus labels, the spend logs and any `CustomLogger` receive them with no plugin setting.
-
-`src/brownout/policy.py` makes every decision in two pure functions. `gateway.py` runs each request
-through the checks and the decision, and `bridge.py` holds everything that touches LiteLLM.
-
-## Assumptions
-
-Brownout governs team budgets on one LiteLLM gateway. Each assumption below either has a rule that
-enforces it, named by its id, or is documented and left unchecked. `brownout check` runs the file
-rules in your CI, and the gateway runs the request rules on every governed request.
-
-| Assumption | When it breaks | Enforced by |
-|---|---|---|
-| Budgets belong to teams, and every governed key belongs to a manifest team | 503 and a platform incident | `team-in-manifest` |
-| Keys carry no budget of their own, whether `max_budget`, `model_max_budget` or `budget_limits` | 503 and a platform incident | `key-has-no-budget` |
-| The team's LiteLLM `max_budget` equals `envelope_usd` | 503 and a platform incident | `ceiling-matches-envelope` |
-| The team's LiteLLM `budget_duration` equals the manifest's | Tier windows drift from LiteLLM's resets | `duration-matches`, run by `brownout init` |
-| The window tumbles with LiteLLM's resets | The manifest refuses to load | `duration-tumbles` |
-| No user, organisation, end-user or tag budget blocks first | LiteLLM refuses before any tier fires | Documented, not checked |
-| No stacked team `budget_limits` | A daily limit inside a weekly one hits with no brownout first | Documented, not checked |
-| The team's model list includes each fallback | The primary serves and a `brownout_fallback_rejected` event fires | The permission check |
-| `fail_closed_budget_enforcement` is on and reservations are on | 503 and a platform incident | `fail-closed-on`, `reservation-on` |
-| A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
-| LiteLLM's budget alerts are off and `coordination_redis` is configured | `brownout check` fails | `no-native-budget-alerts`, `redis-configured` |
-| Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | `brownout check` fails before deploy. A pairing that breaks after deploy withholds the downgrade, so the primary serves and the platform gets an incident | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
-| Only chat completions are governed | Embeddings, images, audio, `/v1/messages` and `/v1/responses` pass through untouched, at full price and without headers | Documented |
-| The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
-| `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade | Documented, not checked |
-| LiteLLM is 1.95.1 or newer | The gateway refuses to start. It warns on 1.95.1 to 1.100, whose boundary can close a window above the budget, and past the tested 1.104 | `supported-litellm` |
-
-## Set it up by hand
-
-`brownout init` makes these changes for you. This section shows what they are, and how to mount the
-source in place of installing the package. Four changes wire the plugin into a gateway. Mount the
-package into the LiteLLM container, point one environment variable at your manifest, name the handler
-in the gateway config, then create each team in LiteLLM to match the manifest.
-
-The callback governs every chat-completion call on the gateway, and a key whose team is missing
-from the manifest gets a 503. On a shared gateway, add every team that sends chat traffic to the
-manifest before you enable the callback.
-
-The first two changes go in the LiteLLM service of your Compose file.
-
-```yaml
-services:
-  litellm:
-    image: docker.litellm.ai/berriai/litellm:v1.104.2
-    environment:
-      PYTHONPATH: /app/plugins
-      BROWNOUT_MANIFEST: /app/config/manifest.yaml
-    volumes:
-      - ./src/brownout:/app/plugins/brownout:ro
-      - ./config:/app/config:ro
-    command: ["--config", "/app/config/config.yaml", "--port", "4000"]
-```
-
-The gateway config names the handler and turns on the Redis counter and the strict budget boundary.
-
-```yaml
-general_settings:
-  fail_closed_budget_enforcement: true
-  coordination_redis:
-    host: os.environ/REDIS_HOST
-    port: 6379
-    password: os.environ/REDIS_PASSWORD
-
-litellm_settings:
-  callbacks: ["brownout.gateway.handler"]
-  budget_exceeded_status_code: 429
-```
-
-`budget_exceeded_status_code` keeps LiteLLM's budget refusal a 429 from 1.104, whose default is a
-422. Releases before 1.104 ignore it and refuse with a 429 anyway.
-
-Every model group the manifest names needs input and output prices, either on its deployments or
-from LiteLLM's cost map. A route with a fallback and the fallback itself also need a
-`model_info.data_class` from the manifest's `data_class_order`. Leave `disable_budget_reservation`
-out of the gateway config, and if LiteLLM alerting is on, list `alert_types` without
-`budget_alerts`. Router fallbacks may stay, and they never apply to governed chat completions. Each
-LiteLLM team needs the manifest's budget and duration and a model list that includes the fallback,
-and its keys carry no budget of their own. The [configuration reference](docs/configuration.md)
-explains every setting and gives the `curl` calls that create a team and key.
-
-Run the file rules in CI before every deploy.
-
-```bash
-uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml
-```
-
-## Configuration
-
-The manifest holds each team's policy, keyed by the LiteLLM `team_id`.
-
-```yaml
-version: "v1"
-
-data_class_order:
-  - internal
-  - customer_pii
-
-teams:
-  team-a:
-    policy_epoch: "team-a-v1"
-    envelope_usd: 500.0
-    budget_duration: "7d"
-    warn_tiers: [75, 90]
-    routes:
-      chat-qa:
-        fallback: chat-qa-degraded
-        degrade_at: 90
-        warn_tiers: [60, 80]
-      code-review: {}
-```
-
-- **`envelope_usd` and `budget_duration`:** the budget the owner approved and its window. Both must equal the LiteLLM team's settings. `budget_duration` accepts only windows that tumble with LiteLLM's resets: `1h` to `24h` in divisors of 24, `1d`, `7d`, `1w`, `30d`, `1mo`, `hourly`, `daily`, `weekly` and `monthly`.
-- **`warn_tiers`:** percentages of the team budget, optional at the team and at each route. A team tier raises an event for the budget owner, and a route tier raises one for the route's callers. Neither is derived from the other or from `degrade_at`.
-- **`routes`:** each model group's fallback and the percentage at which to use it. A route with an empty policy or no entry keeps its primary model and still counts against the budget.
-- **`data_class_order`:** data classes, least restricted first. Required when any route declares a fallback, which must be at least as restricted as its route.
-- **`policy_epoch`:** a new value re-arms every tier inside the current window, for use after an approved policy change.
-
-The handler reads the manifest once at startup, so a change needs a gateway restart. An unknown key
-at any level stops the manifest from loading, so a typo such as `degrade_At` fails loudly.
-
-## Notes
-
-- **Supported LiteLLM:** 1.95.1 and newer, tested up to 1.104. The plugin imports three private LiteLLM helpers, so `src/brownout/bridge.py` refuses to start below the floor and warns past the tested ceiling. LiteLLM 1.95.1 to 1.100 shrink an over-budget reservation to the remaining headroom instead of refusing it. A window can then close above the envelope, by at most one request's cost under serial traffic, and the handler logs a warning at startup. Run 1.101 or newer for the hard boundary. [CONTRIBUTING.md](CONTRIBUTING.md) explains how a new release joins the range.
-- **Pin the image tag:** a LiteLLM release that renames one of the three private helpers stops the gateway at startup. Pin the image tag and upgrade only to a release the weekly `litellm matrix` workflow has passed.
-- **Image dependencies:** the LiteLLM images for 1.95.1 to 1.99.4 and for 1.101.0 ship PyJWT 2.13.0, urllib3 2.7.0, multidict 6.7.1 and oauthlib 3.3.1, which carry known advisories. The 1.100.5, 1.101.6, 1.102.4, 1.103.4 and 1.104.2 images ship fixed releases. On 1.95 to 1.99, upgrade those packages in your own image or move to a fixed patch.
-- **Test the fallback first:** the plugin checks that a fallback is served, priced, cleared for the data class and callable by the key and team. Whether it suits the route's traffic is the team owner's call. Once the route degrades, the fallback receives every request the route sends, including requests with tools, structured output, images or long prompts, and the plugin does not check those. With `drop_params: true`, LiteLLM silently strips what the fallback cannot take and still returns a 200, so test the fallback on real traffic before relying on it, or turn `drop_params` off to get an error instead. A dearer fallback is allowed, and it reaches LiteLLM's 429 sooner.
-- **Redis is on the request path:** under `fail_closed_budget_enforcement`, LiteLLM refuses every budgeted request on the gateway while it cannot write a reservation to Redis, before the plugin runs. Losing the plugin's claim keys repeats every announcement in the current window. Run Redis with failover, persistence and the `noeviction` eviction policy.
-- **Reporting trust:** the request facts are authoritative on every request the plugin handles. On a request LiteLLM refuses before the plugin runs, a caller can forge them, and LiteLLM attributes that request to the caller's own team. Build team dashboards on the facts and platform alerts on the `brownout` log line. The [enforcement reference](docs/enforcement.md#request-facts-and-announcements) covers both channels.
-- **Failures refuse the request:** a broken assumption from the table above returns a 503 naming its rule id and raises a platform incident. The [enforcement reference](docs/enforcement.md) lists every failure mode, header and announcement.
-- **LiteLLM owns the hard limit:** on LiteLLM 1.101 and newer, `fail_closed_budget_enforcement` decides whether a window may close above its budget. The trade-off is set out under [the envelope boundary](docs/enforcement.md#the-envelope-boundary).
-- **Known limitations:** the [design notes](docs/design.md#known-limitations) list them.
-- **Field reports:** trying it on a real workload? [Open an issue](https://github.com/amk9978/litellm-brownout/issues) with the model pair, budget window, threshold, LiteLLM version and whether the fallback stayed useful. Leave keys and private prompts out.
+- The [configuration reference][configuration] explains every setting, manifest key, rule and `init`
+  option.
+- The [enforcement reference][enforcement] covers the assumptions, failure modes, headers and events.
+- The [design notes][design] show how the modules fit together.
+- [SECURITY.md][security] says what brownout reads and writes and how to verify a release.
+- [CONTRIBUTING.md][contributing] covers the tests, supported LiteLLM releases and releasing.
 
 ## License
 
-[MIT](LICENSE)
+[MIT][license]
+
+[litellm-budget-fallbacks]: https://docs.litellm.ai/docs/proxy/budget_fallbacks
+[uv]: https://docs.astral.sh/uv/
+[lab]: https://github.com/amk9978/litellm-brownout/blob/main/docs/lab.md
+[enforcement]: https://github.com/amk9978/litellm-brownout/blob/main/docs/enforcement.md
+[limitations]: https://github.com/amk9978/litellm-brownout/blob/main/docs/design.md#known-limitations
+[issues]: https://github.com/amk9978/litellm-brownout/issues
+[configuration]: https://github.com/amk9978/litellm-brownout/blob/main/docs/configuration.md
+[design]: https://github.com/amk9978/litellm-brownout/blob/main/docs/design.md
+[security]: https://github.com/amk9978/litellm-brownout/blob/main/SECURITY.md
+[contributing]: https://github.com/amk9978/litellm-brownout/blob/main/CONTRIBUTING.md
+[license]: https://github.com/amk9978/litellm-brownout/blob/main/LICENSE
