@@ -99,7 +99,7 @@ class ForgedRequest:
 def lab_run() -> LabRun:
     started_at = datetime.now(UTC).isoformat()
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "lab" / "setup_lab.py")],
+        [sys.executable, str(REPO_ROOT / "tests" / "setup_lab.py")],
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,

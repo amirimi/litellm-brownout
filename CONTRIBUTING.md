@@ -43,7 +43,7 @@ The sequence skips itself when the gateway is unreachable. `LAB_REQUIRE_STACK=1`
 unreachable gateway into a failure, which is what CI does. The sequence provisions the one lab team
 the manifest names, so two copies cannot run at once.
 
-`lab/setup_lab.py` is rerunnable at about eleven seconds, because a spend reset takes more than one
+`tests/setup_lab.py` is rerunnable at about eleven seconds, because a spend reset takes more than one
 write. LiteLLM buffers spend per team and flushes it every `PROXY_BATCH_WRITE_AT` seconds. A counter
 cleared in Redis is reseeded from the database row on the next read. The script therefore deletes
 the team, waits out the flush window, clears the counter and the claims, then recreates the team.

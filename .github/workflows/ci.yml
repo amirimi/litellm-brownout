@@ -59,14 +59,14 @@ jobs:
       - run: uv sync --locked
       - run: uv build --wheel --out-dir dist
       - run: cp .env.example .env
-      - run: docker compose -f docker-compose.yml -f docker-compose.wheel.yml up -d --wait --build
+      - run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml up -d --wait --build
       - name: brownout check runs inside the gateway image
-        run: docker compose -f docker-compose.yml -f docker-compose.wheel.yml exec -T litellm brownout check --gateway-config /app/config/config.yaml --manifest /app/config/manifest.yaml
+        run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml exec -T litellm brownout check --gateway-config /app/config/config.yaml --manifest /app/config/manifest.yaml
       - name: run the sequence
         run: set -a && . ./.env && set +a && uv run pytest -m e2e
         env:
           LAB_REQUIRE_STACK: "1"
       - if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.wheel.yml logs litellm
+        run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml logs litellm
       - if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.wheel.yml down -v
+        run: docker compose -f docker-compose.yml -f .github/wheel-install/compose.yml down -v

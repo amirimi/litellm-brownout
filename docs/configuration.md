@@ -140,8 +140,8 @@ Failover between deployments of one model group, by `order` and cooldown, still 
 Every team in the manifest needs a LiteLLM team whose `max_budget` equals `envelope_usd` and whose
 `budget_duration` equals the manifest's, with a model list that includes every declared fallback.
 Keys carry no budget of their own, because a key budget would be a second ceiling the manifest
-knows nothing about. `lab/setup_lab.py` is the reference implementation and sends these two
-requests.
+knows nothing about. `brownout init` prints the request that creates or corrects each team it finds
+missing or drifted. A new team and its key take these two requests.
 
 ```bash
 curl -s localhost:4000/team/new \
@@ -155,7 +155,7 @@ curl -s localhost:4000/key/generate \
 
 The plugin checks the amount and the key budget on every request, and refuses with a 503 and a
 platform incident when either breaks its assumption. The duration is invisible at request time, so
-a drifted `budget_duration` has to be caught wherever the team is rendered.
+`brownout init` reports a drifted `budget_duration` as `duration-matches` before deploy.
 
 ## Team manifest
 

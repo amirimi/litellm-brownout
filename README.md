@@ -93,11 +93,11 @@ at 75%.
 ```bash
 docker compose up -d --wait
 set -a; source .env; set +a
-KEY=$(uv run python lab/setup_lab.py | tail -1)
-[ -n "$KEY" ] || echo "lab/setup_lab.py printed no key. Fix the error above before the loop."
+KEY=$(uv run python tests/setup_lab.py | tail -1)
+[ -n "$KEY" ] || echo "tests/setup_lab.py printed no key. Fix the error above before the loop."
 ```
 
-`lab/setup_lab.py` creates a fresh lab team and prints its key, which takes about 11 seconds. Once
+`tests/setup_lab.py` creates a fresh lab team and prints its key, which takes about 11 seconds. Once
 it has printed a key, send the requests.
 
 ```bash
@@ -124,7 +124,7 @@ Around request 57 LiteLLM answers with its own 429, because the next request no 
 budget. Run `docker compose logs litellm | grep brownout_` to see the transitions the plugin announced
 on the way.
 
-To repeat the run, rerun `lab/setup_lab.py` and the loop. The script deletes and recreates the
+To repeat the run, rerun `tests/setup_lab.py` and the loop. The script deletes and recreates the
 `budget-lab` team and clears its counters and event claims, so point it only at the lab gateway.
 `docker compose down` stops the stack. The credentials in `.env.example` are for local development
 only. The [lab walkthrough](docs/lab.md) covers more experiments, such as a refused downgrade and a
