@@ -79,11 +79,34 @@ def test_deployments_that_disagree_on_a_data_class_are_a_violation():
     assert rules_for(group("primary"), split) == [RuleId.DATA_CLASS_DECLARED]
 
 
-@pytest.mark.parametrize("data_class", [None, "secret"])
-def test_a_data_class_outside_the_order_is_a_violation(data_class):
-    assert rules_for(
-        group("primary"), group("cheaper", data_classes=(data_class,))
-    ) == [RuleId.DATA_CLASS_DECLARED]
+@pytest.mark.parametrize(
+    ("data_class", "message"),
+    [
+        pytest.param(
+            None,
+            "has no model_info.data_class. A route with a fallback and its fallback "
+            "each need one from data_class_order ['internal', 'customer_pii']",
+            id="missing",
+        ),
+        pytest.param(
+            "secret",
+            "declares data class 'secret', which is not in the manifest's "
+            "data_class_order ['internal', 'customer_pii']",
+            id="unlisted",
+        ),
+    ],
+)
+def test_a_data_class_outside_the_order_names_the_fix(data_class, message):
+    lookup = {
+        item.name: item
+        for item in (group("primary"), group("cheaper", data_classes=(data_class,)))
+    }
+
+    violations = route_rules(manifest(), PAIR, lookup.get)
+
+    assert [(violation.rule, violation.message) for violation in violations] == [
+        (RuleId.DATA_CLASS_DECLARED, message)
+    ]
 
 
 def test_a_less_restricted_fallback_is_a_violation():

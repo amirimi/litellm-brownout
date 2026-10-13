@@ -166,7 +166,18 @@ def _declared_class(
         )
         return None
     data_class = classes.pop()
-    if data_class is None or manifest.sensitivity(data_class) is None:
+    if data_class is None:
+        violations.append(
+            Violation(
+                RuleId.DATA_CLASS_DECLARED,
+                name,
+                "has no model_info.data_class. A route with a fallback and its "
+                "fallback each need one from data_class_order "
+                f"{list(manifest.data_class_order)}",
+            )
+        )
+        return None
+    if manifest.sensitivity(data_class) is None:
         violations.append(
             Violation(
                 RuleId.DATA_CLASS_DECLARED,

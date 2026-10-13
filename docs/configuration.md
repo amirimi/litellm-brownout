@@ -26,8 +26,12 @@ its LiteLLM imports are private helpers (`_can_object_call_model`,
 `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), and all of
 them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.95.1. It
 logs one warning on 1.95.1 to 1.100, whose budget boundary is weaker, and one on a release newer
-than the tested 1.104. The repository documents and tests the
-mount. Installing the built wheel into a custom image is untested.
+than the tested 1.104. CI runs both this mount and the README's wheel install.
+
+The LiteLLM images for 1.95.1 to 1.99.4 and for 1.101.0 ship PyJWT 2.13.0, urllib3 2.7.0, multidict
+6.7.1 and oauthlib 3.3.1, which carry known advisories. The 1.100.5, 1.101.6, 1.102.4, 1.103.4 and
+1.104.2 images ship fixed releases. On 1.95 to 1.99, upgrade those packages in your own image or
+move to a fixed patch.
 
 | Variable | Default | Purpose |
 |---|---|---|
