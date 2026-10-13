@@ -31,8 +31,8 @@ REDIS_CONNECTION_FIELDS: Final = (
     "sentinel_password",
 )
 BUDGET_PLACEHOLDER: Final = "<YOUR BUDGET>"
-DURATION_PLACEHOLDER: Final = "<YOUR DURATION, SUCH AS 7d>"
-TEAM_PLACEHOLDER: Final = "<YOUR TEAM>"
+DURATION_PLACEHOLDER: Final = '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">'
+TEAM_PLACEHOLDER: Final = "<YOUR TEAM ID>"
 
 Section = Literal["general_settings", "litellm_settings"]
 
@@ -117,7 +117,10 @@ def key_findings(
                         _post(
                             gateway,
                             "/key/update",
-                            [("key", _json(key.token)), ("team_id", TEAM_PLACEHOLDER)],
+                            [
+                                ("key", _json(key.token)),
+                                ("team_id", _json(TEAM_PLACEHOLDER)),
+                            ],
                         ),
                     ),
                     True,

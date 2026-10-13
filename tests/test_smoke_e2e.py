@@ -85,6 +85,7 @@ class Observation:
     blocked_status: int | None = None
     blocked_body: str = ""
     first_degraded_response_id: str | None = None
+    first_degraded_body_model: str | None = None
     disclosure_mismatches: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -270,6 +271,7 @@ def _drive_to_exhaustion(client: httpx.Client, key: str) -> Observation:
         ):
             observed.first_degraded_headers = headers
             observed.first_degraded_response_id = response.json()["id"]
+            observed.first_degraded_body_model = response.json()["model"]
     return observed
 
 
@@ -388,6 +390,10 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(
     assert drained.first_degraded_headers["x-brownout-degraded-from"] == LAB_ROUTE
     assert drained.first_degraded_headers["x-brownout-route-served"] == DEGRADED_ROUTE
     assert drained.first_degraded_headers["x-brownout-budget-tier"] == "75"
+    assert drained.first_degraded_body_model == LAB_ROUTE, (
+        "LiteLLM no longer returns the requested route as the body's model, so the "
+        "docs that send callers to x-brownout-route-served need revisiting"
+    )
 
     assert drained.blocked_status in BUDGET_REFUSAL_STATUSES, (
         f"never reached the native ceiling in {drained.requests} requests"
@@ -681,7 +687,7 @@ def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findi
         ]:
             command = prepared.resolution(rule, subject)[0]
             if filled is not None:
-                command = command.replace("<YOUR TEAM>", json.dumps(filled))
+                command = command.replace("<YOUR TEAM ID>", filled)
             assert _run_decision(command) == 200, command
 
         resolved = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key)

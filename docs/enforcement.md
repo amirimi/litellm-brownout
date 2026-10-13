@@ -124,10 +124,17 @@ own.
 
 ## Response headers
 
-The post-call hook builds these headers from the request's facts. When the provider call fails, the
-hook omits `x-brownout-route-served` and `x-brownout-deployment-id`, because nothing served, and
-keeps the headers that describe the decision. LiteLLM's own budget refusal carries no header,
-because LiteLLM refuses it during authentication, before the plugin writes the request's facts.
+The post-call hook builds these headers from the request's facts. When a non-streamed provider call
+fails, the hook omits `x-brownout-route-served` and `x-brownout-deployment-id`, because nothing
+served, and keeps the headers that describe the decision. LiteLLM 1.104.2 calls the hook for a
+stream before it reads the first chunk. A stream that fails on its first chunk therefore answers
+with an error status and still names the group it was sent to in `x-brownout-route-served`.
+LiteLLM's own budget refusal carries no header, because LiteLLM refuses it during authentication,
+before the plugin writes the request's facts.
+
+The response body's `model` keeps the route the caller asked for, also after a downgrade. Callers
+learn the group that served from `x-brownout-route-served`, which LiteLLM's own
+`x-litellm-model-group` header matches.
 
 | Header | Present | Value |
 |---|---|---|
