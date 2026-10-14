@@ -15,7 +15,7 @@ from .adoption.resolutions import (
     merge_config,
     primary_resolution,
 )
-from .adoption.scenario import load_scenario, scenario_names
+from .adoption.scenario import gaps_match, load_scenario, scenario_names
 from .adoption.shell import ShellSession
 from .adoption.yamlfile import parse_snippet, read_styled
 from .support import REPO_ROOT
@@ -283,3 +283,16 @@ def test_the_ci_matrix_runs_every_scenario():
 def test_every_scenario_loads():
     for name in scenario_names():
         assert load_scenario(name).description
+
+
+@pytest.mark.parametrize(
+    ("recorded", "matched"),
+    [
+        pytest.param(["redis", "restart"], True, id="optional-met"),
+        pytest.param(["redis"], True, id="optional-missed"),
+        pytest.param(["restart"], False, id="required-missed"),
+        pytest.param(["redis", "restart", "other"], False, id="unexpected"),
+    ],
+)
+def test_a_timing_dependent_gap_may_or_may_not_occur(recorded, matched):
+    assert gaps_match(recorded, ("redis", "restart?")) is matched

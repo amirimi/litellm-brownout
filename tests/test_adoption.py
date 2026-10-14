@@ -8,7 +8,7 @@ from typing import Final
 import pytest
 
 from .adoption.runner import scenario_report
-from .adoption.scenario import load_scenario, scenario_names
+from .adoption.scenario import gaps_match, load_scenario, scenario_names
 from .support import REPO_ROOT
 
 ENABLED: Final = os.getenv("BROWNOUT_ADOPTION", "").lower() in {"1", "true", "yes"}
@@ -60,4 +60,4 @@ def test_the_printed_path_meets_only_the_declared_gaps(
 
     report: Final = scenario_report(scenario, release, wheel, tmp_path)
 
-    assert report.gaps == list(scenario.gaps_on(release)), report.summary()
+    assert gaps_match(report.gaps, scenario.gaps_on(release)), report.summary()

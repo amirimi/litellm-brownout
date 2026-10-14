@@ -11,6 +11,7 @@ SCENARIOS: Final = Path(__file__).resolve().parent / "scenarios"
 BASE_COMPOSE: Final = SCENARIOS / "compose.base.yml"
 ANY_SUBJECT: Final = "*"
 EVERY_RELEASE: Final = "*"
+OPTIONAL_MARK: Final = "?"
 
 
 @dataclass(frozen=True)
@@ -134,3 +135,13 @@ def _expected_gaps(document: Any) -> dict[str, tuple[str, ...]]:
     if isinstance(document, Mapping):
         return {release: tuple(gaps or ()) for release, gaps in document.items()}
     return {EVERY_RELEASE: tuple(document)}
+
+
+def gaps_match(recorded: list[str], expected: tuple[str, ...]) -> bool:
+    optional: Final = {
+        gap.removesuffix(OPTIONAL_MARK)
+        for gap in expected
+        if gap.endswith(OPTIONAL_MARK)
+    }
+    required: Final = [gap for gap in expected if not gap.endswith(OPTIONAL_MARK)]
+    return [gap for gap in recorded if gap not in optional] == required
