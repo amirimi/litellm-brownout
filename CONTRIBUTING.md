@@ -65,7 +65,8 @@ BROWNOUT_ADOPTION=1 BROWNOUT_ADOPTION_SCENARIOS=a-config-models BROWNOUT_ADOPTIO
 A step the runner cannot take from printed text is a gap. Each scenario lists its gaps in
 `expected_gaps`, and its test passes only when a run meets exactly those. A fix that closes a gap
 fails the test until its entry is removed. A new gap fails it until someone decides whether to fix
-or record it. The runner substitutes three things in the README's blocks: the gateway URL, the local
+or record it. A gap that ends in `?` may or may not occur, because it depends on LiteLLM's timing,
+such as a config reload that lands before or after `init` reruns. The runner substitutes three things in the README's blocks: the gateway URL, the local
 wheel for the PyPI package, and the LiteLLM image tag. Every step's command and output lands in
 `transcript.log` in the scenario's temporary directory.
 

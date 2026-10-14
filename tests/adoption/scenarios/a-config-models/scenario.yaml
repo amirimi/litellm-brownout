@@ -48,3 +48,4 @@ drive:
   model: chat
 expected_gaps:
   - redis-configured:no-redis-guidance
+  - model-priced:needs-restart?
