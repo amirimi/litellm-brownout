@@ -50,12 +50,26 @@ def _parse(runtime: ModuleType, text: str) -> YamlDocument:
     renderer: Final = runtime.YAML()
     renderer.preserve_quotes = True
     renderer.width = LINE_WIDTH
-    renderer.indent(
-        mapping=dash_offset or DEFAULT_INDENT,
-        sequence=sequence_indent or DEFAULT_SEQUENCE_INDENT,
-        offset=dash_offset or DEFAULT_INDENT,
-    )
+    _set_indent(renderer, sequence_indent, dash_offset)
     return YamlDocument(data=renderer.load(text), renderer=renderer)
+
+
+def _set_indent(
+    renderer: Any, sequence_indent: int | None, dash_offset: int | None
+) -> None:
+    if sequence_indent is None or dash_offset is None:
+        renderer.indent(
+            mapping=DEFAULT_INDENT,
+            sequence=DEFAULT_SEQUENCE_INDENT,
+            offset=DEFAULT_INDENT,
+        )
+        return
+    mapping_indent = DEFAULT_INDENT
+    if dash_offset > 0:
+        mapping_indent = dash_offset
+    renderer.indent(
+        mapping=mapping_indent, sequence=sequence_indent, offset=dash_offset
+    )
 
 
 def dump_document(document: YamlDocument) -> str:

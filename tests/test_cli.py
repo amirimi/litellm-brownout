@@ -537,3 +537,31 @@ def test_init_reports_a_malformed_manifest_by_position(tmp_path, capsys):
     assert f"{manifest} is not valid YAML at line 2, column 1" in (
         capsys.readouterr().err
     )
+
+
+@pytest.mark.parametrize(
+    ("written", "priced"),
+    [
+        pytest.param("1e-4", True, id="scientific-without-a-point"),
+        pytest.param("0.0001", True, id="decimal-string"),
+        pytest.param("not a price", False, id="text"),
+        pytest.param("nan", False, id="not-finite"),
+    ],
+)
+def test_a_string_price_is_read_the_way_litellm_reads_it(written, priced):
+    gateway = gateway_file(
+        {
+            "model_list": [
+                {
+                    "model_name": "chat",
+                    "litellm_params": {
+                        "model": "openai/never-mapped",
+                        "input_cost_per_token": written,
+                        "output_cost_per_token": written,
+                    },
+                }
+            ]
+        }
+    )
+
+    assert (gateway.groups["chat"].input_cost_per_token is not None) is priced

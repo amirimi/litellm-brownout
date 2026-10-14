@@ -22,5 +22,4 @@ fallback:
 drive:
   key: search-app
   model: chat
-expected_gaps:
-  - check:failed
+expected_gaps: []

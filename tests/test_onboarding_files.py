@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
+import pytest
+import yaml
+
 from brownout.onboarding import AppendSetting, RemoveSetting, SetSetting, TeamEntry
 from brownout.onboarding_files import (
     append_teams,
@@ -118,3 +121,61 @@ def test_the_diff_names_the_file_and_shows_only_changes():
     assert diff.splitlines()[:2] == ["--- config.yaml", "+++ config.yaml"]
     assert "-b: 2" in diff and "+b: 3" in diff
     assert unified_diff("same\n", "same\n", "x") == ""
+
+
+FLUSH_LISTS: Final = """model_list:
+- model_name: chat
+  litellm_params:
+    model: openai/mock-chat
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+"""
+INDENTED_LISTS: Final = """model_list:
+  - model_name: chat
+    litellm_params:
+      model: openai/mock-chat
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+"""
+FOUR_SPACE_MAPS: Final = """general_settings:
+    master_key: os.environ/LITELLM_MASTER_KEY
+model_list:
+    - model_name: chat
+      litellm_params:
+          model: openai/mock-chat
+"""
+NO_LISTS: Final = """general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+"""
+
+
+@pytest.mark.parametrize(
+    "text",
+    [FLUSH_LISTS, INDENTED_LISTS, FOUR_SPACE_MAPS, NO_LISTS],
+    ids=["flush", "indented", "four-space", "no-lists"],
+)
+def test_every_list_style_round_trips_byte_for_byte(text):
+    assert dump_document(load_document(SOURCE, text)) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [FLUSH_LISTS, INDENTED_LISTS, NO_LISTS],
+    ids=["flush", "indented", "no-lists"],
+)
+def test_a_prepared_config_stays_valid_yaml_in_every_list_style(text):
+    document = load_document(SOURCE, text)
+
+    apply_config_changes(
+        document,
+        [
+            AppendSetting("litellm_settings", "callbacks", "brownout.gateway.handler"),
+            SetSetting(
+                "general_settings", "coordination_redis", {"host": "redis"}, None
+            ),
+        ],
+    )
+
+    reloaded = yaml.safe_load(dump_document(document))
+    assert reloaded["litellm_settings"]["callbacks"] == ["brownout.gateway.handler"]
+    assert reloaded["general_settings"]["coordination_redis"] == {"host": "redis"}

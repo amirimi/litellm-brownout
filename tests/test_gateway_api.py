@@ -159,3 +159,28 @@ def test_a_transport_failure_raises_the_same_error_type():
 
     with pytest.raises(GatewayReadError, match="refused"):
         read_gateway(client, lambda page, total: None)
+
+
+@pytest.mark.parametrize(
+    ("prices", "priced"),
+    [
+        pytest.param((0, 0), False, id="zero-as-litellm-1.95.1-reports-unpriced"),
+        pytest.param((0, 2e-6), True, id="free-input"),
+        pytest.param((1e-6, None), False, id="one-price-missing"),
+    ],
+)
+def test_a_model_is_priced_by_the_same_rule_the_requests_use(prices, priced):
+    deployment = {
+        "model_name": "mock",
+        "model_info": {
+            "input_cost_per_token": prices[0],
+            "output_cost_per_token": prices[1],
+        },
+    }
+
+    snapshot = read_gateway(
+        gateway_client({"/model/info": {"data": [deployment]}}),
+        lambda page, total: None,
+    )
+
+    assert snapshot.models == (LiteLLMModel("mock", priced),)

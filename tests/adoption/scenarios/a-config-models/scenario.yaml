@@ -47,10 +47,5 @@ drive:
   key: search-app
   model: chat
 expected_gaps:
-  "v1.104.2":
-    - redis-configured:no-redis-guidance
-    - model-priced:needs-restart?
-  "v1.95.1":
-    - redis-configured:no-redis-guidance
-    - model-priced:needs-restart?
-    - confirm:no-header
+  - redis-configured:no-redis-guidance
+  - model-priced:needs-restart?
