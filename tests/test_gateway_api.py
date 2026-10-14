@@ -11,7 +11,9 @@ from brownout.gateway_api import (
     LiteLLMModel,
     LiteLLMTeam,
     read_gateway,
+    read_model_groups,
 )
+from brownout.rules import ModelGroup
 
 TEAMS: Final = [
     {
@@ -184,3 +186,62 @@ def test_a_model_is_priced_by_the_same_rule_the_requests_use(prices, priced):
     )
 
     assert snapshot.models == (LiteLLMModel("mock", priced),)
+
+
+def test_members_with_a_budget_inside_the_team_are_named():
+    listed = [
+        {
+            **TEAMS[0],
+            "team_memberships": [
+                {"user_id": "alice", "litellm_budget_table": {"max_budget": 0.2}},
+                {"user_id": "bob", "litellm_budget_table": None},
+                {"user_id": "carol", "litellm_budget_table": {"max_budget": None}},
+            ],
+        }
+    ]
+
+    snapshot = read_gateway(
+        gateway_client({"/team/list": listed}), lambda page, total: None
+    )
+
+    assert snapshot.teams[0].budgeted_members == ("alice",)
+
+
+def test_model_groups_carry_prices_and_data_classes_from_the_gateway():
+    deployments = [
+        {
+            "model_name": "ui-chat",
+            "model_info": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": 2e-6,
+                "data_class": "internal",
+            },
+        },
+        {
+            "model_name": "ui-chat",
+            "model_info": {
+                "input_cost_per_token": 3e-6,
+                "output_cost_per_token": 1e-6,
+                "data_class": "internal",
+            },
+        },
+        {
+            "model_name": "half-priced",
+            "model_info": {"input_cost_per_token": 1e-6, "output_cost_per_token": None},
+        },
+    ]
+
+    groups = read_model_groups(gateway_client({"/model/info": {"data": deployments}}))
+
+    assert groups["ui-chat"] == ModelGroup(
+        "ui-chat", 3e-6, 2e-6, ("internal", "internal")
+    )
+    assert groups["half-priced"].output_cost_per_token is None
+    assert groups["half-priced"].data_classes == (None,)
+
+
+def test_the_snapshot_carries_the_same_model_groups():
+    snapshot = read_gateway(gateway_client(), lambda page, total: None)
+
+    assert snapshot.groups == read_model_groups(gateway_client())
+    assert set(snapshot.groups) == {"chat", "unpriced"}

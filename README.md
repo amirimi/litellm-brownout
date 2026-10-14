@@ -41,6 +41,24 @@ Brownout governs every chat completion on the gateway, so the whole gateway has 
   alerts are off.
 - LiteLLM runs a release from 1.95.1 to 1.104, pinned by image tag.
 
+Brownout needs a Redis that LiteLLM can reach. LiteLLM keeps each team's spend counter there, and
+brownout records each announcement there. If the gateway has no Redis, add one before running
+`init`, and give the gateway the same `REDIS_PASSWORD`. With Docker Compose the service looks like
+this, and its host for `init` is `redis`.
+
+<!-- adoption: redis-service -->
+```yaml
+services:
+  redis:
+    image: redis:7
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory-policy noeviction"]
+    env_file:
+      - .env
+```
+
+The append-only file and the `noeviction` policy keep the counter and the announcements through a
+restart or memory pressure.
+
 ## Install
 
 `brownout init` reads your running gateway and reports what breaks the requirements. You resolve
@@ -168,8 +186,36 @@ model_list:
       data_class: internal
 ```
 
+A model added in the admin UI lives in LiteLLM's database instead of a file, so it takes its class
+through LiteLLM's model patch. This loop patches every deployment of `chat-qa`. Run it for the
+fallback too.
+
+<!-- adoption: fallback-ui -->
+```bash
+for id in $(curl -sSf http://localhost:4000/model/info -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+    | jq -r '.data[] | select(.model_name == "chat-qa") | .model_info.id'); do
+  curl -sSf -X PATCH "http://localhost:4000/model/$id/update" \
+    -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+    -d '{"model_info": {"data_class": "internal"}}'
+done
+```
+
 The team's model list in LiteLLM must include the fallback, or the primary keeps serving. Run
-`brownout check` again, then restart the gateway, which reads the manifest only at startup.
+`brownout check` again, then restart the gateway, which reads the manifest only at startup. `check`
+reads models from files, so for a model added in the admin UI it needs `--gateway` and a read-only
+key, created and deleted as in Prepare.
+
+<!-- adoption: fallback-ui-check -->
+```bash
+BROWNOUT_INIT_KEY=$(curl -sSf http://localhost:4000/user/new \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"user_id": "brownout-init", "user_role": "proxy_admin_viewer"}' | jq -er .key) \
+  && export BROWNOUT_INIT_KEY
+uvx --from litellm-brownout brownout check --gateway http://localhost:4000 --gateway-config brownout.config.yaml --manifest brownout.yaml
+curl -sSf http://localhost:4000/user/delete \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"user_ids": ["brownout-init"]}'
+```
 
 Send the fallback the route's real requests before it carries real traffic. After the downgrade it
 receives everything the route sends, including tools, structured output, images and long prompts,
@@ -217,6 +263,8 @@ such as a refused downgrade and a broken manifest. `docker compose down` stops t
 
 ## Limits
 
+- Routes name concrete model groups. A request through a wildcard group such as `openai/*` earns
+  team tiers and never degrades, so the manifest refuses a wildcard route.
 - Brownout governs `/v1/chat/completions` only. Embeddings, images, audio, `/v1/messages` and
   `/v1/responses` pass through at full price and without headers.
 - Router fallbacks never apply to governed requests. A provider error on the chosen model group

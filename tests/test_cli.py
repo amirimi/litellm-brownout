@@ -7,7 +7,7 @@ import httpx
 import pytest
 import yaml
 
-from brownout.cli import InitOptions, gateway_file, init, main
+from brownout.cli import InitOptions, check, gateway_file, init, main
 from brownout.manifest import Manifest
 
 from .support import CONFIG_DIR, SECRET, config_with_inline_secrets, lab_gateway_config
@@ -565,3 +565,67 @@ def test_a_string_price_is_read_the_way_litellm_reads_it(written, priced):
     )
 
     assert (gateway.groups["chat"].input_cost_per_token is not None) is priced
+
+
+def split_lab_config(directory: Path) -> Path:
+    config = lab_gateway_config()
+    models = {"model_list": config.pop("model_list")}
+    config["include"] = ["models.yaml"]
+    write(directory / "models.yaml", models)
+    return write(directory / "config.yaml", config)
+
+
+def test_check_reads_models_from_included_files(tmp_path):
+    exit_code = check_files(split_lab_config(tmp_path), LAB_MANIFEST)
+
+    assert exit_code == 0
+
+
+def test_init_reads_models_from_included_files(tmp_path):
+    chosen = options(
+        tmp_path,
+        gateway_config=split_lab_config(tmp_path),
+        manifest=LAB_MANIFEST,
+        manifest_out=tmp_path / "out.yaml",
+    )
+
+    init(chosen, fake_gateway(), DEFAULT_ALERTS, INIT_TOKEN)
+
+    assert check_files(chosen.config_out, chosen.manifest_out) == 0
+
+
+def test_check_sees_gateway_models_a_file_does_not_list(tmp_path):
+    config = lab_gateway_config()
+    database_models = {
+        name: group
+        for name, group in gateway_file(config).groups.items()
+        if name.startswith("budget-lab")
+    }
+    config["model_list"] = [
+        deployment
+        for deployment in config["model_list"]
+        if not deployment["model_name"].startswith("budget-lab")
+    ]
+    config_path = write(tmp_path / "config.yaml", config)
+
+    assert check(config_path, LAB_MANIFEST, {}) != []
+    assert check(config_path, LAB_MANIFEST, database_models) == []
+
+
+def test_check_with_a_gateway_needs_the_init_key(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("BROWNOUT_INIT_KEY", raising=False)
+
+    exit_code = main(
+        [
+            "check",
+            "--gateway",
+            "http://gateway.test",
+            "--gateway-config",
+            str(LAB_CONFIG),
+            "--manifest",
+            str(LAB_MANIFEST),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "BROWNOUT_INIT_KEY" in capsys.readouterr().err

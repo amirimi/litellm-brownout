@@ -28,6 +28,7 @@ class RuleId(StrEnum):
     DURATION_MATCHES = "duration-matches"
     TEAM_EXISTS = "team-exists"
     FALLBACK_IN_TEAM_MODELS = "fallback-in-team-models"
+    MEMBER_HAS_NO_BUDGET = "member-has-no-budget"
 
 
 @dataclass(frozen=True)

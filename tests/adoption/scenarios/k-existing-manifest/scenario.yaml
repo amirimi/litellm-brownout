@@ -20,7 +20,7 @@ confirm:
   key: search-app
   model: chat
 fallback:
-  team: search
+  team: "{team:search}"
   route: chat
   fallback: chat-cheap
   degrade_at: 75

@@ -6,7 +6,7 @@ from typing import Any, Final
 
 import httpx
 
-from .rules import has_usable_prices
+from .rules import ModelGroup, group_price, has_usable_prices
 
 KEY_PAGE_SIZE: Final = 100
 
@@ -23,6 +23,7 @@ class LiteLLMTeam:
     max_budget: float | None
     budget_duration: str | None
     models: tuple[str, ...]
+    budgeted_members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,14 +45,21 @@ class GatewaySnapshot:
     teams: tuple[LiteLLMTeam, ...]
     keys: tuple[LiteLLMKey, ...]
     models: tuple[LiteLLMModel, ...]
+    groups: Mapping[str, ModelGroup]
 
 
 def read_gateway(client: httpx.Client, on_page: PageProgress) -> GatewaySnapshot:
+    deployments: Final = _deployments(client)
     return GatewaySnapshot(
         teams=_teams(client),
         keys=_keys(client, on_page),
-        models=_models(client),
+        models=_models(deployments),
+        groups=_groups(deployments),
     )
+
+
+def read_model_groups(client: httpx.Client) -> dict[str, ModelGroup]:
+    return _groups(_deployments(client))
 
 
 def _teams(client: httpx.Client) -> tuple[LiteLLMTeam, ...]:
@@ -72,7 +80,27 @@ def _team(entry: Any) -> LiteLLMTeam:
         max_budget=max_budget,
         budget_duration=entry.get("budget_duration"),
         models=tuple(str(model) for model in entry.get("models") or []),
+        budgeted_members=_budgeted_members(entry.get("team_memberships") or []),
     )
+
+
+def _budgeted_members(memberships: Any) -> tuple[str, ...]:
+    if not isinstance(memberships, list):
+        raise GatewayReadError(
+            "/team/list returned team_memberships that are not a list"
+        )
+    return tuple(
+        str(membership["user_id"])
+        for membership in memberships
+        if isinstance(membership, dict) and _member_budget(membership) is not None
+    )
+
+
+def _member_budget(membership: Mapping[str, Any]) -> Any:
+    table: Final = membership.get("litellm_budget_table")
+    if not isinstance(table, dict):
+        return None
+    return table.get("max_budget")
 
 
 def _keys(client: httpx.Client, on_page: PageProgress) -> tuple[LiteLLMKey, ...]:
@@ -110,17 +138,49 @@ def _key(entry: Any) -> LiteLLMKey:
     )
 
 
-def _models(client: httpx.Client) -> tuple[LiteLLMModel, ...]:
+def _deployments(client: httpx.Client) -> list[Mapping[str, Any]]:
     listed: Final = _get(client, "/model/info", {})
     if not isinstance(listed, dict) or not isinstance(listed.get("data"), list):
         raise GatewayReadError("/model/info did not return a list of deployments")
+    return [deployment for deployment in listed["data"] if isinstance(deployment, dict)]
+
+
+def _models(deployments: list[Mapping[str, Any]]) -> tuple[LiteLLMModel, ...]:
     priced: dict[str, bool] = {}
-    for deployment in listed["data"]:
+    for deployment in deployments:
         name = str(deployment.get("model_name") or "")
         priced[name] = priced.get(name, False) or _has_prices(
             deployment.get("model_info") or {}
         )
     return tuple(LiteLLMModel(name, priced[name]) for name in sorted(priced))
+
+
+def _groups(deployments: list[Mapping[str, Any]]) -> dict[str, ModelGroup]:
+    infos: dict[str, list[Mapping[str, Any]]] = {}
+    for deployment in deployments:
+        name = str(deployment.get("model_name") or "")
+        infos.setdefault(name, []).append(deployment.get("model_info") or {})
+    return {name: _group(name, group_infos) for name, group_infos in infos.items()}
+
+
+def _group(name: str, infos: list[Mapping[str, Any]]) -> ModelGroup:
+    return ModelGroup(
+        name=name,
+        input_cost_per_token=group_price(
+            [_number(info.get("input_cost_per_token")) for info in infos]
+        ),
+        output_cost_per_token=group_price(
+            [_number(info.get("output_cost_per_token")) for info in infos]
+        ),
+        data_classes=tuple(_data_class(info) for info in infos),
+    )
+
+
+def _data_class(info: Mapping[str, Any]) -> str | None:
+    declared: Final = info.get("data_class")
+    if isinstance(declared, str):
+        return declared
+    return None
 
 
 def _has_prices(model_info: Mapping[str, Any]) -> bool:

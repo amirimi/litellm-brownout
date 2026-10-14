@@ -202,3 +202,19 @@ def test_a_team_cannot_be_built_with_a_window_that_does_not_tumble():
             warn_tiers=(75,),
             routes={},
         )
+
+
+@pytest.mark.parametrize(
+    "routes",
+    [
+        pytest.param({"openai/*": {}}, id="wildcard-route"),
+        pytest.param(
+            {"chat": {"fallback": "openai/*", "degrade_at": 90}}, id="wildcard-fallback"
+        ),
+    ],
+)
+def test_a_wildcard_group_cannot_be_a_route_or_a_fallback(routes):
+    error = refused(document({"routes": routes}))
+
+    assert error.rule is RuleId.MANIFEST_SCHEMA
+    assert "concrete model group" in str(error)

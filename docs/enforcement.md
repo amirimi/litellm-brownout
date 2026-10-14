@@ -23,6 +23,7 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | The team's LiteLLM `max_budget` equals `envelope_usd` | 503 and a platform incident | `ceiling-matches-envelope` |
 | The team's LiteLLM `budget_duration` equals the manifest's | Tier windows drift from LiteLLM's resets | `duration-matches`, run by `brownout init` |
 | The window tumbles with LiteLLM's resets | The manifest refuses to load | `duration-tumbles` |
+| No team member carries a budget inside the team | LiteLLM refuses that member before any tier fires | `member-has-no-budget`, run by `brownout init` |
 | No user, organisation, end-user or tag budget blocks first | LiteLLM refuses before any tier fires | Documented, not checked |
 | No stacked team `budget_limits` | A daily limit inside a weekly one hits with no brownout first | Documented, not checked |
 | The team's model list includes each fallback | The primary serves and a `brownout_fallback_rejected` event fires | The permission check |
@@ -30,6 +31,7 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
 | LiteLLM's budget alerts are off and `coordination_redis` is configured | `brownout check` fails | `no-native-budget-alerts`, `redis-configured` |
 | Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | `brownout check` fails before deploy. A pairing that breaks after deploy withholds the downgrade, so the primary serves and the platform gets an incident | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
+| Routes and fallbacks name concrete model groups | A wildcard group such as `openai/*` never matches a request, so it would never degrade | `manifest-schema` |
 | Only chat completions are governed | Embeddings, images, audio, `/v1/messages` and `/v1/responses` pass through untouched, at full price and without headers | Documented |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade. A request without `max_tokens` reserves the model's whole output | Documented, not checked |

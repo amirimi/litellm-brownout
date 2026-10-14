@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from brownout.inputs import DocumentError, load_yaml, mapping, positioned, read_text
+from brownout.inputs import (
+    DocumentError,
+    load_yaml,
+    mapping,
+    positioned,
+    read_text,
+    with_includes,
+)
 
 
 @dataclass(frozen=True)
@@ -67,3 +74,38 @@ def test_anything_but_a_mapping_is_refused(document):
 
 def test_a_mapping_passes_through():
     assert mapping(Path("config.yaml"), {"model_list": []}) == {"model_list": []}
+
+
+def test_includes_merge_the_way_litellm_merges_them(tmp_path):
+    (tmp_path / "models.yaml").write_text(
+        "model_list:\n  - model_name: included\nlitellm_settings:\n  drop_params: true\n",
+        encoding="utf-8",
+    )
+    config = {
+        "include": ["models.yaml"],
+        "model_list": [{"model_name": "main"}],
+        "litellm_settings": {"cache": False},
+    }
+
+    merged = with_includes(tmp_path / "config.yaml", config)
+
+    assert merged == {
+        "model_list": [{"model_name": "main"}, {"model_name": "included"}],
+        "litellm_settings": {"drop_params": True},
+    }
+
+
+def test_a_missing_include_is_named(tmp_path):
+    with pytest.raises(DocumentError, match="missing.yaml was not found"):
+        with_includes(tmp_path / "config.yaml", {"include": ["missing.yaml"]})
+
+
+def test_an_include_that_is_not_a_list_is_refused(tmp_path):
+    with pytest.raises(DocumentError, match="include must list files"):
+        with_includes(tmp_path / "config.yaml", {"include": "models.yaml"})
+
+
+def test_a_config_without_includes_is_unchanged(tmp_path):
+    assert with_includes(tmp_path / "config.yaml", {"model_list": []}) == {
+        "model_list": []
+    }

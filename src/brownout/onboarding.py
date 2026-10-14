@@ -98,7 +98,36 @@ def team_entries(
 
 
 def team_findings(teams: Iterable[LiteLLMTeam], gateway: str) -> list[Finding]:
-    return [_team_finding(team, gateway) for team in teams if not _governable(team)]
+    listed: Final = tuple(teams)
+    return [
+        *(_team_finding(team, gateway) for team in listed if not _governable(team)),
+        *(
+            _member_finding(team, user_id, gateway)
+            for team in listed
+            for user_id in team.budgeted_members
+        ),
+    ]
+
+
+def _member_finding(team: LiteLLMTeam, user_id: str, gateway: str) -> Finding:
+    return Finding(
+        RuleId.MEMBER_HAS_NO_BUDGET,
+        f"{team.team_id}/{user_id}",
+        "carries a budget inside the team, so LiteLLM can refuse its requests before "
+        "any tier fires or any route degrades",
+        (
+            _post(
+                gateway,
+                "/team/member_update",
+                [
+                    ("team_id", _json(team.team_id)),
+                    ("user_id", _json(user_id)),
+                    ("max_budget_in_team", "null"),
+                ],
+            ),
+        ),
+        True,
+    )
 
 
 def key_findings(
@@ -156,7 +185,10 @@ def model_findings(models: Iterable[LiteLLMModel]) -> list[Finding]:
         Finding(
             RuleId.MODEL_PRICED,
             model.name,
-            "has no input and output price, so requests for it will be refused",
+            "has no input and output price, so requests for it will be refused. Add "
+            "the lines below to its deployments and restart the gateway, because init "
+            "reads prices from the running gateway. A model added in the admin UI takes "
+            "its price there instead",
             (
                 f"- model_name: {model.name}",
                 "  litellm_params:",
@@ -251,13 +283,34 @@ def admin_keys_notice(own_key_teamless: bool) -> Finding:
     )
 
 
-def nothing_to_govern() -> Finding:
+def nothing_to_govern(gateway: str, teams_exist: bool) -> Finding:
+    if teams_exist:
+        return Finding(
+            RuleId.TEAM_IN_MANIFEST,
+            "manifest",
+            "no LiteLLM team has a positive max_budget and an accepted budget_duration, "
+            "so there is no manifest to write. Resolve the team findings first",
+            (),
+            True,
+        )
     return Finding(
         RuleId.TEAM_IN_MANIFEST,
         "manifest",
-        "no LiteLLM team has a positive max_budget and an accepted budget_duration, "
-        "so there is no manifest to write. Resolve the team findings first",
-        (),
+        "the gateway has no team, so there is no manifest to write. Create a team with "
+        "a budget and a key for it with the commands below, then send chat traffic with "
+        "that key",
+        (
+            _post(
+                gateway,
+                "/team/new",
+                [
+                    ("team_id", _json(TEAM_PLACEHOLDER)),
+                    ("max_budget", BUDGET_PLACEHOLDER),
+                    ("budget_duration", DURATION_PLACEHOLDER),
+                ],
+            ),
+            _post(gateway, "/key/generate", [("team_id", _json(TEAM_PLACEHOLDER))]),
+        ),
         True,
     )
 

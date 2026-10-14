@@ -14,14 +14,13 @@ environment:
   SLACK_WEBHOOK_URL: http://127.0.0.1:9/slack
 provisions:
   "<YOUR REDIS HOST>":
-    gap: redis-configured:no-redis-guidance
-    compose: redis.compose.yml
+    readme: redis-service
     value: redis
 confirm:
   key: search-app
   model: chat
 fallback:
-  team: search
+  team: "{team:search}"
   route: chat
   fallback: chat-cheap
   degrade_at: 75
@@ -29,5 +28,4 @@ fallback:
 drive:
   key: search-app
   model: chat
-expected_gaps:
-  - redis-configured:no-redis-guidance
+expected_gaps: []

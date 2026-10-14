@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 import shutil
 from collections.abc import Callable
@@ -29,6 +30,8 @@ README_GATEWAY: Final = "http://localhost:4000"
 README_UVX: Final = "uvx --from litellm-brownout "
 README_IMAGE: Final = "FROM docker.litellm.ai/berriai/litellm:v1.104.2"
 README_REQUIREMENT: Final = "litellm-brownout==0.1.0"
+README_UI_GROUP: Final = 'select(.model_name == "chat-qa")'
+README_UI_CLASS: Final = '"data_class": "internal"'
 INIT_COMMAND: Final = "brownout init"
 CHECK_COMMAND: Final = "brownout check"
 CHECK_PASSED: Final = "brownout check passed"
@@ -41,6 +44,9 @@ WRITTEN_MANIFEST: Final = "brownout.yaml"
 INSTALL_OVERRIDE: Final = "compose.brownout.yml"
 SCENARIO_ONLY_FILES: Final = frozenset({"scenario.yaml", "compose.yml"})
 OFFLINE_TOOLS: Final = {"UV_OFFLINE": "1"}
+RESTART_INSTRUCTION: Final = "restart the gateway"
+PRINTED_KEY: Final = re.compile(r'"key"\s*:\s*"(sk-[^"]+)"')
+PRINTED_KEY_ALIAS: Final = "printed-key"
 MAX_INIT_ROUNDS: Final = 4
 DRIVE_LIMIT: Final = 120
 DRIVE_MAX_TOKENS: Final = 40
@@ -183,6 +189,8 @@ class Adoption:
             for finding in pending:
                 self._apply(finding)
                 applied[finding.key] = finding
+            if any(RESTART_INSTRUCTION in finding.detail for finding in pending):
+                self.gateway.restart()
             result = self.shell.run(self.init_line)
         raise PathStop(
             "init:no-convergence", f"init still exits 1 after {MAX_INIT_ROUNDS} rounds"
@@ -241,13 +249,7 @@ class Adoption:
                         f"scenario {self.scenario.name} declares no value for "
                         f"{missing.placeholder} in {finding.key}"
                     ) from missing
-                self.report.record(
-                    provision.gap,
-                    f"{finding.rule} needs {missing.placeholder}, and this setup had "
-                    f"to provision it from {provision.compose.name} without guidance",
-                )
-                self._add_compose_file(provision.compose)
-                self.gateway.up(False)
+                self._provision(provision.readme)
                 values[missing.placeholder] = provision.value
 
     def _apply_command(self, finding: PrintedFinding, command: str) -> None:
@@ -258,6 +260,8 @@ class Adoption:
                 f"the printed command for {finding.subject} failed: "
                 f"{_excerpt(result.stdout + result.stderr)}",
             )
+        for key in PRINTED_KEY.findall(result.stdout):
+            self.seeded.keys[PRINTED_KEY_ALIAS] = key
 
     def _apply_config(self, finding: PrintedFinding, text: str) -> None:
         documents: Final = self._config_documents(GATEWAY_CONFIG)
@@ -356,7 +360,7 @@ class Adoption:
         plan: Final = self.scenario.fallback
         route_keys, class_order = _manifest_template(self.blocks["fallback-manifest"])
         info_key, class_key = _config_template(self.blocks["fallback-config"])
-        team_id: Final = self.seeded.team_ids[plan.team]
+        team_id: Final = self.seeded.resolve(plan.team)
         manifest_document: Final = read_styled(self.workdir / WRITTEN_MANIFEST)
         manifest: Final = manifest_document.data
         if team_id not in (manifest.get("teams") or {}):
@@ -373,6 +377,7 @@ class Adoption:
         }
         manifest_document.save()
         documents: Final = self._config_documents(WRITTEN_CONFIG)
+        database_groups: list[str] = []
         for group in (plan.route, plan.fallback):
             deployments = [
                 deployment
@@ -381,16 +386,17 @@ class Adoption:
                 if deployment.get("model_name") == group
             ]
             if not deployments:
-                raise PathStop(
-                    "fallback:nowhere-to-add",
-                    f"{WRITTEN_CONFIG} and its includes define no deployment of {group}, "
-                    f"so its {info_key}.{class_key} has nowhere to go",
-                )
+                database_groups.append(group)
             for deployment in deployments:
                 deployment.setdefault(info_key, {})[class_key] = plan.data_class
         for document in documents:
             document.save()
-        checked: Final = self.shell.run(self.check_line)
+        for group in database_groups:
+            self._patch_database_group(group, plan.data_class)
+        check_script = self.check_line
+        if database_groups:
+            check_script = self._readme_block("fallback-ui-check")
+        checked: Final = self.shell.run(check_script)
         if CHECK_PASSED not in checked.stdout:
             raise PathStop(
                 "fallback:check-failed",
@@ -398,6 +404,22 @@ class Adoption:
                 f"{_excerpt(checked.stdout + checked.stderr)}",
             )
         self._gateway_step("fallback", self.gateway.restart)
+
+    def _patch_database_group(self, group: str, data_class: str) -> None:
+        block: Final = adapt(
+            self._readme_block("fallback-ui"),
+            [
+                (README_UI_GROUP, f'select(.model_name == "{group}")'),
+                (README_UI_CLASS, f'"data_class": "{data_class}"'),
+            ],
+        )
+        patched: Final = self.shell.run(block)
+        if patched.returncode != 0 or not patched.stdout.strip():
+            raise PathStop(
+                "fallback:nowhere-to-add",
+                f"neither the config files nor the gateway's database define {group}: "
+                f"{_excerpt(patched.stdout + patched.stderr)}",
+            )
 
     def _drive(self) -> None:
         call: Final = self.scenario.drive
@@ -449,6 +471,14 @@ class Adoption:
                 *_uvx_replacement(self.blocks[name], self.tool_wheel),
             ],
         )
+
+    def _provision(self, block: str) -> None:
+        target: Final = (
+            self.workdir / f"compose.{len(self.gateway.files)}.readme-{block}.yml"
+        )
+        target.write_text(self.blocks[block], encoding="utf-8")
+        self.gateway.files.append(target)
+        self.gateway.up(False)
 
     def _add_compose_file(self, source: Path) -> None:
         target: Final = (

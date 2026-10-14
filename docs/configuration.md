@@ -212,7 +212,7 @@ teams:
 | `envelope_usd` | positive finite number | The owner-approved budget. Must equal the LiteLLM team's `max_budget` |
 | `budget_duration` | `1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`, `24h`, `1d`, `7d`, `1w`, `30d`, `1mo`, `hourly`, `daily`, `weekly` or `monthly` | The windows that tumble with LiteLLM's resets. Any other value fails rule `duration-tumbles` |
 | `warn_tiers` | list of integers in 1..99, optional | Team tiers. Each raises one event with scope `team` per window. 100 belongs to LiteLLM's ceiling |
-| `routes.<model_group>` | mapping, may be empty | Keyed by LiteLLM model group name. A route absent from the manifest still spends against the envelope and still earns team tier events. It never degrades |
+| `routes.<model_group>` | mapping, may be empty | Keyed by LiteLLM model group name. A route absent from the manifest still spends against the envelope and still earns team tier events. It never degrades. A wildcard group such as `openai/*` cannot be a route or a fallback, because requests name concrete models and never match it |
 | `routes.<model_group>.fallback` | model group name | The degradation target. It differs from its route (rule `fallback-distinct`), is served and priced, and is at least as restricted in data class. Its price relative to the route is the owner's call |
 | `routes.<model_group>.degrade_at` | integer in 1..99 | Requires `fallback`. A degrade threshold only, and never a tier |
 | `routes.<model_group>.warn_tiers` | list of integers in 1..99, optional | Route tiers. Each raises one event with scope `route` per window, on a request to that route |
@@ -251,6 +251,7 @@ settings.
 | `duration-matches` | A manifest team's `budget_duration` equals its LiteLLM team's | Init |
 | `team-exists` | Every manifest team exists in LiteLLM | Init |
 | `fallback-in-team-models` | Every fallback is in its team's LiteLLM model list, unless the list allows every model | Init |
+| `member-has-no-budget` | No team member carries a budget inside the team, whether set per member or for every member | Init |
 | `supported-litellm` | LiteLLM is 1.95.1 or newer | Load |
 
 ```bash
@@ -260,8 +261,15 @@ uv run brownout check --gateway-config config/config.yaml --manifest config/mani
 The command prints one line per violation, as rule id, subject and message, and exits `1` when any
 rule fails. An input that is missing, unreadable, not UTF-8, not valid YAML or not a YAML mapping
 exits `2`. The message names the file and gives at most a line and column or a byte offset, because
-the offending line can hold a secret. It reads `config.yaml` as YAML and fills a deployment's missing prices from
-LiteLLM's cost map, so it runs without starting a gateway.
+the offending line can hold a secret. It reads `config.yaml` as YAML, follows its `include:` files
+the way LiteLLM does, and fills a deployment's missing prices from LiteLLM's cost map, so it runs
+without starting a gateway. A price written as a string, such as `1e-4`, counts when it reads as a
+finite number, as it does for LiteLLM.
+
+Models added in LiteLLM's admin UI live in its database, where a file cannot show them. With
+`--gateway URL`, `check` also reads `/model/info` with the key in `BROWNOUT_INIT_KEY` and adds every
+model group the files do not define. A group defined in a file keeps the file's prices and classes.
+`init` always reads them this way.
 
 ## Fallback checks
 
