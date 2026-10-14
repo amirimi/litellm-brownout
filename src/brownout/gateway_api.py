@@ -7,7 +7,7 @@ from typing import Any, Final
 import httpx
 
 from .gateway_config import declared_data_class, price
-from .rules import ModelGroup, group_price
+from .rules import ModelGroup, group_from_deployments
 
 KEY_PAGE_SIZE: Final = 100
 
@@ -151,15 +151,16 @@ def _groups(deployments: list[Mapping[str, Any]]) -> dict[str, ModelGroup]:
 
 
 def _group(name: str, infos: list[Mapping[str, Any]]) -> ModelGroup:
-    return ModelGroup(
-        name=name,
-        input_cost_per_token=group_price(
-            [price(info.get("input_cost_per_token")) for info in infos]
-        ),
-        output_cost_per_token=group_price(
-            [price(info.get("output_cost_per_token")) for info in infos]
-        ),
-        data_classes=tuple(declared_data_class(info) for info in infos),
+    return group_from_deployments(
+        name,
+        [
+            (
+                price(info.get("input_cost_per_token")),
+                price(info.get("output_cost_per_token")),
+            )
+            for info in infos
+        ],
+        tuple(declared_data_class(info) for info in infos),
     )
 
 

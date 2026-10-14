@@ -1,6 +1,7 @@
 description: >
   A wildcard model group routes every openai/* model through one priced deployment, and the team
-  may call the wildcard and the cheap group. There is no Redis.
+  may call the wildcard and the cheap group. There is no Redis. Brownout refuses a request for a
+  name the wildcard serves, so the path stops at the confirm request with its printed reason.
 seed:
   teams:
     - alias: search
@@ -27,4 +28,4 @@ drive:
   key: search-app
   model: openai/gpt-4o
 expected_gaps:
-  - fallback:check-failed
+  - confirm:model_not_a_group

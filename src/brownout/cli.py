@@ -57,7 +57,7 @@ from .onboarding_files import (
     unified_diff,
 )
 from .refusals import Violation
-from .rules import GatewayFile, ModelGroup, file_rules, group_price
+from .rules import GatewayFile, ModelGroup, file_rules, group_from_deployments
 
 GATEWAY_TIMEOUT_SECONDS: Final = 30.0
 NEW_FILE_MODE: Final = 0o666
@@ -449,12 +449,10 @@ def gateway_file(config: GatewayConfig) -> GatewayFile:
 
 
 def _model_group(name: str, deployments: list[Deployment]) -> ModelGroup:
-    prices: Final = [_deployment_prices(deployment) for deployment in deployments]
-    return ModelGroup(
-        name=name,
-        input_cost_per_token=group_price([costs[0] for costs in prices]),
-        output_cost_per_token=group_price([costs[1] for costs in prices]),
-        data_classes=tuple(deployment.data_class for deployment in deployments),
+    return group_from_deployments(
+        name,
+        [_deployment_prices(deployment) for deployment in deployments],
+        tuple(deployment.data_class for deployment in deployments),
     )
 
 

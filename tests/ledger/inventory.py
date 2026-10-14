@@ -26,19 +26,9 @@ WALKED_RELEASES: Final = (
 )
 
 OPEN_FINDINGS: Final[Mapping[str, str]] = {
-    "name-not-a-group": (
-        "LiteLLM maps a router alias, a wildcard deployment, a routing group, a team's "
-        "public model name, a comma-separated model list, and before 1.97 a key's or "
-        "team's alias, to deployments only after brownout's hook, so the request is "
-        "served undegraded or refused with a message that blames its price"
-    ),
-    "mixed-price-group": (
-        "LiteLLM prices a group at its highest known deployment price, so a group with "
-        "an unpriced deployment passes the request-time price rule that check refuses"
-    ),
     "model-info-prices": (
-        "LiteLLM prices a deployment from model_info, and check reads prices only from "
-        "litellm_params and the cost map"
+        "LiteLLM bills a deployment priced in model_info, and check reads prices only "
+        "from litellm_params and the cost map"
     ),
     "cost-map-source": (
         "check prices a model from whichever cost map LiteLLM loaded, fetched or "
@@ -52,11 +42,6 @@ OPEN_FINDINGS: Final[Mapping[str, str]] = {
         "organization, tag, end-user, global proxy, budget_limits, access group, late "
         "member, default key and opted-in user budgets can refuse before the tiers, and "
         "init or check can see each of them"
-    ),
-    "rate-limit-fallbacks": (
-        "a local rate limit retries a governed request on a router fallback, and brownout "
-        "governs the retry as a new request, so the manifest's data class order does not "
-        "cover the move"
     ),
 }
 

@@ -137,14 +137,16 @@ instead. Send one chat request with a key of a team in the manifest.
 
 <!-- adoption: confirm -->
 ```bash
-curl -s -D - -o /dev/null http://localhost:4000/v1/chat/completions \
+curl -s -i http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer <A TEAM KEY>" -H "Content-Type: application/json" \
   -d '{"model": "<A MODEL>", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 20}' \
-  | grep -i '^x-brownout'
+  | grep -io '^x-brownout-[a-z-]*: [^[:cntrl:]]*\|"reason": *"[a-z_]*"'
 ```
 
-The response carries `x-brownout-route-served` with the model group that answered. Brownout refuses
-chat calls made with the master key or the viewer key, because neither belongs to a team.
+The response carries `x-brownout-route-served` with the model group that answered. A refused request
+prints its reason instead, such as `"reason":"model_not_a_group"` for a name that is not a model
+group the gateway configures. Brownout refuses chat calls made with the master key or the viewer
+key, because neither belongs to a team.
 
 ## Add a fallback
 
@@ -263,14 +265,16 @@ such as a refused downgrade and a broken manifest. `docker compose down` stops t
 
 ## Limits
 
-- Routes name concrete model groups. A request through a wildcard group such as `openai/*` earns
-  team tiers and never degrades, so the manifest refuses a wildcard route.
+- Governed requests name concrete model groups. The plugin refuses a router alias, a routing
+  group, a name a wildcard group such as `openai/*` serves, a deployment id and a list of models
+  with a 503 `model_not_a_group`, and the manifest refuses a wildcard route.
 - `check` and `init` read the config file you pass them. A gateway that loads its config from a
   bucket needs that file downloaded first.
 - Brownout governs `/v1/chat/completions` only. Embeddings, images, audio, `/v1/messages` and
   `/v1/responses` pass through at full price and without headers.
-- Router fallbacks never apply to governed requests. A provider error on the chosen model group
-  reaches the caller, while failover between deployments of one group still works.
+- Router fallbacks never apply to governed requests, including the retry LiteLLM's local rate limiter
+  makes. A provider error on the chosen model group reaches the caller, while failover between
+  deployments of one group still works.
 - Redis sits on the request path. While LiteLLM cannot write a reservation, it refuses every budgeted
   request. Once Redis is back, LiteLLM keeps refusing until its Redis circuit breaker resets, 60
   seconds by default. Run Redis with failover, persistence and the `noeviction` policy.

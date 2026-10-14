@@ -12,6 +12,7 @@ MANIFEST: Final = "tests/test_manifest.py::"
 PERMISSIONS: Final = "tests/test_permissions.py::"
 EVENTS: Final = "tests/test_events.py::"
 SEAMS: Final = "tests/test_litellm_seams.py::"
+SMOKE: Final = "tests/test_smoke_e2e.py::"
 
 
 def _request(rule: RuleId, reason: RefusalReason, *tests: str) -> Refused:
@@ -95,9 +96,16 @@ REQUEST_ROWS: Final = (
             ),
             Form(
                 "a name LiteLLM maps to a group only after the hook: a router alias, a "
-                "wildcard deployment or a team's public model name",
-                "served undegraded, or refused as unpriced",
-                Open("name-not-a-group"),
+                "routing group, a wildcard-served name, a deployment id, a model list or "
+                "a team's public model name",
+                "refused",
+                _request(
+                    RuleId.MODEL_IS_A_GROUP,
+                    RefusalReason.MODEL_NOT_A_GROUP,
+                    f"{GATEWAY}test_a_name_that_is_not_a_model_group_is_refused",
+                    f"{BRIDGE}test_only_a_configured_model_name_is_a_concrete_group",
+                    f"{SMOKE}test_a_router_alias_is_refused_before_routing",
+                ),
             ),
         ),
     ),
@@ -442,64 +450,232 @@ REQUEST_ROWS: Final = (
         shape="router model group",
         source="brownout",
         parser="bridge.LiteLLMGatewayState.model_group",
-        reads=(
-            "router:get_model_group_info",
-            "router:get_model_list",
-            "key:model_info",
-            "member:input_cost_per_token",
-            "member:output_cost_per_token",
-        ),
+        reads=("router:get_model_list",),
         cites=("litellm/router.py:9177@1.95.1",),
         forms=(
             Form(
-                "a group LiteLLM prices",
+                "a group whose every deployment LiteLLM prices",
                 "priced",
                 Supported(
                     (
                         f"{BRIDGE}test_the_live_gateway_state_reads_prices_classes_and_settings",
-                        f"{SEAMS}test_seam_the_router_reports_a_group_price",
+                        f"{BRIDGE}test_a_group_is_priced_by_what_litellm_bills_each_deployment",
                     )
                 ),
             ),
             Form(
-                "no group, or a group without both prices",
+                "no deployment, or any deployment without a usable price",
                 "refused",
                 _request(
                     RuleId.MODEL_PRICED,
                     RefusalReason.UNPRICED_MODEL,
                     f"{GATEWAY}test_an_unpriced_model_fails_closed_and_pages_the_platform",
+                    f"{SMOKE}test_a_group_with_an_unpriced_deployment_is_refused",
                 ),
-            ),
-            Form(
-                "a group with an unpriced deployment beside a priced one",
-                "LiteLLM reports the highest known price, so the request is admitted",
-                Open("mixed-price-group"),
             ),
         ),
     ),
     Input(
-        shape="router model names for a team",
+        shape="the price LiteLLM bills a deployment",
         source="brownout",
-        parser="bridge.LiteLLMGatewayState.serves",
-        reads=("router:get_model_names",),
-        cites=(),
+        parser="bridge.LiteLLMGatewayState._billed_prices",
+        reads=(
+            "router:get_deployment_model_info",
+            "key:model_info",
+            "key:id",
+            "key:litellm_params",
+            "key:model",
+            "key:input_cost_per_token",
+            "key:output_cost_per_token",
+        ),
+        cites=("litellm/router.py:9035@1.95.1",),
         forms=(
             Form(
-                "a name the gateway serves",
-                "an incident about the group",
+                "a price from litellm_params, model_info or the cost map",
+                "the billed price",
                 Supported(
                     (
-                        f"{GATEWAY}test_an_unpriced_model_group_the_gateway_serves_is_reported_per_group",
+                        f"{SEAMS}test_seam_a_deployment_reports_the_price_litellm_bills",
+                        f"{BRIDGE}test_a_group_is_priced_by_what_litellm_bills_each_deployment",
                     )
                 ),
             ),
             Form(
-                "a name it does not serve",
-                "an incident about the team",
+                "no usable price, reported as 0 on 1.95.1 and as None on 1.104.2",
+                "unpriced, so its group is unpriced",
                 Supported(
                     (
-                        f"{GATEWAY}test_made_up_model_names_raise_one_incident_per_team_per_window",
+                        f"{SEAMS}test_seam_an_unpriced_deployment_reports_no_price",
+                        "tests/test_rules.py::test_a_group_with_one_unpriced_deployment_is_unpriced",
                     )
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="data classes of a candidate list",
+        source="brownout",
+        parser="bridge.LiteLLMGatewayState.candidate_group",
+        reads=("key:model_info",),
+        cites=(),
+        forms=(
+            Form(
+                "each deployment's model_info.data_class",
+                "the group's data classes",
+                Supported(
+                    (
+                        f"{BRIDGE}test_the_live_gateway_state_reads_prices_classes_and_settings",
+                    )
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="model names the router configures",
+        source="brownout",
+        parser="bridge.LiteLLMGatewayState.is_concrete",
+        reads=("router:model_list", "key:model_name"),
+        cites=(),
+        forms=(
+            Form(
+                "a model_name of a configured deployment",
+                "a concrete group",
+                Supported(
+                    (
+                        f"{BRIDGE}test_only_a_configured_model_name_is_a_concrete_group",
+                        f"{SEAMS}test_seam_the_router_lists_configured_model_names_only",
+                    )
+                ),
+            ),
+            Form(
+                "any other name, or one holding *",
+                "refused",
+                _request(
+                    RuleId.MODEL_IS_A_GROUP,
+                    RefusalReason.MODEL_NOT_A_GROUP,
+                    f"{GATEWAY}test_a_name_that_is_not_a_model_group_is_refused",
+                    f"{BRIDGE}test_only_a_configured_model_name_is_a_concrete_group",
+                    f"{SMOKE}test_a_router_alias_is_refused_before_routing",
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="the team a routed request belongs to",
+        source="brownout",
+        parser="bridge.request_team",
+        reads=("key:metadata", "key:litellm_metadata", "key:user_api_key_team_id"),
+        cites=("litellm/proxy/litellm_pre_call_utils.py:1031@1.95.1",),
+        forms=(
+            Form(
+                "a team in the manifest",
+                "verified",
+                Supported(
+                    (
+                        f"{GATEWAY}test_the_filter_passes_priced_candidates_of_the_decided_group",
+                        f"{SEAMS}test_seam_the_proxy_writes_the_team_into_request_metadata",
+                    )
+                ),
+            ),
+            Form(
+                "no team, or a team outside the manifest",
+                "untouched",
+                Supported(
+                    (f"{GATEWAY}test_the_filter_leaves_other_requests_untouched",)
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="brownout's decided route at routing",
+        source="brownout",
+        parser="bridge.decided_route",
+        reads=("key:served_route",),
+        cites=(),
+        forms=(
+            Form(
+                "the route the pre-call hook decided",
+                "the group every candidate must belong to",
+                Supported(
+                    (f"{GATEWAY}test_the_filter_passes_a_downgrade_to_its_fallback",)
+                ),
+            ),
+            Form(
+                "missing on a governed chat request",
+                "refused",
+                _request(
+                    RuleId.MODEL_IS_A_GROUP,
+                    RefusalReason.MODEL_NOT_A_GROUP,
+                    f"{GATEWAY}test_the_filter_refuses_a_governed_chat_request_brownout_never_saw",
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="deployment filter hook parameters",
+        source="brownout",
+        parser="gateway.BrownoutHandler.async_filter_deployments",
+        reads=(
+            "parameter:model",
+            "parameter:healthy_deployments",
+            "parameter:messages",
+            "parameter:request_kwargs",
+        ),
+        cites=("litellm/router.py:10686@1.95.1",),
+        forms=(
+            Form(
+                "a chat request after the router resolved its name",
+                "verified",
+                Supported(
+                    (
+                        f"{GATEWAY}test_the_filter_passes_priced_candidates_of_the_decided_group",
+                        f"{SEAMS}test_seam_the_deployment_filter_hook_keeps_its_parameters",
+                        f"{SEAMS}test_seam_the_router_filters_deployments_after_resolving_the_name",
+                    )
+                ),
+            ),
+            Form(
+                "a call without messages",
+                "untouched",
+                Supported(
+                    (f"{GATEWAY}test_the_filter_leaves_other_requests_untouched",)
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="candidate deployments",
+        source="brownout",
+        parser="gateway.BrownoutHandler._verify",
+        reads=("key:model_name",),
+        cites=(),
+        forms=(
+            Form(
+                "every candidate in the decided group and priced",
+                "passed unchanged",
+                Supported(
+                    (
+                        f"{GATEWAY}test_the_filter_passes_priced_candidates_of_the_decided_group",
+                        f"{GATEWAY}test_the_filter_passes_a_downgrade_to_its_fallback",
+                    )
+                ),
+            ),
+            Form(
+                "a candidate from another group",
+                "refused",
+                _request(
+                    RuleId.MODEL_IS_A_GROUP,
+                    RefusalReason.MODEL_NOT_A_GROUP,
+                    f"{GATEWAY}test_the_filter_refuses_a_candidate_from_another_group",
+                ),
+            ),
+            Form(
+                "a candidate without a usable price",
+                "refused",
+                _request(
+                    RuleId.MODEL_PRICED,
+                    RefusalReason.UNPRICED_MODEL,
+                    f"{GATEWAY}test_the_filter_refuses_an_unpriced_candidate",
                 ),
             ),
         ),

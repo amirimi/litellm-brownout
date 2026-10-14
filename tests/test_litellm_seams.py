@@ -416,3 +416,106 @@ def test_seam_a_model_outside_the_allowlist_raises_a_proxy_exception():
             team_id="seam-team",
             object_type="team",
         )
+
+
+def test_seam_the_deployment_filter_hook_keeps_its_parameters():
+    parameters = inspect.signature(CustomLogger.async_filter_deployments).parameters
+
+    assert {"model", "healthy_deployments", "messages", "request_kwargs"} <= set(
+        parameters
+    )
+
+
+def test_seam_the_router_filters_deployments_after_resolving_the_name():
+    healthy = ast.unparse(
+        _function_in_source("router.py", "async_get_healthy_deployments")
+    )
+    callbacks = ast.unparse(
+        _function_in_source("router.py", "async_callback_filter_deployments")
+    )
+
+    assert healthy.index("_common_checks_available_deployment(") < healthy.index(
+        "async_callback_filter_deployments("
+    )
+    assert "raise e" in callbacks
+
+
+def test_seam_the_proxy_writes_the_team_into_request_metadata():
+    source = (LITELLM_ROOT / "proxy/litellm_pre_call_utils.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "user_api_key_team_id=user_api_key_dict.team_id" in source
+
+
+@pytest.fixture
+def billing_router(monkeypatch) -> litellm.Router:
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    return litellm.Router(
+        model_list=[
+            {
+                "model_name": "seam-explicit",
+                "litellm_params": {
+                    "model": "openai/seam-explicit",
+                    "api_key": "sk-seam",
+                    "input_cost_per_token": 1e-6,
+                    "output_cost_per_token": 2e-6,
+                },
+            },
+            {
+                "model_name": "seam-info",
+                "litellm_params": {"model": "openai/seam-info", "api_key": "sk-seam"},
+                "model_info": {
+                    "input_cost_per_token": 3e-6,
+                    "output_cost_per_token": 4e-6,
+                },
+            },
+            {
+                "model_name": "seam-mapped",
+                "litellm_params": {"model": "openai/gpt-4o-mini", "api_key": "sk-seam"},
+            },
+            {
+                "model_name": "seam-unpriced",
+                "litellm_params": {
+                    "model": "openai/seam-unpriced",
+                    "api_key": "sk-seam",
+                },
+            },
+        ],
+        model_group_alias={"seam-alias": "seam-explicit"},
+    )
+
+
+def _billed(router: litellm.Router, name: str) -> tuple[object, object]:
+    deployment = router.get_model_list(model_name=name)[0]
+    info = router.get_deployment_model_info(
+        model_id=deployment["model_info"]["id"],
+        model_name=deployment["litellm_params"]["model"],
+    )
+    assert info is not None
+    return (info.get("input_cost_per_token"), info.get("output_cost_per_token"))
+
+
+@pytest.mark.parametrize(
+    ("name", "prices"),
+    [
+        pytest.param("seam-explicit", (1e-6, 2e-6), id="litellm-params"),
+        pytest.param("seam-info", (3e-6, 4e-6), id="model-info"),
+        pytest.param("seam-mapped", (1.5e-7, 6e-7), id="cost-map"),
+    ],
+)
+def test_seam_a_deployment_reports_the_price_litellm_bills(
+    billing_router, name, prices
+):
+    assert _billed(billing_router, name) == prices
+
+
+def test_seam_an_unpriced_deployment_reports_no_price(billing_router):
+    assert not any(_billed(billing_router, "seam-unpriced"))
+
+
+def test_seam_the_router_lists_configured_model_names_only(billing_router):
+    names = {deployment["model_name"] for deployment in billing_router.model_list}
+
+    assert "seam-explicit" in names
+    assert "seam-alias" not in names

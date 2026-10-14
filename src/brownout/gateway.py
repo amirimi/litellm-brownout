@@ -133,6 +133,44 @@ class BrownoutHandler(CustomLogger):
     ) -> dict[str, str] | None:
         return bridge.headers(data, response, litellm_call_info)
 
+    async def async_filter_deployments(
+        self,
+        model: str,
+        healthy_deployments: list,
+        messages: list | None,
+        request_kwargs: dict | None = None,
+        parent_otel_span: Any = None,
+    ) -> list:
+        routed: Final = request_kwargs or {}
+        team: Final = self._manifest.team_policy(bridge.request_team(routed))
+        if team is None or messages is None:
+            return healthy_deployments
+        refusal: Final = self._verify(model, team, routed, healthy_deployments)
+        if refusal is None:
+            return healthy_deployments
+        await self._report(
+            refusal,
+            transitions.window_id(self._schedule, team.budget_duration),
+            transitions.window_ttl(team.budget_duration),
+        )
+        raise bridge.http_error(refusal)
+
+    def _verify(
+        self,
+        model: str,
+        team: TeamPolicy,
+        routed: dict,
+        candidates: list[dict],
+    ) -> Refusal | None:
+        decided: Final = bridge.decided_route(bridge.read_field(routed))
+        if decided is None or any(
+            candidate.get("model_name") != decided for candidate in candidates
+        ):
+            return _not_a_group(model, team)
+        if is_priced(self._gateway.candidate_group(decided, candidates)):
+            return None
+        return _unpriced(decided, team)
+
     async def _govern(
         self,
         caller: Caller,
@@ -201,6 +239,7 @@ class BrownoutHandler(CustomLogger):
         route: Final = team.route_policy(model)
         groups: Final = _memoised(self._gateway.model_group)
         checks: Final = (
+            self._concrete(model, team),
             self._key_without_budget(caller, team),
             self._priced(model, team, groups),
             _ceiling_matches(caller, team),
@@ -251,31 +290,18 @@ class BrownoutHandler(CustomLogger):
             incident_subject=team.team_id,
         )
 
+    def _concrete(self, model: str, team: TeamPolicy) -> Refusal | None:
+        if self._gateway.is_concrete(model):
+            return None
+        return _not_a_group(model, team)
+
     def _priced(
         self, model: str, team: TeamPolicy, groups: GroupLookup
     ) -> Refusal | None:
         group = groups(model)
         if group is not None and is_priced(group):
             return None
-        served = self._gateway.serves(model, team.team_id)
-        if served:
-            subject = f"group:{model}"
-        else:
-            subject = f"team:{team.team_id}"
-        return Refusal(
-            rule=RuleId.MODEL_PRICED,
-            reason=RefusalReason.UNPRICED_MODEL,
-            message=(
-                f"Model {model!r} has no input and output price, so its spend cannot be "
-                "bounded. The request was refused rather than admitted at an unknown cost."
-            ),
-            detail={
-                "model": model,
-                "model_group_served": served,
-                "team_id": team.team_id,
-            },
-            incident_subject=subject,
-        )
+        return _unpriced(model, team)
 
     def _broken_pairing(
         self, decision: Decision, route: RoutePolicy
@@ -375,6 +401,34 @@ def _ungoverned_refusal(subject: str, message: str) -> Refusal:
         message=message,
         detail={"team_id": subject},
         incident_subject=subject,
+    )
+
+
+def _not_a_group(model: str, team: TeamPolicy) -> Refusal:
+    return Refusal(
+        rule=RuleId.MODEL_IS_A_GROUP,
+        reason=RefusalReason.MODEL_NOT_A_GROUP,
+        message=(
+            f"Model {model!r} is not a model group the gateway configures. Brownout "
+            "governs requests that name a model group, so it refuses aliases, wildcards, "
+            "deployment ids and model lists."
+        ),
+        detail={"model": model, "team_id": team.team_id},
+        incident_subject=f"team:{team.team_id}",
+    )
+
+
+def _unpriced(model: str, team: TeamPolicy) -> Refusal:
+    return Refusal(
+        rule=RuleId.MODEL_PRICED,
+        reason=RefusalReason.UNPRICED_MODEL,
+        message=(
+            f"Model {model!r} has a deployment without an input and output price, so its "
+            "spend cannot be bounded. The request was refused rather than admitted at an "
+            "unknown cost."
+        ),
+        detail={"model": model, "team_id": team.team_id},
+        incident_subject=f"group:{model}",
     )
 
 

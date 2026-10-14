@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, assert_never
@@ -23,7 +23,12 @@ from brownout.gateway import BrownoutHandler
 from brownout.manifest import Manifest, TeamPolicy
 from brownout.policy import Permission
 from brownout.ports import Caller, Guardrails, Permissions, ResetSchedule
-from brownout.rules import GatewayFile, GatewaySettings, ModelGroup
+from brownout.rules import (
+    GatewayFile,
+    GatewaySettings,
+    ModelGroup,
+    group_from_deployments,
+)
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 CONFIG_DIR: Final = REPO_ROOT / "config"
@@ -176,7 +181,20 @@ class FakeGateway:
     def model_group(self, name: str) -> ModelGroup | None:
         return self.groups.get(name)
 
-    def serves(self, name: str, team_id: str) -> bool:
+    def candidate_group(
+        self, name: str, deployments: Sequence[Mapping[str, Any]]
+    ) -> ModelGroup:
+        params = [deployment.get("litellm_params") or {} for deployment in deployments]
+        return group_from_deployments(
+            name,
+            [
+                (param.get("input_cost_per_token"), param.get("output_cost_per_token"))
+                for param in params
+            ],
+            (),
+        )
+
+    def is_concrete(self, name: str) -> bool:
         return name in self.groups or name in self._extra_served
 
     def settings(self) -> GatewaySettings:

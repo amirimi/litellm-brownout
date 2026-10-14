@@ -12,7 +12,17 @@ BRIDGE: Final = "tests/test_bridge.py::"
 RULES: Final = "tests/test_rules.py::"
 CLI: Final = "tests/test_cli.py::"
 SMOKE: Final = "tests/test_smoke_e2e.py::"
-NAME_NOT_A_GROUP: Final = Open("name-not-a-group")
+GATEWAY: Final = "tests/test_gateway.py::"
+NAME_NOT_A_GROUP: Final = Refused(
+    stage="request",
+    rule=RuleId.MODEL_IS_A_GROUP,
+    reason=RefusalReason.MODEL_NOT_A_GROUP,
+    tests=(
+        f"{GATEWAY}test_a_name_that_is_not_a_model_group_is_refused",
+        "tests/test_bridge.py::test_only_a_configured_model_name_is_a_concrete_group",
+        f"{SMOKE}test_a_router_alias_is_refused_before_routing",
+    ),
+)
 BUDGETS_BEFORE_TIERS: Final = Open("budgets-before-tiers")
 FROM_1_97: Final = Releases(first=97)
 BEFORE_1_97: Final = Releases(last=96)
@@ -53,12 +63,10 @@ LITELLM_ROWS: Final = (
         forms=(
             Form(
                 "an alias for a routed group",
-                "priced as its group and matched to no route",
+                "refused before routing",
                 NAME_NOT_A_GROUP,
             ),
-            Form(
-                "a hidden alias", "no group, so refused as unpriced", NAME_NOT_A_GROUP
-            ),
+            Form("a hidden alias", "refused before routing", NAME_NOT_A_GROUP),
         ),
     ),
     Input(
@@ -80,7 +88,7 @@ LITELLM_ROWS: Final = (
             ),
             Form(
                 "an alias, before 1.97",
-                "not resolved before the hook",
+                "refused before routing",
                 NAME_NOT_A_GROUP,
                 releases=BEFORE_1_97,
             ),
@@ -106,7 +114,7 @@ LITELLM_ROWS: Final = (
             ),
             Form(
                 "a request for a concrete name a wildcard deployment serves",
-                "priced from the cost map and matched to no route",
+                "refused before routing",
                 NAME_NOT_A_GROUP,
             ),
         ),
@@ -120,7 +128,7 @@ LITELLM_ROWS: Final = (
         forms=(
             Form(
                 "a request for a routing group's name, from 1.98",
-                "priced from its members and matched to no route",
+                "refused before routing",
                 NAME_NOT_A_GROUP,
                 releases=Releases(first=98),
             ),
@@ -135,7 +143,7 @@ LITELLM_ROWS: Final = (
         forms=(
             Form(
                 "a request naming several models at once",
-                "no group, so refused as unpriced",
+                "refused before routing",
                 NAME_NOT_A_GROUP,
             ),
         ),
@@ -152,7 +160,7 @@ LITELLM_ROWS: Final = (
         forms=(
             Form(
                 "a request for a team's public model name",
-                "no group, so refused as unpriced",
+                "refused before routing",
                 NAME_NOT_A_GROUP,
             ),
         ),
@@ -171,13 +179,26 @@ LITELLM_ROWS: Final = (
             ),
             Form(
                 "an unpriced deployment beside a priced one",
-                "the highest known price",
-                Open("mixed-price-group"),
+                "refused, because LiteLLM would bill that deployment nothing",
+                Refused(
+                    stage="request",
+                    rule=RuleId.MODEL_PRICED,
+                    reason=RefusalReason.UNPRICED_MODEL,
+                    tests=(
+                        "tests/test_rules.py::test_a_group_with_one_unpriced_deployment_is_unpriced",
+                        f"{GATEWAY}test_the_filter_refuses_an_unpriced_candidate",
+                        f"{SMOKE}test_a_group_with_an_unpriced_deployment_is_refused",
+                    ),
+                ),
             ),
             Form(
                 "prices only in model_info",
-                "priced at runtime",
-                Open("model-info-prices"),
+                "priced at request time, as LiteLLM bills it",
+                Supported(
+                    (
+                        "tests/test_bridge.py::test_a_group_is_priced_by_what_litellm_bills_each_deployment",
+                    )
+                ),
             ),
         ),
     ),
@@ -220,8 +241,14 @@ LITELLM_ROWS: Final = (
             ),
             Form(
                 "a local rate limit that retries the request on a router fallback",
-                "brownout governs the retry as a new request",
-                Open("rate-limit-fallbacks"),
+                "stopped, because the pre-call hook sets disable_fallbacks",
+                Supported(
+                    (
+                        f"{SMOKE}test_a_local_rate_limit_never_retries_on_a_router_fallback",
+                        "tests/test_bridge.py::test_every_governed_request_has_its_fallbacks_emptied",
+                        f"{SEAMS}test_seam_a_local_rate_limit_retries_the_pre_call_logic_on_a_router_fallback",
+                    )
+                ),
             ),
         ),
     ),

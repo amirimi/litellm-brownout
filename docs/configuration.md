@@ -247,7 +247,8 @@ settings.
 | `no-caller-routing` | The caller sent no fallback list | Request |
 | `team-in-manifest` | The key's team is in the manifest | Request |
 | `key-has-no-budget` | The key carries no `max_budget`, `model_max_budget` or `budget_limits` of its own | Request |
-| `model-priced` | The requested model is priced | Request |
+| `model-is-a-group` | The requested model is a model group the gateway configures | Request |
+| `model-priced` | Every deployment of the requested model has a price LiteLLM bills | Request, routing |
 | `ceiling-matches-envelope` | The team's `max_budget` equals `envelope_usd` | Request |
 | `spend-readable` | The team's spend counter can be read | Request |
 | `duration-matches` | A manifest team's `budget_duration` equals its LiteLLM team's | Init |
