@@ -8,12 +8,11 @@ import pytest
 from brownout.gateway_api import (
     GatewayReadError,
     LiteLLMKey,
-    LiteLLMModel,
     LiteLLMTeam,
     read_gateway,
     read_model_groups,
 )
-from brownout.rules import ModelGroup
+from brownout.rules import ModelGroup, is_priced
 
 TEAMS: Final = [
     {
@@ -82,7 +81,7 @@ def gateway_client(overrides: dict[str, Any] | None = None) -> httpx.Client:
 
     def handle(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET", "the gateway client only reads"
-        if request.url.path == "/key/list":
+        if request.url.path == "/key/list" and "/key/list" not in responses:
             page = int(request.url.params["page"])
             return httpx.Response(
                 200,
@@ -129,13 +128,21 @@ def test_every_key_page_is_read_and_own_budgets_are_named():
     assert pages == [(1, 2), (2, 2)]
 
 
-def test_a_model_is_priced_when_any_deployment_carries_both_prices():
-    snapshot = read_gateway(gateway_client(), lambda page, total: None)
+def test_a_model_group_is_priced_only_when_every_deployment_is():
+    priced = {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}
+    unpriced = {"input_cost_per_token": None, "output_cost_per_token": None}
+    deployments = [
+        {"model_name": "priced", "model_info": priced},
+        {"model_name": "mixed", "model_info": priced},
+        {"model_name": "mixed", "model_info": unpriced},
+    ]
 
-    assert snapshot.models == (
-        LiteLLMModel("chat", True),
-        LiteLLMModel("unpriced", False),
-    )
+    groups = read_model_groups(gateway_client({"/model/info": {"data": deployments}}))
+
+    assert {name: is_priced(group) for name, group in groups.items()} == {
+        "priced": True,
+        "mixed": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -144,6 +151,19 @@ def test_a_model_is_priced_when_any_deployment_carries_both_prices():
         {"/team/list": httpx.Response(401, json={"error": "bad key"})},
         {"/team/list": {"unexpected": "shape"}},
         {"/model/info": httpx.Response(500, text="boom")},
+        pytest.param({"/team/list": [{"max_budget": 1.0}]}, id="team-without-id"),
+        pytest.param(
+            {"/team/list": [{**TEAMS[0], "team_memberships": "alice"}]},
+            id="memberships-not-a-list",
+        ),
+        pytest.param({"/key/list": {"keys": "none"}}, id="keys-not-a-page"),
+        pytest.param(
+            {"/key/list": {"keys": [{"key_alias": "x"}], "total_pages": 1}},
+            id="key-without-token",
+        ),
+        pytest.param(
+            {"/model/info": {"data": ["chat"]}}, id="deployment-not-a-mapping"
+        ),
     ],
 )
 def test_an_unreadable_gateway_raises_one_error_type(broken):
@@ -185,7 +205,7 @@ def test_a_model_is_priced_by_the_same_rule_the_requests_use(prices, priced):
         lambda page, total: None,
     )
 
-    assert snapshot.models == (LiteLLMModel("mock", priced),)
+    assert is_priced(snapshot.groups["mock"]) is priced
 
 
 def test_members_with_a_budget_inside_the_team_are_named():

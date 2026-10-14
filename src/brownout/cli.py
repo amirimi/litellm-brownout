@@ -5,8 +5,6 @@ import os
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from importlib.metadata import version
-from math import isfinite
 from pathlib import Path
 from typing import Any, Final
 
@@ -16,13 +14,22 @@ from litellm.proxy._types import hash_token
 from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
 
 from . import settings
+from .bridge import running_litellm
 from .gateway_api import (
     GatewayReadError,
     GatewaySnapshot,
     read_gateway,
     read_model_groups,
 )
-from .inputs import DocumentError, load_yaml, mapping, read_text, with_includes
+from .gateway_config import Deployment, GatewayConfig, price, read_gateway_config
+from .inputs import (
+    DocumentError,
+    load_yaml,
+    load_yaml_text,
+    mapping,
+    read_text,
+    with_includes,
+)
 from .manifest import Manifest, ManifestError
 from .onboarding import (
     ConfigChange,
@@ -47,17 +54,10 @@ from .onboarding_files import (
     dump_document,
     load_document,
     new_manifest_document,
-    to_plain,
     unified_diff,
 )
 from .refusals import Violation
-from .rules import (
-    GatewayFile,
-    GatewaySettings,
-    ModelGroup,
-    file_rules,
-    group_price,
-)
+from .rules import GatewayFile, ModelGroup, file_rules, group_price
 
 GATEWAY_TIMEOUT_SECONDS: Final = 30.0
 NEW_FILE_MODE: Final = 0o666
@@ -140,12 +140,7 @@ def _init_command(arguments: argparse.Namespace) -> int:
         headers={"Authorization": f"Bearer {key}"},
         timeout=GATEWAY_TIMEOUT_SECONDS,
     ) as client:
-        return init(
-            options,
-            client,
-            [alert_type.value for alert_type in DEFAULT_ALERT_TYPES],
-            hash_token(key),
-        )
+        return init(options, client, litellm_alert_types(), hash_token(key))
 
 
 def init(
@@ -204,7 +199,7 @@ def _check_command(arguments: argparse.Namespace) -> int:
     if violations:
         print(f"{len(violations)} rule violation(s)", file=sys.stderr)
         return 1
-    print(f"brownout check passed on LiteLLM {litellm_release()}")
+    print(f"brownout check passed on LiteLLM {running_litellm()}")
     return 0
 
 
@@ -239,15 +234,19 @@ def _prepare(
     config_document: Final = load_document(
         options.gateway_config, read_text(options.gateway_config)
     )
-    config: Final = with_includes(
-        options.gateway_config,
-        mapping(options.gateway_config, to_plain(config_document)),
+    config: Final = read_config(
+        options.gateway_config, load_yaml(options.gateway_config), default_alert_types
     )
     existing: Final = _existing_manifest(options.manifest)
     snapshot: Final = read_gateway(client, _key_page_progress)
-    changes: Final = config_plan(config, default_alert_types)
+    changes: Final = config_plan(config)
     apply_config_changes(config_document, changes)
     config_out_text: Final = dump_document(config_document)
+    written_config: Final = read_config(
+        options.gateway_config,
+        load_yaml_text(options.config_out, config_out_text),
+        default_alert_types,
+    )
     manifest_text, manifest_document = _manifest_documents(options, existing, snapshot)
     manifest_out_text: str | None = None
     if manifest_document is not None:
@@ -258,7 +257,7 @@ def _prepare(
         manifest_text=manifest_text,
         manifest_out_text=manifest_out_text,
         findings=_findings(
-            options, existing, snapshot, config_document, manifest_document, own_token
+            options, existing, snapshot, written_config, manifest_out_text, own_token
         ),
     )
 
@@ -288,35 +287,29 @@ def _findings(
     options: InitOptions,
     existing: Manifest | None,
     snapshot: GatewaySnapshot,
-    config_document: YamlDocument,
-    manifest_document: YamlDocument | None,
+    written_config: GatewayConfig,
+    manifest_out_text: str | None,
     own_token: str,
 ) -> list[Finding]:
     findings: list[Finding] = [
         *team_findings(snapshot.teams, options.gateway),
         *key_findings(snapshot.keys, options.gateway, own_token),
-        *model_findings(snapshot.models),
+        *model_findings(snapshot.groups),
     ]
     if existing is not None:
         findings.extend(reconcile_findings(existing, snapshot.teams, options.gateway))
-    if manifest_document is None:
+    if manifest_out_text is None:
         findings.append(nothing_to_govern(options.gateway, bool(snapshot.teams)))
     else:
         written = Manifest.from_document(
-            str(options.manifest_out), to_plain(manifest_document)
+            str(options.manifest_out),
+            load_yaml_text(options.manifest_out, manifest_out_text),
         )
         findings.extend(
             violation_findings(
                 file_rules(
                     written,
-                    with_live_groups(
-                        gateway_file(
-                            with_includes(
-                                options.gateway_config, to_plain(config_document)
-                            )
-                        ),
-                        snapshot.groups,
-                    ),
+                    with_live_groups(gateway_file(written_config), snapshot.groups),
                 )
             )
         )
@@ -416,13 +409,22 @@ def check(
         manifest = Manifest.from_file(manifest_path)
     except ManifestError as error:
         return [Violation(error.rule, str(manifest_path), str(error))]
-    config: Final = mapping(gateway_config, load_yaml(gateway_config))
-    return file_rules(
-        manifest,
-        with_live_groups(
-            gateway_file(with_includes(gateway_config, config)), live_groups
-        ),
+    config: Final = read_config(
+        gateway_config, load_yaml(gateway_config), litellm_alert_types()
     )
+    return file_rules(manifest, with_live_groups(gateway_file(config), live_groups))
+
+
+def read_config(
+    path: Path, document: object, default_alert_types: Sequence[str]
+) -> GatewayConfig:
+    return read_gateway_config(
+        path, with_includes(path, mapping(path, document)), default_alert_types
+    )
+
+
+def litellm_alert_types() -> list[str]:
+    return [alert_type.value for alert_type in DEFAULT_ALERT_TYPES]
 
 
 def with_live_groups(
@@ -431,68 +433,47 @@ def with_live_groups(
     return replace(file, groups={**live_groups, **file.groups})
 
 
-def gateway_file(config: Mapping[str, Any]) -> GatewayFile:
-    general: Final = config.get("general_settings") or {}
-    deployments_by_group: dict[str, list[Mapping[str, Any]]] = {}
-    for deployment in config.get("model_list") or []:
-        deployments_by_group.setdefault(str(deployment["model_name"]), []).append(
-            deployment
-        )
+def gateway_file(config: GatewayConfig) -> GatewayFile:
+    deployments_by_group: dict[str, list[Deployment]] = {}
+    for deployment in config.deployments:
+        deployments_by_group.setdefault(deployment.model_name, []).append(deployment)
     return GatewayFile(
         groups={
             name: _model_group(name, deployments)
             for name, deployments in deployments_by_group.items()
         },
-        settings=GatewaySettings(
-            fail_closed_budget_enforcement=general.get("fail_closed_budget_enforcement")
-            is True,
-            disable_budget_reservation=general.get("disable_budget_reservation")
-            is True,
-        ),
-        native_budget_alerts=_native_budget_alerts(general),
-        redis_configured=bool(general.get("coordination_redis")),
+        settings=config.settings,
+        native_budget_alerts=config.native_budget_alerts,
+        redis_configured=config.coordination_redis,
     )
 
 
-def _native_budget_alerts(general: Mapping[str, Any]) -> bool:
-    if not general.get("alerting"):
-        return False
-    alert_types = general.get("alert_types")
-    if alert_types is None:
-        return True
-    return "budget_alerts" in alert_types
-
-
-def litellm_release() -> str:
-    return version("litellm")
-
-
-def _model_group(name: str, deployments: list[Mapping[str, Any]]) -> ModelGroup:
-    prices = [_deployment_prices(deployment) for deployment in deployments]
-    input_costs = [price[0] for price in prices]
-    output_costs = [price[1] for price in prices]
+def _model_group(name: str, deployments: list[Deployment]) -> ModelGroup:
+    prices: Final = [_deployment_prices(deployment) for deployment in deployments]
     return ModelGroup(
         name=name,
-        input_cost_per_token=group_price(input_costs),
-        output_cost_per_token=group_price(output_costs),
-        data_classes=tuple(
-            (deployment.get("model_info") or {}).get("data_class")
-            for deployment in deployments
-        ),
+        input_cost_per_token=group_price([costs[0] for costs in prices]),
+        output_cost_per_token=group_price([costs[1] for costs in prices]),
+        data_classes=tuple(deployment.data_class for deployment in deployments),
     )
 
 
-def _deployment_prices(
-    deployment: Mapping[str, Any],
-) -> tuple[float | None, float | None]:
-    params: Final = deployment.get("litellm_params") or {}
-    mapped: Final = _cost_map_entry(str(params.get("model") or ""))
+def _deployment_prices(deployment: Deployment) -> tuple[float | None, float | None]:
+    mapped: Final = _cost_map_entry(deployment.model)
     return (
-        _price(params.get("input_cost_per_token"), mapped.get("input_cost_per_token")),
-        _price(
-            params.get("output_cost_per_token"), mapped.get("output_cost_per_token")
+        _explicit_or_mapped(
+            deployment.input_cost_per_token, mapped.get("input_cost_per_token")
+        ),
+        _explicit_or_mapped(
+            deployment.output_cost_per_token, mapped.get("output_cost_per_token")
         ),
     )
+
+
+def _explicit_or_mapped(explicit: float | None, mapped: Any) -> float | None:
+    if explicit is not None:
+        return explicit
+    return price(mapped)
 
 
 def _cost_map_entry(model: str) -> Mapping[str, Any]:
@@ -500,27 +481,6 @@ def _cost_map_entry(model: str) -> Mapping[str, Any]:
     if exact is not None:
         return exact
     return litellm.model_cost.get(model.split("/", 1)[-1]) or {}
-
-
-def _price(explicit: Any, mapped: Any) -> float | None:
-    value = explicit
-    if value is None:
-        value = mapped
-    if isinstance(value, str):
-        return _written_price(value)
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value)
-
-
-def _written_price(text: str) -> float | None:
-    try:
-        price: Final = float(text)
-    except ValueError:
-        return None
-    if not isfinite(price):
-        return None
-    return price
 
 
 if __name__ == "__main__":

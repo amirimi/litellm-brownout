@@ -140,11 +140,11 @@ model_list:
 | `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's claims reuse the same Redis, so one crossing is one announcement across every replica. Rule `redis-configured` requires it in `brownout check`. A Redis `cache_params` block does not substitute for it, because on LiteLLM 1.95.1 it leaves each replica counting alone. A coordination Redis saved from the admin UI lives in the database, where the check cannot see it |
 | `callbacks` | The dotted path to the handler `src/brownout/gateway.py` builds at import |
 | `budget_exceeded_status_code: 429` | Keeps LiteLLM's budget refusal a 429 from 1.104, whose default is a 422 (`litellm/__init__.py:404` in 1.104.2). Releases before 1.104 ignore it and refuse with a 429 anyway. Run on the 1.104.2 lab image |
-| `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. A deployment without them is priced from LiteLLM's cost map. Rules `route-priced` and `model-priced` refuse a model with neither |
+| `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. A deployment without them is priced from LiteLLM's cost map. A model group counts as priced only when every deployment has both prices and one of them is above zero. Rules `route-priced` and `model-priced` refuse any other group |
 | `model_info.data_class` | Read for a route that declares a fallback and for the fallback. Every deployment of the group declares the same class, from the manifest's `data_class_order`. Rules `data-class-declared` and `fallback-data-class` |
 
-`general_settings.disable_budget_reservation` must stay absent, because it would remove the hold from
-every budget on the gateway, which rule `reservation-on` refuses. LiteLLM's own alerting may stay on
+`general_settings.disable_budget_reservation` must not be `true`, because that would remove the hold
+from every budget on the gateway, which rule `reservation-on` refuses. LiteLLM's own alerting may stay on
 for outages, latency and deployments. Its budget alerts must stay off, because LiteLLM's hardcoded
 85% and 95% budget alerter would become a second owner of tier announcements. Rule
 `no-native-budget-alerts` fails when `general_settings.alerting` is set and `alert_types` is absent
@@ -218,7 +218,9 @@ teams:
 | `routes.<model_group>.warn_tiers` | list of integers in 1..99, optional | Route tiers. Each raises one event with scope `route` per window, on a request to that route |
 
 An unknown key at any level fails rule `manifest-schema` and names the key, so a typo such as
-`degrade_At` stops the manifest from loading.
+`degrade_At` stops the manifest from loading. A team id or a route name must be a string. YAML reads
+an unquoted number, or `yes`, `no`, `on` and `off`, as another type, so quote such a name, or rule
+`manifest-schema` refuses it.
 
 ## The rules
 
@@ -260,11 +262,15 @@ uv run brownout check --gateway-config config/config.yaml --manifest config/mani
 
 The command prints one line per violation, as rule id, subject and message, and exits `1` when any
 rule fails. An input that is missing, unreadable, not UTF-8, not valid YAML or not a YAML mapping
-exits `2`. The message names the file and gives at most a line and column or a byte offset, because
-the offending line can hold a secret. It reads `config.yaml` as YAML, follows its `include:` files
-the way LiteLLM does, and fills a deployment's missing prices from LiteLLM's cost map, so it runs
-without starting a gateway. A price written as a string, such as `1e-4`, counts when it reads as a
-finite number, as it does for LiteLLM.
+exits `2`. So does a config LiteLLM could not load as written, such as a `model_list` that is not a
+list or a deployment without a `model_name`, and the message names the field. The message names the
+file and gives at most a line and column or a byte offset, because the offending line can hold a
+secret. It reads `config.yaml` as YAML, follows its `include:` files the way LiteLLM does, and fills
+a deployment's missing prices from LiteLLM's cost map, so it runs without starting a gateway. An
+included file that includes more files, or a file listed twice, exits `2`, because LiteLLM resolves
+both differently across releases. A price written as a string, such as `1e-4`, counts when it reads
+as a finite number, as it does for LiteLLM. Any other written price exits `2`, including an
+`os.environ/` reference, because the check cannot know what it resolves to.
 
 Models added in LiteLLM's admin UI live in its database, where a file cannot show them. With
 `--gateway URL`, `check` also reads `/model/info` with the key in `BROWNOUT_INIT_KEY` and adds every
