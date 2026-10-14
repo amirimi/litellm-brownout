@@ -34,8 +34,10 @@ GroupLookup = Callable[[str], ModelGroup | None]
 
 
 def is_priced(group: ModelGroup) -> bool:
-    input_cost = group.input_cost_per_token
-    output_cost = group.output_cost_per_token
+    return has_usable_prices(group.input_cost_per_token, group.output_cost_per_token)
+
+
+def has_usable_prices(input_cost: float | None, output_cost: float | None) -> bool:
     if input_cost is None or output_cost is None:
         return False
     prices = (input_cost, output_cost)

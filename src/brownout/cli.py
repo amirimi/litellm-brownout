@@ -6,6 +6,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import version
+from math import isfinite
 from pathlib import Path
 from typing import Any, Final
 
@@ -447,9 +448,21 @@ def _price(explicit: Any, mapped: Any) -> float | None:
     value = explicit
     if value is None:
         value = mapped
+    if isinstance(value, str):
+        return _written_price(value)
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)
+
+
+def _written_price(text: str) -> float | None:
+    try:
+        price: Final = float(text)
+    except ValueError:
+        return None
+    if not isfinite(price):
+        return None
+    return price
 
 
 def _highest_known(values: list[float | None]) -> float | None:

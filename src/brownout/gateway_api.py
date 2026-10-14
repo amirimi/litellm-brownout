@@ -6,6 +6,8 @@ from typing import Any, Final
 
 import httpx
 
+from .rules import has_usable_prices
+
 KEY_PAGE_SIZE: Final = 100
 
 PageProgress = Callable[[int, int], None]
@@ -122,10 +124,16 @@ def _models(client: httpx.Client) -> tuple[LiteLLMModel, ...]:
 
 
 def _has_prices(model_info: Mapping[str, Any]) -> bool:
-    return (
-        model_info.get("input_cost_per_token") is not None
-        and model_info.get("output_cost_per_token") is not None
+    return has_usable_prices(
+        _number(model_info.get("input_cost_per_token")),
+        _number(model_info.get("output_cost_per_token")),
     )
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
 
 
 def _get(client: httpx.Client, path: str, params: Mapping[str, Any]) -> Any:
