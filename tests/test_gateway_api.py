@@ -186,7 +186,7 @@ def test_a_transport_failure_raises_the_same_error_type():
 @pytest.mark.parametrize(
     ("prices", "priced"),
     [
-        pytest.param((0, 0), False, id="zero-as-litellm-1.95.1-reports-unpriced"),
+        pytest.param((0, 0), False, id="zero-as-litellm-1.101.6-reports-unpriced"),
         pytest.param((0, 2e-6), True, id="free-input"),
         pytest.param((1e-6, None), False, id="one-price-missing"),
     ],

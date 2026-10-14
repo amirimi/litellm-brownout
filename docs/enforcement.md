@@ -2,8 +2,7 @@
 
 Each chat request meets LiteLLM first and the plugin second. LiteLLM authenticates the key,
 reserves the request's worst-case cost on the team's Redis counter and refuses the request when
-that worst case does not fit. LiteLLM 1.95.1 to 1.100 shrink the hold to fit instead, as
-[the envelope boundary](#the-envelope-boundary) sets out. The plugin's pre-call hook then runs the request rules,
+that worst case does not fit, as [the envelope boundary](#the-envelope-boundary) sets out. The plugin's pre-call hook then runs the request rules,
 reads the counter, decides, checks the caller's permission only if it wants a downgrade, rewrites
 the request if the downgrade is allowed, announces any claimed transition on the gateway log, and
 writes the request's facts into its LiteLLM metadata. The router then gathers the deployments that
@@ -37,7 +36,7 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | Only chat completions are governed | Embeddings, images, audio, `/v1/messages` and `/v1/responses` pass through untouched, at full price and without headers | Documented |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade. A request without `max_tokens` reserves the model's whole output | Documented, not checked |
-| LiteLLM is 1.95.1 or newer | The gateway refuses to start. It warns on 1.95.1 to 1.100, whose boundary can close a window above the budget, and past the tested 1.104 | `supported-litellm` |
+| LiteLLM is 1.101.6 or newer | The gateway refuses to start. It warns past the tested 1.104 | `supported-litellm` |
 
 ## The spend figure a tier compares
 
@@ -80,8 +79,7 @@ plugin reports and degrades below the boundary, and LiteLLM alone owns the bound
 
 | Gateway posture | When the worst case exceeds the headroom | Settled spend at window close |
 |---|---|---|
-| `fail_closed_budget_enforcement: true` on LiteLLM 1.101.0 and newer | Refused whole, 429 at authentication ([`budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)) | At or below the envelope, to the accuracy of the estimate below. Up to one worst case of headroom goes unspent |
-| `fail_closed_budget_enforcement: true` on LiteLLM 1.95.1 to 1.100 | Hold shrunk to the headroom and the request served at its full `max_tokens`. Requests keep being admitted this way until no headroom is left, then refused with a 429 | Above the envelope by the overrun of the shrunk requests, at most one request's cost under serial traffic. The handler logs this boundary at startup |
+| `fail_closed_budget_enforcement: true` | Refused whole, 429 at authentication ([`budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)) | At or below the envelope, to the accuracy of the estimate below. Up to one worst case of headroom goes unspent |
 | Flag absent or `false` | Refused by rule `fail-closed-on` before the plugin decides | Not reached |
 | `disable_budget_reservation: true` | Refused by rule `reservation-on` before the plugin decides | Not reached |
 
@@ -192,7 +190,7 @@ forging key. Build team dashboards and team alerts on the entry, and never platf
 A team derives window-level alerts in its own tool from these facts.
 
 - **A `CustomLogger`:** read `kwargs["standard_logging_object"]["metadata"]["spend_logs_metadata"]["brownout"]` in `async_log_success_event` and `async_log_failure_event`.
-- **Prometheus:** set `custom_prometheus_metadata_labels: ["metadata.brownout.outcome", "metadata.brownout.served_route"]` under `litellm_settings` with LiteLLM's `prometheus` callback. LiteLLM flattens `spend_logs_metadata` into the label lookup, so the path omits it. Labels keep string values only, which is why tiers are strings. Verified on 1.95.1 and 1.101.0. Caller metadata of the same name merges first and the plugin's entry overrides it, so on a request the plugin does not govern a caller's `metadata.brownout` can surface as a label for that caller's team.
+- **Prometheus:** set `custom_prometheus_metadata_labels: ["metadata.brownout.outcome", "metadata.brownout.served_route"]` under `litellm_settings` with LiteLLM's `prometheus` callback. LiteLLM flattens `spend_logs_metadata` into the label lookup, so the path omits it. Labels keep string values only, which is why tiers are strings. Verified on 1.101.0. Caller metadata of the same name merges first and the plugin's entry overrides it, so on a request the plugin does not govern a caller's `metadata.brownout` can surface as a label for that caller's team.
 - **A log-based monitor:** count `outcome:degraded` grouped by `requested_route`, or alert when `budget_tier` reaches `75` grouped by LiteLLM's team field.
 
 Order-based failover logs one request twice, a failure for the attempt that failed and a success for

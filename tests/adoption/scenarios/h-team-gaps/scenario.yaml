@@ -19,11 +19,11 @@ choices:
     subject: "{team:search}"
     values:
       "<YOUR BUDGET>": "1.0"
-      '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">': '"7d"'
+      "<YOUR DURATION, SUCH AS 7d>": 7d
   - rule: duration-tumbles
     subject: "{team:ops}"
     values:
-      '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">': '"1d"'
+      "<YOUR DURATION, SUCH AS 7d>": 1d
 provisions:
   "<YOUR REDIS HOST>":
     readme: redis-service

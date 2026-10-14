@@ -13,12 +13,6 @@ from .printed_rows import PRINTED_ROWS
 from .request_rows import REQUEST_ROWS
 
 WALKED_RELEASES: Final = (
-    "1.95.1",
-    "1.96.2",
-    "1.97.0",
-    "1.98.1",
-    "1.99.4",
-    "1.100.5",
     "1.101.6",
     "1.102.4",
     "1.103.4",
@@ -26,13 +20,10 @@ WALKED_RELEASES: Final = (
 )
 
 OPEN_FINDINGS: Final[Mapping[str, str]] = {
-    "model-info-prices": (
-        "LiteLLM bills a deployment priced in model_info, and check reads prices only "
-        "from litellm_params and the cost map"
-    ),
     "cost-map-source": (
         "check prices a model from whichever cost map LiteLLM loaded, fetched or "
-        "bundled, so it can differ from the gateway's"
+        "bundled, and ignores model_info.base_model, so it can differ from the "
+        "gateway's"
     ),
     "non-chat-pass-through": (
         "the plugin sees every call type and governs only chat completions, so other "

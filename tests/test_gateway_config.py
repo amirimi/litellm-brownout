@@ -157,6 +157,48 @@ def test_the_lab_config_reads_its_deployments():
             id="price-from-environment",
         ),
         pytest.param(
+            {"model_list": [deployment(model_info={"input_cost_per_token": "cheap"})]},
+            "model_info.input_cost_per_token must be a finite number",
+            id="info-price-words",
+        ),
+        pytest.param(
+            {"model_list": [deployment(model_info={"output_cost_per_token": False})]},
+            "model_info.output_cost_per_token must be a finite number",
+            id="info-price-boolean",
+        ),
+        pytest.param(
+            {
+                "model_list": [
+                    deployment(model_info={"input_cost_per_token": float("nan")})
+                ]
+            },
+            "model_info.input_cost_per_token must be a finite number",
+            id="info-price-not-a-number",
+        ),
+        pytest.param(
+            {
+                "model_list": [
+                    deployment(
+                        model_info={"output_cost_per_token": "os.environ/OUTPUT_PRICE"}
+                    )
+                ]
+            },
+            "model_info.output_cost_per_token must be a finite number",
+            id="info-price-from-environment",
+        ),
+        pytest.param(
+            {
+                "model_list": [
+                    deployment(
+                        litellm_params={"model": "x", "input_cost_per_token": 1e-6},
+                        model_info={"input_cost_per_token": "cheap"},
+                    )
+                ]
+            },
+            "model_info.input_cost_per_token must be a finite number",
+            id="info-price-unreadable-under-a-readable-one",
+        ),
+        pytest.param(
             {"general_settings": {"alert_types": "budget_alerts"}},
             "alert_types must be a list",
             id="alert-types",
@@ -254,6 +296,47 @@ def test_a_deployment_carries_its_explicit_prices_and_class():
     assert config.deployments == (
         Deployment("chat", "openai/x", 0.0001, 0.001, "internal"),
     )
+
+
+@pytest.mark.parametrize(
+    ("params", "info", "prices"),
+    [
+        pytest.param(
+            {},
+            {"input_cost_per_token": "3e-6", "output_cost_per_token": 4e-6},
+            (3e-6, 4e-6),
+            id="model-info-only",
+        ),
+        pytest.param(
+            {"input_cost_per_token": 1e-6},
+            {"output_cost_per_token": 8e-6},
+            (1e-6, 8e-6),
+            id="split-across-both",
+        ),
+        pytest.param(
+            {"input_cost_per_token": 1e-6},
+            {"input_cost_per_token": 9e-6, "output_cost_per_token": 8e-6},
+            (1e-6, 8e-6),
+            id="litellm-params-first",
+        ),
+        pytest.param({}, {}, (None, None), id="neither"),
+    ],
+)
+def test_a_deployment_takes_each_price_from_litellm_params_then_model_info(
+    params, info, prices
+):
+    config = read(
+        {
+            "model_list": [
+                deployment(
+                    litellm_params={"model": "openai/x", **params}, model_info=info
+                )
+            ]
+        }
+    )
+
+    priced = config.deployments[0]
+    assert (priced.input_cost_per_token, priced.output_cost_per_token) == prices
 
 
 @pytest.mark.parametrize(

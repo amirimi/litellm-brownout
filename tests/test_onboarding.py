@@ -125,11 +125,9 @@ def test_a_team_with_a_rejected_duration_is_a_tumbles_finding():
         (RuleId.DURATION_TUMBLES, "biweekly")
     ]
     command = findings[0].resolution[0]
-    assert (
-        '"budget_duration": <YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">' in command
+    assert json.loads(json_body(command))["budget_duration"] == (
+        "<YOUR DURATION, SUCH AS 7d>"
     )
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(json_body(command))
 
 
 def test_teamless_and_self_budgeted_keys_are_findings_with_runnable_commands():

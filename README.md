@@ -39,7 +39,7 @@ Brownout governs every chat completion on the gateway, so the whole gateway has 
 - No key carries a budget of its own.
 - `fail_closed_budget_enforcement` is on, `coordination_redis` is configured and LiteLLM's budget
   alerts are off.
-- LiteLLM runs a release from 1.95.1 to 1.104, pinned by image tag.
+- LiteLLM runs a release from 1.101.6 to 1.104, pinned by image tag.
 
 Brownout needs a Redis that LiteLLM can reach. LiteLLM keeps each team's spend counter there, and
 brownout records each announcement there. If the gateway has no Redis, add one before running
@@ -278,11 +278,9 @@ such as a refused downgrade and a broken manifest. `docker compose down` stops t
 - Redis sits on the request path. While LiteLLM cannot write a reservation, it refuses every budgeted
   request. Once Redis is back, LiteLLM keeps refusing until its Redis circuit breaker resets, 60
   seconds by default. Run Redis with failover, persistence and the `noeviction` policy.
-- Brownout imports three private LiteLLM helpers and refuses to start below 1.95.1. A release that
+- Brownout imports three private LiteLLM helpers and refuses to start below 1.101.6. A release that
   renames a helper stops the gateway at startup, so pin the image tag and upgrade only to a release
   the weekly `litellm matrix` workflow has passed.
-- On LiteLLM 1.95.1 to 1.100, a window can close above the budget by one request's cost under
-  serial traffic, and by more under concurrent traffic. Run 1.101 or newer for a hard limit.
 - A request that breaks a requirement gets a 503 naming the rule. The [enforcement
   reference][enforcement] lists every assumption, failure mode, header and event.
 

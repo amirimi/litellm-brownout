@@ -3,9 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
-import re
 from datetime import UTC, datetime
-from importlib.metadata import version
 from pathlib import Path
 from typing import Final
 
@@ -21,16 +19,6 @@ from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
 
 LITELLM_ROOT: Final = Path(importlib.util.find_spec("litellm").origin).parent
-REFUSE_WHOLE_FROM: Final = (1, 101, 0)
-
-
-def _installed_release() -> tuple[int, int, int]:
-    match = re.match(r"(\d+)\.(\d+)\.(\d+)", version("litellm"))
-    assert match is not None, f"cannot read the LiteLLM release {version('litellm')!r}"
-    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-
-
-REFUSES_WHOLE: Final = _installed_release() >= REFUSE_WHOLE_FROM
 
 
 def _function_in_source(
@@ -126,7 +114,6 @@ def test_seam_the_spend_read_accepts_the_arguments_the_plugin_passes():
     assert {"counter_key", "fallback_spend", "max_budget"} <= _parameter_names(read)
 
 
-@pytest.mark.skipif(not REFUSES_WHOLE, reason="the hold is shrunk before 1.101.0")
 def test_seam_fail_closed_refuses_a_worst_case_that_does_not_fit():
     policy = _function_in_source(
         "proxy/spend_tracking/budget_reservation.py",
@@ -134,17 +121,6 @@ def test_seam_fail_closed_refuses_a_worst_case_that_does_not_fit():
     )
 
     assert "fail_closed_budget_enforcement" in _parameter_names(policy)
-
-
-@pytest.mark.skipif(REFUSES_WHOLE, reason="the hold is refused whole from 1.101.0")
-def test_seam_before_1_101_an_over_budget_hold_is_shrunk():
-    policy = _function_in_source(
-        "proxy/spend_tracking/budget_reservation.py",
-        "_apply_over_budget_reservation_policy",
-    )
-
-    assert "fail_closed_budget_enforcement" not in _parameter_names(policy)
-    assert "_resize_applied_reservation(" in ast.unparse(policy)
 
 
 @pytest.mark.parametrize(
@@ -325,10 +301,6 @@ def test_seam_team_and_key_aliases_apply_before_the_pre_call_hook():
     assert "_update_model_if_key_alias_exists(" in aliases
 
 
-PER_REQUEST_ALIASES_FROM: Final = (1, 97, 0)
-RESOLVES_PER_REQUEST_ALIASES: Final = _installed_release() >= PER_REQUEST_ALIASES_FROM
-
-
 def _pre_call_source() -> str:
     return (LITELLM_ROOT / "proxy/common_request_processing.py").read_text(
         encoding="utf-8"
@@ -351,9 +323,6 @@ def test_seam_server_and_key_model_rewrites_apply_before_the_pre_call_hook(rewri
     )
 
 
-@pytest.mark.skipif(
-    not RESOLVES_PER_REQUEST_ALIASES, reason="per-request aliases arrive in 1.97.0"
-)
 def test_seam_key_and_team_router_aliases_apply_before_the_pre_call_hook():
     source = _pre_call_source()
 
@@ -369,10 +338,6 @@ def test_seam_a_local_rate_limit_retries_the_pre_call_logic_on_a_router_fallback
     assert '.get("disable_fallbacks")' in source
 
 
-@pytest.mark.skipif(
-    not RESOLVES_PER_REQUEST_ALIASES,
-    reason="user budgets reach team keys only through a setting added in 1.97.0",
-)
 def test_seam_a_setting_lets_a_user_budget_refuse_team_keys():
     check = ast.unparse(
         _function_in_source("proxy/auth/auth_checks.py", "common_checks")
@@ -381,21 +346,6 @@ def test_seam_a_setting_lets_a_user_budget_refuse_team_keys():
     assert "apply_user_budget_to_team_keys" in check
 
 
-@pytest.mark.skipif(
-    RESOLVES_PER_REQUEST_ALIASES,
-    reason="1.97.0 adds a setting for user budgets on team keys",
-)
-def test_seam_before_1_97_a_user_budget_applies_to_personal_keys_only():
-    check = ast.unparse(
-        _function_in_source("proxy/auth/auth_checks.py", "common_checks")
-    )
-
-    assert "(team_object is None or team_object.team_id is None)" in check
-
-
-@pytest.mark.skipif(
-    not RESOLVES_PER_REQUEST_ALIASES, reason="the setting arrives in 1.97.0"
-)
 def test_seam_a_user_budget_skips_team_keys_unless_the_setting_is_true():
     check = ast.unparse(
         _function_in_source("proxy/auth/auth_checks.py", "common_checks")
@@ -471,6 +421,18 @@ def billing_router(monkeypatch) -> litellm.Router:
                 },
             },
             {
+                "model_name": "seam-split",
+                "litellm_params": {
+                    "model": "openai/seam-split",
+                    "api_key": "sk-seam",
+                    "input_cost_per_token": 1e-6,
+                },
+                "model_info": {
+                    "input_cost_per_token": 9e-6,
+                    "output_cost_per_token": 8e-6,
+                },
+            },
+            {
                 "model_name": "seam-mapped",
                 "litellm_params": {"model": "openai/gpt-4o-mini", "api_key": "sk-seam"},
             },
@@ -501,6 +463,7 @@ def _billed(router: litellm.Router, name: str) -> tuple[object, object]:
     [
         pytest.param("seam-explicit", (1e-6, 2e-6), id="litellm-params"),
         pytest.param("seam-info", (3e-6, 4e-6), id="model-info"),
+        pytest.param("seam-split", (1e-6, 8e-6), id="litellm-params-first"),
         pytest.param("seam-mapped", (1.5e-7, 6e-7), id="cost-map"),
     ],
 )

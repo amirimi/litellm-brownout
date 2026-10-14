@@ -145,9 +145,10 @@ def file_rules(manifest: Manifest, gateway: GatewayFile) -> list[Violation]:
             Violation(
                 RuleId.REDIS_CONFIGURED,
                 "general_settings.coordination_redis",
-                "is unset. The spend counter and the plugin's claims need it, and a Redis "
-                "cache does not provide it on every supported LiteLLM release. A gateway "
-                "without Redis needs one first, as the README's Requirements show",
+                "is unset. The spend counter and the plugin's claims need it. A Redis cache "
+                "does not count, because only coordination_redis is verified to carry the "
+                "counter on every supported LiteLLM release. A gateway without Redis needs "
+                "one first, as the README's Requirements show",
             )
         )
     for team in manifest.teams:

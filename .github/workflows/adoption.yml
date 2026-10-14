@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: ["v1.95.1", "v1.104.2"]
+        release: ["v1.101.6", "v1.104.2"]
         scenario:
           - a-config-models
           - a2-no-model-store
@@ -52,33 +52,9 @@ jobs:
           - o-scientific-prices
         include:
           - scenario: a-config-models
-            release: "v1.96.2"
-          - scenario: a-config-models
-            release: "v1.97.0"
-          - scenario: a-config-models
-            release: "v1.98.1"
-          - scenario: a-config-models
-            release: "v1.99.4"
-          - scenario: a-config-models
-            release: "v1.100.5"
-          - scenario: a-config-models
-            release: "v1.101.6"
-          - scenario: a-config-models
             release: "v1.102.4"
           - scenario: a-config-models
             release: "v1.103.4"
-          - scenario: b-ui-models
-            release: "v1.96.2"
-          - scenario: b-ui-models
-            release: "v1.97.0"
-          - scenario: b-ui-models
-            release: "v1.98.1"
-          - scenario: b-ui-models
-            release: "v1.99.4"
-          - scenario: b-ui-models
-            release: "v1.100.5"
-          - scenario: b-ui-models
-            release: "v1.101.6"
           - scenario: b-ui-models
             release: "v1.102.4"
           - scenario: b-ui-models

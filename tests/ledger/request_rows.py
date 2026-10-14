@@ -66,7 +66,7 @@ REQUEST_ROWS: Final = (
         source="brownout",
         parser="bridge.requested_model",
         reads=("key:model",),
-        cites=("litellm/proxy/common_request_processing.py:1201@1.95.1",),
+        cites=("litellm/proxy/common_request_processing.py:1899@1.101.6",),
         forms=(
             Form(
                 "a model group the team's manifest routes",
@@ -451,7 +451,7 @@ REQUEST_ROWS: Final = (
         source="brownout",
         parser="bridge.LiteLLMGatewayState.model_group",
         reads=("router:get_model_list",),
-        cites=("litellm/router.py:9177@1.95.1",),
+        cites=("litellm/router.py:10640@1.101.6",),
         forms=(
             Form(
                 "a group whose every deployment LiteLLM prices",
@@ -488,7 +488,7 @@ REQUEST_ROWS: Final = (
             "key:input_cost_per_token",
             "key:output_cost_per_token",
         ),
-        cites=("litellm/router.py:9035@1.95.1",),
+        cites=("litellm/router.py:10483@1.101.6",),
         forms=(
             Form(
                 "a price from litellm_params, model_info or the cost map",
@@ -501,7 +501,7 @@ REQUEST_ROWS: Final = (
                 ),
             ),
             Form(
-                "no usable price, reported as 0 on 1.95.1 and as None on 1.104.2",
+                "no usable price, reported as 0 on 1.101.6 and as None on 1.104.2",
                 "unpriced, so its group is unpriced",
                 Supported(
                     (
@@ -565,7 +565,7 @@ REQUEST_ROWS: Final = (
         source="brownout",
         parser="bridge.request_team",
         reads=("key:metadata", "key:litellm_metadata", "key:user_api_key_team_id"),
-        cites=("litellm/proxy/litellm_pre_call_utils.py:1031@1.95.1",),
+        cites=("litellm/proxy/litellm_pre_call_utils.py:1576@1.101.6",),
         forms=(
             Form(
                 "a team in the manifest",
@@ -621,7 +621,7 @@ REQUEST_ROWS: Final = (
             "parameter:messages",
             "parameter:request_kwargs",
         ),
-        cites=("litellm/router.py:10686@1.95.1",),
+        cites=("litellm/router.py:12414@1.101.6",),
         forms=(
             Form(
                 "a chat request after the router resolved its name",

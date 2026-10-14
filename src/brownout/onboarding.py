@@ -18,7 +18,7 @@ EVERY_MODEL: Final = "all-proxy-models"
 REFUSAL_STATUS: Final = 429
 CEILING_TOLERANCE_USD: Final = 1e-9
 BUDGET_PLACEHOLDER: Final = "<YOUR BUDGET>"
-DURATION_PLACEHOLDER: Final = '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">'
+DURATION_PLACEHOLDER: Final = "<YOUR DURATION, SUCH AS 7d>"
 TEAM_PLACEHOLDER: Final = "<YOUR TEAM ID>"
 
 Section = Literal["general_settings", "litellm_settings"]
@@ -288,7 +288,7 @@ def nothing_to_govern(gateway: str, teams_exist: bool) -> Finding:
                 [
                     ("team_id", _json(TEAM_PLACEHOLDER)),
                     ("max_budget", BUDGET_PLACEHOLDER),
-                    ("budget_duration", DURATION_PLACEHOLDER),
+                    ("budget_duration", _json(DURATION_PLACEHOLDER)),
                 ],
             ),
             _post(gateway, "/key/generate", [("team_id", _json(TEAM_PLACEHOLDER))]),
@@ -352,7 +352,7 @@ def _team_finding(team: LiteLLMTeam, gateway: str) -> Finding:
     if not _has_budget(team):
         fields.append(("max_budget", BUDGET_PLACEHOLDER))
     if team.budget_duration not in WINDOW_SECONDS:
-        fields.append(("budget_duration", DURATION_PLACEHOLDER))
+        fields.append(("budget_duration", _json(DURATION_PLACEHOLDER)))
     command: Final = (_post(gateway, "/team/update", fields),)
     if not _has_budget(team):
         return Finding(

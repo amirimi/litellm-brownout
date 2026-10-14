@@ -144,7 +144,7 @@ COMMAND_ROWS: Final = (
         cites=(),
         forms=(
             Form(
-                "below 1.95.1, or unreadable",
+                "below 1.101.6, or unreadable",
                 "refused",
                 Refused(
                     stage="start",
@@ -156,23 +156,9 @@ COMMAND_ROWS: Final = (
                 ),
             ),
             Form(
-                "1.95.1 to 1.100, which shrink an over-budget hold",
-                "runs, with a startup warning",
-                Supported(
-                    (
-                        f"{BRIDGE}test_a_release_that_shrinks_holds_to_fit_runs_with_a_warning",
-                    )
-                ),
-            ),
-            Form(
-                "1.101 to 1.104, which refuse an over-budget hold whole",
+                "1.101.6 to 1.104",
                 "runs",
-                Supported(
-                    (
-                        f"{BRIDGE}test_a_tested_release_that_refuses_whole_runs_quietly",
-                        f"{BRIDGE}test_the_boundary_follows_the_release",
-                    )
-                ),
+                Supported((f"{BRIDGE}test_a_tested_release_runs_quietly",)),
             ),
             Form(
                 "past 1.104",

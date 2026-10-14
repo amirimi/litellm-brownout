@@ -4,7 +4,7 @@ from typing import Final
 
 from brownout.refusals import RefusalReason, RuleId
 
-from .model import Documented, Form, Input, Open, Refused, Releases, Supported
+from .model import Documented, Form, Input, Open, Refused, Supported
 
 SEAMS: Final = "tests/test_litellm_seams.py::"
 MANIFEST: Final = "tests/test_manifest.py::"
@@ -24,9 +24,6 @@ NAME_NOT_A_GROUP: Final = Refused(
     ),
 )
 BUDGETS_BEFORE_TIERS: Final = Open("budgets-before-tiers")
-FROM_1_97: Final = Releases(first=97)
-BEFORE_1_97: Final = Releases(last=96)
-FROM_1_100: Final = Releases(first=100)
 
 
 LITELLM_ROWS: Final = (
@@ -36,8 +33,8 @@ LITELLM_ROWS: Final = (
         parser=None,
         reads=(),
         cites=(
-            "litellm/proxy/common_request_processing.py:1201@1.95.1",
-            "litellm/proxy/litellm_pre_call_utils.py:1900@1.95.1",
+            "litellm/proxy/common_request_processing.py:1899@1.101.6",
+            "litellm/proxy/litellm_pre_call_utils.py:2558@1.101.6",
             "litellm/proxy/common_request_processing.py:2058@1.104.2",
         ),
         forms=(
@@ -59,7 +56,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/router.py:9186@1.95.1",),
+        cites=("litellm/router.py:10649@1.101.6",),
         forms=(
             Form(
                 "an alias for a routed group",
@@ -77,20 +74,13 @@ LITELLM_ROWS: Final = (
         cites=("litellm/proxy/common_request_processing.py:2124@1.104.2",),
         forms=(
             Form(
-                "an alias, from 1.97",
+                "an alias",
                 "resolved before the hook, so brownout sees the group",
                 Supported(
                     (
                         f"{SEAMS}test_seam_key_and_team_router_aliases_apply_before_the_pre_call_hook",
                     )
                 ),
-                releases=FROM_1_97,
-            ),
-            Form(
-                "an alias, before 1.97",
-                "refused before routing",
-                NAME_NOT_A_GROUP,
-                releases=BEFORE_1_97,
             ),
         ),
     ),
@@ -99,7 +89,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/router.py:9177@1.95.1",),
+        cites=("litellm/router.py:10640@1.101.6",),
         forms=(
             Form(
                 "a wildcard route or fallback in the manifest",
@@ -127,10 +117,9 @@ LITELLM_ROWS: Final = (
         cites=("litellm/router.py:11702@1.104.2",),
         forms=(
             Form(
-                "a request for a routing group's name, from 1.98",
+                "a request for a routing group's name",
                 "refused before routing",
                 NAME_NOT_A_GROUP,
-                releases=Releases(first=98),
             ),
         ),
     ),
@@ -139,7 +128,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/proxy/route_llm_request.py:420@1.95.1",),
+        cites=("litellm/proxy/route_llm_request.py:503@1.101.6",),
         forms=(
             Form(
                 "a request naming several models at once",
@@ -154,8 +143,8 @@ LITELLM_ROWS: Final = (
         parser=None,
         reads=(),
         cites=(
-            "litellm/proxy/route_llm_request.py:549@1.95.1",
-            "litellm/router.py:9550@1.95.1",
+            "litellm/proxy/route_llm_request.py:632@1.101.6",
+            "litellm/router.py:11018@1.101.6",
         ),
         forms=(
             Form(
@@ -170,7 +159,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/router.py:9087@1.95.1",),
+        cites=("litellm/router.py:10536@1.101.6",),
         forms=(
             Form(
                 "every deployment priced",
@@ -207,7 +196,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/proxy/auth/user_api_key_auth.py:1374@1.95.1",),
+        cites=("litellm/proxy/auth/user_api_key_auth.py:1568@1.101.6",),
         forms=(
             Form(
                 "a request for it",
@@ -226,7 +215,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/router.py:2082@1.95.1",),
+        cites=("litellm/router.py:2675@1.101.6",),
         forms=(
             Form(
                 "fallbacks in router_settings or in a key's or team's router_settings",
@@ -257,7 +246,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/proxy/proxy_server.py:981@1.95.1",),
+        cites=("litellm/proxy/proxy_server.py:1169@1.101.6",),
         forms=(
             Form(
                 "general_settings or coordination_redis kept only in LiteLLM's database",
@@ -282,7 +271,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/proxy/proxy_server.py:3893@1.95.1",),
+        cites=("litellm/proxy/proxy_server.py:4645@1.101.6",),
         forms=(
             Form(
                 "a bucket or a path only the gateway can reach",
@@ -301,7 +290,7 @@ LITELLM_ROWS: Final = (
         parser=None,
         reads=(),
         cites=(
-            "litellm/proxy/auth/auth_checks.py:489@1.95.1",
+            "litellm/proxy/auth/auth_checks.py:834@1.101.6",
             "litellm/proxy/auth/auth_checks.py:932@1.104.2",
         ),
         forms=(
@@ -340,20 +329,17 @@ LITELLM_ROWS: Final = (
                 "a model access group budget",
                 "refuses before the tiers",
                 BUDGETS_BEFORE_TIERS,
-                releases=FROM_1_100,
             ),
             Form(
                 "a user's personal budget with apply_user_budget_to_team_keys on",
                 "refuses before the tiers",
                 BUDGETS_BEFORE_TIERS,
-                releases=FROM_1_97,
             ),
             Form(
                 "a user's personal budget on a team key otherwise",
                 "never applies",
                 Supported(
                     (
-                        f"{SEAMS}test_seam_before_1_97_a_user_budget_applies_to_personal_keys_only",
                         f"{SEAMS}test_seam_a_user_budget_skips_team_keys_unless_the_setting_is_true",
                     )
                 ),
