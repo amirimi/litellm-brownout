@@ -19,6 +19,7 @@ from brownout.onboarding import (
     exit_code,
     key_findings,
     model_findings,
+    nothing_to_govern,
     reconcile_findings,
     team_entries,
     team_findings,
@@ -158,6 +159,8 @@ def test_an_unpriced_model_is_a_finding_with_the_lines_to_add():
 
     assert [(f.rule, f.subject) for f in findings] == [(RuleId.MODEL_PRICED, "mystery")]
     assert any("input_cost_per_token" in line for line in findings[0].resolution)
+    assert "restart the gateway" in findings[0].detail
+    assert "admin UI" in findings[0].detail
 
 
 def test_reconciling_names_every_mismatch_with_litellm():
@@ -405,3 +408,41 @@ def test_the_key_init_runs_with_still_answers_for_its_own_budget():
     assert [(f.rule, f.subject) for f in findings] == [
         (RuleId.KEY_HAS_NO_BUDGET, "init")
     ]
+
+
+def test_a_gateway_without_teams_is_told_how_to_create_its_first_one():
+    finding = nothing_to_govern(GATEWAY, teams_exist=False)
+
+    team_command, key_command = finding.resolution
+    assert team_command.startswith(f"curl -X POST {GATEWAY}/team/new ")
+    assert '"team_id": "<YOUR TEAM ID>"' in team_command
+    assert '"max_budget": <YOUR BUDGET>' in team_command
+    assert key_command.startswith(f"curl -X POST {GATEWAY}/key/generate ")
+    assert '"team_id": "<YOUR TEAM ID>"' in key_command
+    assert finding.blocking is True
+
+
+def test_teams_without_budgets_are_resolved_through_their_own_findings():
+    assert nothing_to_govern(GATEWAY, teams_exist=True).resolution == ()
+
+
+def test_a_member_budget_inside_a_team_is_a_finding_with_its_clearing_command():
+    budgeted = LiteLLMTeam("search", 500.0, "7d", (), ("alice",))
+
+    findings = [
+        finding
+        for finding in team_findings((budgeted,), GATEWAY)
+        if finding.rule is RuleId.MEMBER_HAS_NO_BUDGET
+    ]
+
+    assert [(f.subject, f.blocking) for f in findings] == [("search/alice", True)]
+    assert json.loads(json_body(findings[0].resolution[0])) == {
+        "team_id": "search",
+        "user_id": "alice",
+        "max_budget_in_team": None,
+    }
+    assert (
+        findings[0]
+        .resolution[0]
+        .startswith(f"curl -X POST {GATEWAY}/team/member_update ")
+    )

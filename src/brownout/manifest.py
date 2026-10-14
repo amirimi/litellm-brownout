@@ -9,6 +9,7 @@ from typing import Any, Final
 from .inputs import load_yaml
 from .refusals import RuleId
 
+WILDCARD: Final = "*"
 HOUR_SECONDS: Final = 3600
 DAY_SECONDS: Final = 24 * HOUR_SECONDS
 LONGEST_MONTH_SECONDS: Final = 31 * DAY_SECONDS
@@ -186,10 +187,13 @@ def _build_route(source: str, team_id: str, route: str, entry: Any) -> RoutePoli
     if not isinstance(entry, dict):
         raise _schema(source, f"{where} must be a mapping")
     _require_known_keys(source, where, entry, ROUTE_KEYS)
+    _require_concrete(source, where, route)
 
     fallback = entry.get("fallback")
     if fallback is not None and (not isinstance(fallback, str) or not fallback):
         raise _schema(source, f"{where} 'fallback' must be a model group name")
+    if fallback is not None:
+        _require_concrete(source, f"{where} fallback", fallback)
     if fallback == route:
         raise ManifestError(
             RuleId.FALLBACK_DISTINCT,
@@ -208,6 +212,16 @@ def _build_route(source: str, team_id: str, route: str, entry: Any) -> RoutePoli
         degrade_at=degrade_at,
         warn_tiers=_tiers(source, where, entry.get("warn_tiers")),
     )
+
+
+def _require_concrete(source: str, where: str, group: str) -> None:
+    if WILDCARD in group:
+        raise _schema(
+            source,
+            f"{where} names the wildcard group {group!r}. A route and its fallback must "
+            "each be a concrete model group, because requests name concrete models and "
+            "never match a wildcard route",
+        )
 
 
 def _data_class_order(

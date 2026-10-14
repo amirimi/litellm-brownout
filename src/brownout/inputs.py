@@ -6,6 +6,8 @@ from typing import Any, Final, Protocol
 
 import yaml
 
+INCLUDE_KEY: Final = "include"
+
 
 class DocumentError(Exception):
     pass
@@ -39,6 +41,25 @@ def mapping(path: Path, document: object) -> Mapping[str, Any]:
     if not isinstance(document, Mapping):
         raise DocumentError(f"{path} is not a YAML mapping")
     return document
+
+
+def with_includes(path: Path, config: Mapping[str, Any]) -> dict[str, Any]:
+    merged: Final = {key: value for key, value in config.items() if key != INCLUDE_KEY}
+    includes: Final = config.get(INCLUDE_KEY)
+    if includes is None:
+        return merged
+    if not isinstance(includes, list):
+        raise DocumentError(f"{path} include must list files")
+    for name in includes:
+        included_path = path.parent / str(name)
+        included = mapping(included_path, load_yaml(included_path))
+        for key, value in included.items():
+            existing = merged.get(key)
+            if isinstance(value, list) and isinstance(existing, list):
+                merged[key] = [*existing, *value]
+            else:
+                merged[key] = value
+    return merged
 
 
 def positioned(path: Path, problem: str, mark: Mark | None) -> DocumentError:

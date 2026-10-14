@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.metadata import version
 from math import isfinite
 from pathlib import Path
@@ -16,8 +16,13 @@ from litellm.proxy._types import hash_token
 from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
 
 from . import settings
-from .gateway_api import GatewayReadError, GatewaySnapshot, read_gateway
-from .inputs import DocumentError, load_yaml, mapping, read_text
+from .gateway_api import (
+    GatewayReadError,
+    GatewaySnapshot,
+    read_gateway,
+    read_model_groups,
+)
+from .inputs import DocumentError, load_yaml, mapping, read_text, with_includes
 from .manifest import Manifest, ManifestError
 from .onboarding import (
     ConfigChange,
@@ -51,6 +56,7 @@ from .rules import (
     GatewaySettings,
     ModelGroup,
     file_rules,
+    group_price,
 )
 
 GATEWAY_TIMEOUT_SECONDS: Final = 30.0
@@ -94,6 +100,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     check_command.add_argument("--gateway-config", required=True, type=Path)
     check_command.add_argument("--manifest", required=True, type=Path)
+    check_command.add_argument("--gateway")
     init_command: Final = commands.add_parser(
         "init",
         help="Read a running gateway and prepare a manifest and a gateway config",
@@ -172,8 +179,23 @@ def init(
 
 
 def _check_command(arguments: argparse.Namespace) -> int:
+    live_groups: Mapping[str, ModelGroup] = {}
+    if arguments.gateway is not None:
+        key = settings.init_key()
+        if not key:
+            print(
+                "check --gateway reads the gateway's models, so set BROWNOUT_INIT_KEY to "
+                "a key that can read it, such as one for a proxy_admin_viewer user",
+                file=sys.stderr,
+            )
+            return UNREADY
+        try:
+            live_groups = _gateway_groups(arguments.gateway, key)
+        except GatewayReadError as error:
+            print(f"check could not read the gateway: {error}", file=sys.stderr)
+            return UNREADY
     try:
-        violations = check(arguments.gateway_config, arguments.manifest)
+        violations = check(arguments.gateway_config, arguments.manifest, live_groups)
     except DocumentError as error:
         print(error, file=sys.stderr)
         return UNREADY
@@ -184,6 +206,15 @@ def _check_command(arguments: argparse.Namespace) -> int:
         return 1
     print(f"brownout check passed on LiteLLM {litellm_release()}")
     return 0
+
+
+def _gateway_groups(gateway: str, key: str) -> dict[str, ModelGroup]:
+    with httpx.Client(
+        base_url=gateway,
+        headers={"Authorization": f"Bearer {key}"},
+        timeout=GATEWAY_TIMEOUT_SECONDS,
+    ) as client:
+        return read_model_groups(client)
 
 
 def _taken_outputs(options: InitOptions) -> list[Path]:
@@ -208,7 +239,10 @@ def _prepare(
     config_document: Final = load_document(
         options.gateway_config, read_text(options.gateway_config)
     )
-    config: Final = mapping(options.gateway_config, to_plain(config_document))
+    config: Final = with_includes(
+        options.gateway_config,
+        mapping(options.gateway_config, to_plain(config_document)),
+    )
     existing: Final = _existing_manifest(options.manifest)
     snapshot: Final = read_gateway(client, _key_page_progress)
     changes: Final = config_plan(config, default_alert_types)
@@ -266,14 +300,24 @@ def _findings(
     if existing is not None:
         findings.extend(reconcile_findings(existing, snapshot.teams, options.gateway))
     if manifest_document is None:
-        findings.append(nothing_to_govern())
+        findings.append(nothing_to_govern(options.gateway, bool(snapshot.teams)))
     else:
         written = Manifest.from_document(
             str(options.manifest_out), to_plain(manifest_document)
         )
         findings.extend(
             violation_findings(
-                file_rules(written, gateway_file(to_plain(config_document)))
+                file_rules(
+                    written,
+                    with_live_groups(
+                        gateway_file(
+                            with_includes(
+                                options.gateway_config, to_plain(config_document)
+                            )
+                        ),
+                        snapshot.groups,
+                    ),
+                )
             )
         )
     findings.append(admin_keys_notice(_own_key_teamless(snapshot, own_token)))
@@ -363,14 +407,28 @@ def _write_new(path: Path, text: str, mode: int) -> None:
         handle.write(text)
 
 
-def check(gateway_config: Path, manifest_path: Path) -> list[Violation]:
+def check(
+    gateway_config: Path,
+    manifest_path: Path,
+    live_groups: Mapping[str, ModelGroup],
+) -> list[Violation]:
     try:
         manifest = Manifest.from_file(manifest_path)
     except ManifestError as error:
         return [Violation(error.rule, str(manifest_path), str(error))]
+    config: Final = mapping(gateway_config, load_yaml(gateway_config))
     return file_rules(
-        manifest, gateway_file(mapping(gateway_config, load_yaml(gateway_config)))
+        manifest,
+        with_live_groups(
+            gateway_file(with_includes(gateway_config, config)), live_groups
+        ),
     )
+
+
+def with_live_groups(
+    file: GatewayFile, live_groups: Mapping[str, ModelGroup]
+) -> GatewayFile:
+    return replace(file, groups={**live_groups, **file.groups})
 
 
 def gateway_file(config: Mapping[str, Any]) -> GatewayFile:
@@ -415,8 +473,8 @@ def _model_group(name: str, deployments: list[Mapping[str, Any]]) -> ModelGroup:
     output_costs = [price[1] for price in prices]
     return ModelGroup(
         name=name,
-        input_cost_per_token=_highest_known(input_costs),
-        output_cost_per_token=_highest_known(output_costs),
+        input_cost_per_token=group_price(input_costs),
+        output_cost_per_token=group_price(output_costs),
         data_classes=tuple(
             (deployment.get("model_info") or {}).get("data_class")
             for deployment in deployments
@@ -463,13 +521,6 @@ def _written_price(text: str) -> float | None:
     if not isfinite(price):
         return None
     return price
-
-
-def _highest_known(values: list[float | None]) -> float | None:
-    known = [value for value in values if value is not None]
-    if len(known) != len(values) or not known:
-        return None
-    return max(known)
 
 
 if __name__ == "__main__":

@@ -31,8 +31,7 @@ class Choice:
 @dataclass(frozen=True)
 class Provision:
     placeholder: str
-    gap: str
-    compose: Path
+    readme: str
     value: str
 
 
@@ -113,10 +112,7 @@ def load_scenario(name: str) -> Scenario:
         ),
         provisions={
             placeholder: Provision(
-                placeholder=placeholder,
-                gap=item["gap"],
-                compose=SCENARIOS / item["compose"],
-                value=item["value"],
+                placeholder=placeholder, readme=item["readme"], value=item["value"]
             )
             for placeholder, item in (document.get("provisions") or {}).items()
         },

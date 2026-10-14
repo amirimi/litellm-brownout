@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
+from typing import Final
 
 from .manifest import Manifest, RoutePolicy
 from .refusals import RuleId, Violation
@@ -35,6 +36,13 @@ GroupLookup = Callable[[str], ModelGroup | None]
 
 def is_priced(group: ModelGroup) -> bool:
     return has_usable_prices(group.input_cost_per_token, group.output_cost_per_token)
+
+
+def group_price(values: Sequence[float | None]) -> float | None:
+    known: Final = [value for value in values if value is not None]
+    if len(known) != len(values) or not known:
+        return None
+    return max(known)
 
 
 def has_usable_prices(input_cost: float | None, output_cost: float | None) -> bool:
@@ -116,7 +124,8 @@ def file_rules(manifest: Manifest, gateway: GatewayFile) -> list[Violation]:
                 RuleId.REDIS_CONFIGURED,
                 "general_settings.coordination_redis",
                 "is unset. The spend counter and the plugin's claims need it, and a Redis "
-                "cache does not provide it on every supported LiteLLM release",
+                "cache does not provide it on every supported LiteLLM release. A gateway "
+                "without Redis needs one first, as the README's Requirements show",
             )
         )
     for team in manifest.teams:

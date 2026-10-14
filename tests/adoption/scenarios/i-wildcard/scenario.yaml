@@ -12,14 +12,13 @@ seed:
       team: search
 provisions:
   "<YOUR REDIS HOST>":
-    gap: redis-configured:no-redis-guidance
-    compose: redis.compose.yml
+    readme: redis-service
     value: redis
 confirm:
   key: search-app
   model: openai/gpt-4o
 fallback:
-  team: search
+  team: "{team:search}"
   route: "openai/*"
   fallback: chat-cheap
   degrade_at: 75
@@ -28,5 +27,4 @@ drive:
   key: search-app
   model: openai/gpt-4o
 expected_gaps:
-  - redis-configured:no-redis-guidance
-  - drive:refused-before-downgrade
+  - fallback:check-failed
