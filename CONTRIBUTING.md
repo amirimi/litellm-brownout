@@ -15,7 +15,7 @@ uv sync
 uv run pytest -m "not e2e"
 ```
 
-The unit and seam suites hold 315 tests and need no Redis or gateway. One boundary seam skips on
+The unit and seam suites hold 381 tests and need no Redis or gateway. One boundary seam skips on
 each release, because the shrink and refuse-whole seams split by release. `decide` and `resolve` are
 pure functions tested with plain values. Every outside dependency of the pipeline sits behind a
 protocol in `src/brownout/ports.py`, so the gateway tests inject fakes, and the permission and
@@ -27,7 +27,7 @@ plugin depends on, such as the signature of a private helper, the shape of a res
 guardrails merging before the pre-call hook. A LiteLLM release that changes one of them fails with
 that behaviour's name.
 
-The end-to-end sequence holds 10 tests and runs on mock routes. It spends no provider money and
+The end-to-end sequence holds 12 tests and runs on mock routes. It spends no provider money and
 still exercises real reservations, a real Redis counter and the native ceiling. It reads the
 plugin's announcements from `docker compose logs litellm` and the request facts from LiteLLM's
 `/spend/logs`. Real-provider
@@ -47,6 +47,33 @@ the manifest names, so two copies cannot run at once.
 write. LiteLLM buffers spend per team and flushes it every `PROXY_BATCH_WRITE_AT` seconds. A counter
 cleared in Redis is reseeded from the database row on the next read. The script therefore deletes
 the team, waits out the flush window, clears the counter and the claims, then recreates the team.
+
+## Adoption paths
+
+The adoption suite adopts brownout on stock LiteLLM gateways the way an operator would. For each
+scenario in `tests/adoption/scenarios/`, the runner starts its own compose project on a free port
+and seeds teams, keys and models through LiteLLM's API. It then runs the README's marked blocks as
+written and applies each fix `init` prints, filling in only the placeholders the scenario declares.
+The run continues through `--write`, `check`, the install line, the confirm request, a first
+fallback and a drive to the downgrade. Mock responses keep every run free.
+
+```bash
+BROWNOUT_ADOPTION=1 uv run pytest -m adoption
+BROWNOUT_ADOPTION=1 BROWNOUT_ADOPTION_SCENARIOS=a-config-models BROWNOUT_ADOPTION_RELEASES=v1.95.1 uv run pytest -m adoption
+```
+
+A step the runner cannot take from printed text is a gap. Each scenario lists its gaps in
+`expected_gaps`, and its test passes only when a run meets exactly those. A fix that closes a gap
+fails the test until its entry is removed. A new gap fails it until someone decides whether to fix
+or record it. The runner substitutes three things in the README's blocks: the gateway URL, the local
+wheel for the PyPI package, and the LiteLLM image tag. Every step's command and output lands in
+`transcript.log` in the scenario's temporary directory.
+
+The README marks the blocks the runner runs with `<!-- adoption: name -->` comments, so a marker
+moves with its block. A scenario directory holds `scenario.yaml`, the gateway's `config.yaml`, and
+optionally a `compose.yml` overlay and any file the config includes. The `adoption` workflow runs
+every scenario on 1.95.1 and 1.104.2 weekly and on pull requests that touch `init`, `check`, the
+README or the docs.
 
 ## Supported LiteLLM releases
 

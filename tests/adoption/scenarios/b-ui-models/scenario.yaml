@@ -1,0 +1,49 @@
+description: >
+  Models added through the admin UI with their prices, so they live in LiteLLM's database and
+  config.yaml lists none. Teams and keys come from the API, and there is no Redis.
+seed:
+  models:
+    - model_name: chat
+      litellm_params:
+        model: openai/mock-chat
+        api_key: sk-mock
+        mock_response: "MOCK chat. Padded so a synthetic completion carries enough output tokens to move a small team budget in a handful of calls."
+        input_cost_per_token: 0.0001
+        output_cost_per_token: 0.001
+      model_info: {}
+    - model_name: chat-cheap
+      litellm_params:
+        model: openai/mock-chat-cheap
+        api_key: sk-mock
+        mock_response: "MOCK chat-cheap. The smaller model the chat route falls back to once the team budget fills."
+        input_cost_per_token: 0.00005
+        output_cost_per_token: 0.0005
+      model_info: {}
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: [chat, chat-cheap]
+  keys:
+    - alias: search-app
+      team: search
+provisions:
+  "<YOUR REDIS HOST>":
+    gap: redis-configured:no-redis-guidance
+    compose: redis.compose.yml
+    value: redis
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps:
+  - redis-configured:no-redis-guidance
+  - fallback:nowhere-to-add

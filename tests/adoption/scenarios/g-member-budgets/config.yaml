@@ -1,0 +1,19 @@
+model_list:
+  - model_name: chat
+    litellm_params:
+      model: openai/mock-chat
+      api_key: os.environ/OPENAI_API_KEY
+      mock_response: "MOCK chat. Padded so a synthetic completion carries enough output tokens to move a small team budget in a handful of calls."
+      input_cost_per_token: 0.0001
+      output_cost_per_token: 0.001
+  - model_name: chat-cheap
+    litellm_params:
+      model: openai/mock-chat-cheap
+      api_key: os.environ/OPENAI_API_KEY
+      mock_response: "MOCK chat-cheap. The smaller model the chat route falls back to once the team budget fills."
+      input_cost_per_token: 0.00005
+      output_cost_per_token: 0.0005
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

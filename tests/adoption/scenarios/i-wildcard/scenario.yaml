@@ -1,0 +1,32 @@
+description: >
+  A wildcard model group routes every openai/* model through one priced deployment, and the team
+  may call the wildcard and the cheap group. There is no Redis.
+seed:
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: ["openai/*", chat-cheap]
+  keys:
+    - alias: search-app
+      team: search
+provisions:
+  "<YOUR REDIS HOST>":
+    gap: redis-configured:no-redis-guidance
+    compose: redis.compose.yml
+    value: redis
+confirm:
+  key: search-app
+  model: openai/gpt-4o
+fallback:
+  team: search
+  route: "openai/*"
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: openai/gpt-4o
+expected_gaps:
+  - redis-configured:no-redis-guidance
+  - drive:refused-before-downgrade

@@ -1,0 +1,13 @@
+version: "v1"
+teams:
+  "{team:search}":
+    policy_epoch: "search-v1"
+    envelope_usd: 2.0
+    budget_duration: "7d"
+    warn_tiers: [75, 90]
+    routes: {}
+  ghost-team:
+    policy_epoch: "ghost-team-v1"
+    envelope_usd: 10.0
+    budget_duration: "7d"
+    routes: {}

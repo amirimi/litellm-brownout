@@ -1,0 +1,45 @@
+description: >
+  One team has no budget, no window and an empty model list, which LiteLLM reads as every model.
+  Another has a two-day window, which does not tumble with LiteLLM's resets. There is no Redis.
+seed:
+  teams:
+    - alias: search
+      models: []
+    - alias: ops
+      max_budget: 5.0
+      budget_duration: 2d
+      models: [chat]
+  keys:
+    - alias: search-app
+      team: search
+    - alias: ops-app
+      team: ops
+choices:
+  - rule: team-in-manifest
+    subject: "{team:search}"
+    values:
+      "<YOUR BUDGET>": "1.0"
+      '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">': '"7d"'
+  - rule: duration-tumbles
+    subject: "{team:ops}"
+    values:
+      '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">': '"1d"'
+provisions:
+  "<YOUR REDIS HOST>":
+    gap: redis-configured:no-redis-guidance
+    compose: redis.compose.yml
+    value: redis
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps:
+  - redis-configured:no-redis-guidance

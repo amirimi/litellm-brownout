@@ -1,0 +1,31 @@
+description: >
+  The operator already keeps a manifest. It sets search's envelope to 2.0 while LiteLLM says 1.0,
+  names a team LiteLLM lacks, and misses the ops team. init runs with --manifest theirs.yaml.
+seed:
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: [chat, chat-cheap]
+    - alias: ops
+      max_budget: 5.0
+      budget_duration: 7d
+      models: [chat]
+  keys:
+    - alias: search-app
+      team: search
+init_arguments: --manifest theirs.yaml
+templates: [theirs.yaml]
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps: []

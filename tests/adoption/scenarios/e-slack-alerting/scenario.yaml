@@ -1,0 +1,33 @@
+description: >
+  Slack alerting is on with LiteLLM's default alert types, which include budget alerts. There is no
+  Redis, and models are priced in config.yaml.
+seed:
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: [chat, chat-cheap]
+  keys:
+    - alias: search-app
+      team: search
+environment:
+  SLACK_WEBHOOK_URL: http://127.0.0.1:9/slack
+provisions:
+  "<YOUR REDIS HOST>":
+    gap: redis-configured:no-redis-guidance
+    compose: redis.compose.yml
+    value: redis
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps:
+  - redis-configured:no-redis-guidance
