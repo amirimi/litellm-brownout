@@ -32,13 +32,35 @@ class GatewayFile:
 
 
 GroupLookup = Callable[[str], ModelGroup | None]
+DeploymentPrices = tuple[float | None, float | None]
+UNPRICED: Final[DeploymentPrices] = (None, None)
 
 
 def is_priced(group: ModelGroup) -> bool:
     return has_usable_prices(group.input_cost_per_token, group.output_cost_per_token)
 
 
-def group_price(values: Sequence[float | None]) -> float | None:
+def group_from_deployments(
+    name: str,
+    prices: Sequence[DeploymentPrices],
+    data_classes: tuple[str | None, ...],
+) -> ModelGroup:
+    usable: Final = [_usable(deployment) for deployment in prices]
+    return ModelGroup(
+        name=name,
+        input_cost_per_token=_group_price([pair[0] for pair in usable]),
+        output_cost_per_token=_group_price([pair[1] for pair in usable]),
+        data_classes=data_classes,
+    )
+
+
+def _usable(prices: DeploymentPrices) -> DeploymentPrices:
+    if has_usable_prices(prices[0], prices[1]):
+        return prices
+    return UNPRICED
+
+
+def _group_price(values: Sequence[float | None]) -> float | None:
     known: Final = [value for value in values if value is not None]
     if len(known) != len(values) or not known:
         return None

@@ -37,6 +37,7 @@ CHECK_COMMAND: Final = "brownout check"
 CHECK_PASSED: Final = "brownout check passed"
 SERVED_HEADER: Final = "x-brownout-route-served"
 DEGRADED_HEADER: Final = "x-brownout-degraded-from"
+REFUSAL_REASON: Final = re.compile(r'"reason": *"(?P<reason>[a-z_]+)"')
 TRACKED_VARIABLES: Final = ("LITELLM_MASTER_KEY", "BROWNOUT_INIT_KEY")
 GATEWAY_CONFIG: Final = "config.yaml"
 WRITTEN_CONFIG: Final = "brownout.config.yaml"
@@ -349,6 +350,12 @@ class Adoption:
             {"<A TEAM KEY>": self.seeded.keys[call.key], "<A MODEL>": call.model},
         )
         result: Final = self.shell.run(block)
+        refused: Final = REFUSAL_REASON.search(result.stdout)
+        if refused is not None:
+            raise PathStop(
+                f"confirm:{refused['reason']}",
+                f"the README's confirm request was refused: {_excerpt(result.stdout)}",
+            )
         if SERVED_HEADER not in result.stdout.lower():
             raise PathStop(
                 "confirm:no-header",

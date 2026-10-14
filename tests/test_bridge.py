@@ -16,6 +16,7 @@ from brownout.policy import (
     WantsDegrade,
 )
 from brownout.refusals import Refusal, RefusalReason, RuleId
+from brownout.rules import is_priced
 
 from .support import make_auth
 
@@ -296,6 +297,7 @@ def test_every_governed_request_has_its_fallbacks_emptied(guardrails, outcome):
     assert applied["fallbacks"] == []
     assert applied["context_window_fallbacks"] == []
     assert applied["content_policy_fallbacks"] == []
+    assert applied["disable_fallbacks"] is True
     assert applied["router_settings_override"] == team_settings
 
 
@@ -379,24 +381,46 @@ def test_an_unreadable_release_refuses_to_start():
         bridge.require_supported_litellm("main")
 
 
-def test_the_live_gateway_state_reads_prices_classes_and_settings():
-    router = litellm.Router(
+def _deployment(
+    name: str, model: str, prices: tuple[float, float] | None, info: dict | None = None
+) -> dict:
+    params: dict = {"model": model, "api_key": "sk-state"}
+    if prices is not None:
+        params["input_cost_per_token"] = prices[0]
+        params["output_cost_per_token"] = prices[1]
+    return {"model_name": name, "litellm_params": params, "model_info": info or {}}
+
+
+@pytest.fixture
+def state_router(monkeypatch) -> litellm.Router:
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    return litellm.Router(
         model_list=[
-            {
-                "model_name": "state-primary",
-                "litellm_params": {
-                    "model": "openai/state-primary",
-                    "api_key": "sk-state",
-                    "input_cost_per_token": 0.0001,
-                    "output_cost_per_token": 0.001,
-                },
-                "model_info": {"data_class": "internal"},
-            }
+            _deployment(
+                "state-primary",
+                "openai/state-primary",
+                (0.0001, 0.001),
+                {"data_class": "internal"},
+            ),
+            _deployment("state-mixed", "openai/state-mixed-priced", (0.0001, 0.001)),
+            _deployment("state-mixed", "openai/state-mixed-unpriced", None),
+            _deployment(
+                "state-info",
+                "openai/state-info",
+                None,
+                {"input_cost_per_token": 0.0002, "output_cost_per_token": 0.002},
+            ),
+            _deployment("state-mapped", "openai/gpt-4o-mini", None),
+            _deployment("openai/*", "openai/*", None),
         ],
+        model_group_alias={"state-alias": "state-primary"},
         fallbacks=[{"state-primary": ["elsewhere"]}],
     )
+
+
+def test_the_live_gateway_state_reads_prices_classes_and_settings(state_router):
     state = bridge.LiteLLMGatewayState(
-        lambda: router, lambda: {"fail_closed_budget_enforcement": True}
+        lambda: state_router, lambda: {"fail_closed_budget_enforcement": True}
     )
 
     group = state.model_group("state-primary")
@@ -404,14 +428,65 @@ def test_the_live_gateway_state_reads_prices_classes_and_settings():
     assert (group.input_cost_per_token, group.output_cost_per_token) == (0.0001, 0.001)
     assert group.data_classes == ("internal",)
     assert state.model_group("never-configured") is None
-    assert state.serves("state-primary", "team-a")
     settings = state.settings()
     assert settings.fail_closed_budget_enforcement is True
     assert settings.disable_budget_reservation is False
+
+
+@pytest.mark.parametrize(
+    ("name", "priced"),
+    [
+        pytest.param("state-primary", True, id="explicit"),
+        pytest.param("state-info", True, id="model-info"),
+        pytest.param("state-mapped", True, id="cost-map"),
+        pytest.param("state-mixed", False, id="one-unpriced-deployment"),
+    ],
+)
+def test_a_group_is_priced_by_what_litellm_bills_each_deployment(
+    state_router, name, priced
+):
+    state = bridge.LiteLLMGatewayState(lambda: state_router, dict)
+
+    group = state.model_group(name)
+
+    assert group is not None
+    assert is_priced(group) is priced
+
+
+@pytest.mark.parametrize(
+    ("name", "concrete"),
+    [
+        pytest.param("state-primary", True, id="model-group"),
+        pytest.param("state-alias", False, id="router-alias"),
+        pytest.param("openai/*", False, id="wildcard"),
+        pytest.param("openai/gpt-4o", False, id="wildcard-served"),
+        pytest.param("state-primary,state-mixed", False, id="model-list"),
+        pytest.param("never-configured", False, id="unknown"),
+    ],
+)
+def test_only_a_configured_model_name_is_a_concrete_group(state_router, name, concrete):
+    state = bridge.LiteLLMGatewayState(lambda: state_router, dict)
+
+    assert state.is_concrete(name) is concrete
+
+
+def test_a_deployment_id_is_not_a_concrete_group(state_router):
+    state = bridge.LiteLLMGatewayState(lambda: state_router, dict)
+    deployment_id = state_router.model_list[0]["model_info"]["id"]
+
+    assert state.is_concrete(deployment_id) is False
+
+
+def test_candidates_are_priced_one_deployment_at_a_time(state_router):
+    state = bridge.LiteLLMGatewayState(lambda: state_router, dict)
+    mixed = state_router.get_model_list(model_name="state-mixed")
+
+    assert is_priced(state.candidate_group("state-mixed", mixed[:1]))
+    assert not is_priced(state.candidate_group("state-mixed", mixed))
 
 
 def test_the_gateway_state_without_a_router_serves_nothing():
     state = bridge.LiteLLMGatewayState(lambda: None, dict)
 
     assert state.model_group("anything") is None
-    assert state.serves("anything", "team-a") is False
+    assert state.is_concrete("anything") is False

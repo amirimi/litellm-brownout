@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from .events import Event
 from .policy import Permission
@@ -41,7 +42,11 @@ class Guardrails(Protocol):
 class GatewayState(Protocol):
     def model_group(self, name: str) -> ModelGroup | None: ...
 
-    def serves(self, name: str, team_id: str) -> bool: ...
+    def candidate_group(
+        self, name: str, deployments: Sequence[Mapping[str, Any]]
+    ) -> ModelGroup: ...
+
+    def is_concrete(self, name: str) -> bool: ...
 
     def settings(self) -> GatewaySettings: ...
 

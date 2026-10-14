@@ -29,6 +29,7 @@ class RuleId(StrEnum):
     TEAM_EXISTS = "team-exists"
     FALLBACK_IN_TEAM_MODELS = "fallback-in-team-models"
     MEMBER_HAS_NO_BUDGET = "member-has-no-budget"
+    MODEL_IS_A_GROUP = "model-is-a-group"
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class RefusalReason(StrEnum):
     BUDGET_CEILING_DRIFT = "budget_ceiling_drift"
     GATEWAY_RULE_VIOLATED = "gateway_rule_violated"
     SPEND_COUNTER_UNREADABLE = "spend_counter_unreadable"
+    MODEL_NOT_A_GROUP = "model_not_a_group"
 
 
 @dataclass(frozen=True)

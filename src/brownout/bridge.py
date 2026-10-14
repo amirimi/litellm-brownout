@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from importlib.metadata import version as installed_version
 from typing import Any, Final, Literal, assert_never
@@ -16,8 +16,8 @@ from litellm.proxy.auth.auth_checks import (
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 
-from .gateway_config import declared_data_class, settings_from_general
-from .manifest import TeamPolicy
+from .gateway_config import declared_data_class, price, settings_from_general
+from .manifest import WILDCARD, TeamPolicy
 from .policy import (
     Decision,
     Degraded,
@@ -30,7 +30,13 @@ from .policy import (
 )
 from .ports import Caller, Guardrails
 from .refusals import Refusal, RefusalReason, RuleId
-from .rules import GatewaySettings, ModelGroup
+from .rules import (
+    UNPRICED,
+    DeploymentPrices,
+    GatewaySettings,
+    ModelGroup,
+    group_from_deployments,
+)
 
 logger: Final = logging.getLogger("brownout")
 
@@ -55,6 +61,9 @@ NEUTRALISED_FALLBACK_KEYS: Final = (
     "content_policy_fallbacks",
 )
 METADATA_CONTAINERS: Final = ("metadata", "litellm_metadata")
+DISABLE_FALLBACKS_KEY: Final = "disable_fallbacks"
+TEAM_ID_KEY: Final = "user_api_key_team_id"
+SERVED_ROUTE_KEY: Final = "served_route"
 REASON_DEGRADED: Final = "degrade_tier_reached"
 REASON_REJECTED: Final = "fallback_rejected"
 
@@ -232,24 +241,45 @@ class LiteLLMGatewayState:
         router = self._router()
         if router is None:
             return None
-        info = router.get_model_group_info(model_group=name)
-        if info is None:
+        deployments = router.get_model_list(model_name=name) or []
+        if not deployments:
             return None
-        return ModelGroup(
-            name=name,
-            input_cost_per_token=info.input_cost_per_token,
-            output_cost_per_token=info.output_cost_per_token,
-            data_classes=tuple(
+        return self.candidate_group(name, deployments)
+
+    def candidate_group(
+        self, name: str, deployments: Sequence[Mapping[str, Any]]
+    ) -> ModelGroup:
+        return group_from_deployments(
+            name,
+            [self._billed_prices(deployment) for deployment in deployments],
+            tuple(
                 declared_data_class(deployment.get("model_info") or {})
-                for deployment in router.get_model_list(model_name=name) or []
+                for deployment in deployments
             ),
         )
 
-    def serves(self, name: str, team_id: str) -> bool:
+    def is_concrete(self, name: str) -> bool:
+        router = self._router()
+        if router is None or WILDCARD in name:
+            return False
+        return any(
+            deployment.get("model_name") == name for deployment in router.model_list
+        )
+
+    def _billed_prices(self, deployment: Mapping[str, Any]) -> DeploymentPrices:
         router = self._router()
         if router is None:
-            return False
-        return name in router.get_model_names(team_id=team_id)
+            return UNPRICED
+        info = router.get_deployment_model_info(
+            model_id=str((deployment.get("model_info") or {}).get("id")),
+            model_name=str((deployment.get("litellm_params") or {}).get("model")),
+        )
+        if info is None:
+            return UNPRICED
+        return (
+            price(info.get("input_cost_per_token")),
+            price(info.get("output_cost_per_token")),
+        )
 
     def settings(self) -> GatewaySettings:
         return settings_from_general(self._general_settings())
@@ -335,6 +365,26 @@ def _own_hold(auth: UserAPIKeyAuth) -> float:
     )
 
 
+def request_team(data: Mapping[str, Any]) -> str | None:
+    for container in METADATA_CONTAINERS:
+        metadata = data.get(container)
+        if not isinstance(metadata, dict):
+            continue
+        team_id = metadata.get(TEAM_ID_KEY)
+        if isinstance(team_id, str):
+            return team_id
+    return None
+
+
+def decided_route(field: Mapping[str, Any] | None) -> str | None:
+    if field is None:
+        return None
+    route: Final = field.get(SERVED_ROUTE_KEY)
+    if isinstance(route, str):
+        return route
+    return None
+
+
 def requested_model(data: dict) -> str:
     return str(data.get("model") or "")
 
@@ -384,7 +434,7 @@ def governed_field(
     field: dict[str, Any] = {
         "requested_route": decision.route,
         "outcome": outcome_name(outcome),
-        "served_route": served_route(outcome),
+        SERVED_ROUTE_KEY: served_route(outcome),
     }
     optional = {
         "budget_tier": decision.budget_tier,
@@ -427,6 +477,7 @@ def caller_routing_keys(data: dict) -> list[str]:
 def apply(data: dict, outcome: Outcome, guardrails: Guardrails) -> dict:
     for key in NEUTRALISED_FALLBACK_KEYS:
         data[key] = []
+    data[DISABLE_FALLBACKS_KEY] = True
     match outcome:
         case Served() | Rejected():
             return data
@@ -441,7 +492,7 @@ def headers(
     data: dict, response: Any, litellm_call_info: dict[str, Any] | None
 ) -> dict[str, str] | None:
     field = read_field(data)
-    if field is None or "served_route" not in field:
+    if field is None or SERVED_ROUTE_KEY not in field:
         return None
     degraded_from = None
     if field.get("outcome") == OUTCOME_DEGRADED:
@@ -453,7 +504,7 @@ def headers(
         HEADER_DEGRADATION_REASON: field.get("degradation_reason"),
     }
     if response is not None:
-        disclosed[HEADER_ROUTE_SERVED] = field["served_route"]
+        disclosed[HEADER_ROUTE_SERVED] = field[SERVED_ROUTE_KEY]
         disclosed[HEADER_DEPLOYMENT_ID] = (litellm_call_info or {}).get("model_id")
     result: Final = {
         name: str(value) for name, value in disclosed.items() if value is not None
@@ -475,6 +526,7 @@ def http_error(refusal: Refusal) -> HTTPException:
             | RefusalReason.BUDGET_CEILING_DRIFT
             | RefusalReason.GATEWAY_RULE_VIOLATED
             | RefusalReason.SPEND_COUNTER_UNREADABLE
+            | RefusalReason.MODEL_NOT_A_GROUP
         ):
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             error = "brownout_unavailable"

@@ -334,6 +334,8 @@ class _Scanner(ast.NodeVisitor):
     def _attribute(self, owner: str, attribute: str) -> None:
         if owner in self.scopes[-1].members and attribute != MAPPING_READER:
             self._record("member", (attribute,))
+        if owner in self.scopes[-1].routers:
+            self._record("router", (attribute,))
         if owner in self.facts.litellm_modules:
             self._record("litellm", (attribute,))
 

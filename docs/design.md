@@ -1,20 +1,22 @@
 # Design
 
-The plugin owns two stages of a LiteLLM request and configures the rest. A caller's request is
+The plugin owns three stages of a LiteLLM request and configures the rest. A caller's request is
 authenticated, its worst case is reserved and its guardrails are merged. The plugin's pre-call hook
-then decides, the provider serves, the plugin's post-call hook discloses, and LiteLLM reconciles
-the reservation to the actual cost.
+then decides, the router gathers the deployments that may serve, and the plugin's deployment filter
+verifies them against the decision. The provider serves, the plugin's post-call hook discloses, and
+LiteLLM reconciles the reservation to the actual cost.
 
 ## Where the plugin sits
 
 ```
   PROVIDERS   ══════════════════════════════════════════════════════
                         ▲                              │
-                      5 │ dispatch            response │ 6
+                      6 │ dispatch            response │ 7
                         │                              ▼
   LITELLM     ──────────────────────────────────────────────────────
-                 4  pre_call hook   ★    │   7  post_call hook   ★
-                 3  merge guardrails     │   8  reconcile R to actual
+                 5  deployment filter ★  │   8  post_call hook   ★
+                 4  pre_call hook   ★    │   9  reconcile R to actual
+                 3  merge guardrails     │
                  2  reserve worst case R │
                  1  authenticate         │
               ──────────────────────────────────────────────────────
@@ -23,7 +25,7 @@ the reservation to the actual cost.
                         │ /v1/chat/completions         ▼
   CALLER      ══════════════════════════════════════════════════════
 
-              ★  the two stages this plugin owns
+              ★  the three stages this plugin owns
 ```
 
 Stage 4 is where the plugin decides, and its position sets three constraints.
@@ -32,7 +34,7 @@ Stage 4 is where the plugin decides, and its position sets three constraints.
 |---|---|
 | after stage 2 | the counter it reads already holds a charge for a request that has not run |
 | after stage 2 | on LiteLLM 1.101 and newer the request that exhausts the budget never reaches it, so degradation fires below 100%. On 1.95.1 to 1.100 requests keep arriving with their holds shrunk until no headroom is left, and each is judged like any other |
-| before stage 5 | it cannot know which deployment will serve, so price is a property of the route |
+| before stage 5 | it cannot know which deployments the router will choose, so stage 5 checks each one against the decision and its billed price |
 
 ## Modules
 
@@ -108,7 +110,7 @@ lists the ones a rule enforces.
 | LiteLLM 1.95.1 to 1.100 can close a window above the envelope | Their `_apply_over_budget_reservation_policy` shrinks a hold that does not fit instead of refusing it, and admits requests until no headroom is left. Each admitted request can overrun its shrunk hold. That is at most one request's cost under serial traffic, and more when several shrunk requests are in flight at once. LiteLLM overwrites the hold's original size, so the plugin cannot tell a shrunk hold from a full one, and it logs a warning at startup instead. Run 1.101 or newer for the hard boundary |
 | Request compatibility between a route and its fallback goes unchecked | Context capacity, tools, structured output and modalities can differ. With `drop_params: true`, as in the lab config, a parameter the fallback does not support may be dropped silently. Check each fallback against the workload before it carries real traffic |
 | The counter resets after the window does | LiteLLM's reset job zeroes the counter every 597 to 605 seconds by default, and later if the job is delayed. Until it runs, the previous window's spend can degrade requests and consume the new window's claims. A team that ends a window above a tier therefore gets false announcements at the next boundary, and none when it really crosses that tier later in the window. Closing this needs the team's persisted `budget_reset_at` |
-| Router fallbacks never apply to governed chat completions | The plugin empties every fallback list on each governed request, so a gateway, key or team that relies on cross-group fallbacks for outage resilience loses them on chat. Failover between deployments of one route by `order` and cooldown still works |
+| Router fallbacks never apply to governed chat completions | The plugin empties every fallback list and sets `disable_fallbacks` on each governed request, so a gateway, key or team that relies on cross-group fallbacks for outage resilience loses them on chat. Failover between deployments of one route by `order` and cooldown still works |
 | A fallback that errors fails the request | The caller receives the provider's error, and nothing retries the primary. When a large team crosses `degrade_at`, all its traffic for that route moves to the fallback at once, so the provider quota behind the fallback has to absorb the jump |
 | Losing Redis keys repeats announcements | A flush, or an eviction policy such as `volatile-lru` that evicts keys with a TTL first, removes the plugin's claims, and every transition in the window is announced again |
 | A LiteLLM release that renames a private helper stops startup | The bridge imports three private helpers when LiteLLM loads the callback, so a rename fails the import and the gateway does not start. Pin the image tag and upgrade only to a release the `litellm matrix` workflow has passed |
@@ -121,4 +123,4 @@ lists the ones a rule enforces.
 | Money is a `float` | It matches the counter LiteLLM increments with `INCRBYFLOAT`. Nothing here is the system of record for spend |
 | The reservation is sized on the requested route, never the served one | Reservation runs at authentication and the rewrite runs after it, so a degraded request still needs the primary's worst case to fit the headroom. Admission therefore stops at the envelope minus the requested route's worst case, and a degrade threshold above that ratio never fires. Keep `max_tokens` small relative to the envelope, as the lab does |
 | A request LiteLLM cannot estimate places no hold | `reserve_budget_for_request` returns before reserving when the worst-case estimate is `None` ([`budget_reservation.py:236-237`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236-L237)). Rule `model-priced` refuses a chat request for a model LiteLLM cannot price. Non-chat call types pass through the plugin untouched, so an embeddings, audio or image route the estimate cannot price is admitted on LiteLLM's read alone |
-| The request rules cost about 0.1 to 0.3 ms | The pre-call hook reads the requested model group through `Router.get_model_group_info`, at about 0.1 ms on the lab config, and the fallback group too when a downgrade is wanted |
+| The request rules cost well under a millisecond | The pre-call hook reads each deployment's billed price through `Router.get_deployment_model_info` and checks the name against `Router.model_list`, at about 0.01 ms on the lab config, and the fallback group too when a downgrade is wanted |

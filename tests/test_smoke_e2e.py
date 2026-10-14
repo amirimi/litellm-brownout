@@ -32,6 +32,9 @@ LAB_TEAM_ID: Final = "budget-lab"
 LAB_ROUTE: Final = "budget-lab-primary"
 DEGRADED_ROUTE: Final = "budget-lab-degraded"
 FAILING_ROUTE: Final = "budget-lab-failing"
+STRICT_ROUTE: Final = "budget-lab-strict"
+ALIAS_NAME: Final = "budget-lab-alias"
+MIXED_GROUP: Final = "budget-lab-mixed"
 LAB_ENVELOPE_USD: Final = 1.0
 LAB_PRIMARY_WORST_CASE_USD: Final = 0.0408
 MAX_TOKENS: Final = 40
@@ -155,11 +158,44 @@ def caller_fallback(lab_run: LabRun) -> Answer:
 
 
 @pytest.fixture(scope="module")
+def alias_answer(lab_run: LabRun) -> Answer:
+    return _ask(lab_run.key, {"model": ALIAS_NAME})
+
+
+@pytest.fixture(scope="module")
+def mixed_answer(lab_run: LabRun) -> Answer:
+    models = _team_models()
+    _update_team({"models": [*models, MIXED_GROUP]})
+    try:
+        return _ask(lab_run.key, {"model": MIXED_GROUP})
+    finally:
+        _update_team({"models": models})
+
+
+@pytest.fixture(scope="module")
+def rate_limited(lab_run: LabRun) -> list[Answer]:
+    key = _generate_key(
+        {
+            "team_id": LAB_TEAM_ID,
+            "model_rpm_limit": {STRICT_ROUTE: 1},
+            "router_settings": {"fallbacks": [{STRICT_ROUTE: [DEGRADED_ROUTE]}]},
+        }
+    )
+    try:
+        return [_ask(key, {"model": STRICT_ROUTE}) for _ in range(2)]
+    finally:
+        _delete_keys([key])
+
+
+@pytest.fixture(scope="module")
 def drained(
     lab_run: LabRun,
     forged: ForgedRequest,
     team_fallback: Answer,
     caller_fallback: Answer,
+    alias_answer: Answer,
+    mixed_answer: Answer,
+    rate_limited: list[Answer],
 ) -> Observation:
     with httpx.Client(base_url=GATEWAY, timeout=REQUEST_TIMEOUT_SECONDS) as client:
         return _drive_to_exhaustion(client, lab_run.key)
@@ -188,13 +224,28 @@ def _require_zero_start() -> None:
 
 
 def _set_team_router_settings(router_settings: dict[str, Any]) -> None:
+    _update_team({"router_settings": router_settings})
+
+
+def _update_team(fields: dict[str, Any]) -> None:
     response = httpx.post(
         f"{GATEWAY}/team/update",
         headers=admin_headers(),
-        json={"team_id": LAB_TEAM_ID, "router_settings": router_settings},
+        json={"team_id": LAB_TEAM_ID, **fields},
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
+
+
+def _team_models() -> list[str]:
+    response = httpx.get(
+        f"{GATEWAY}/team/info",
+        params={"team_id": LAB_TEAM_ID},
+        headers=admin_headers(),
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return list(response.json()["team_info"]["models"])
 
 
 def _ask(key: str, overrides: dict[str, Any]) -> Answer:
@@ -472,6 +523,30 @@ def test_caller_sent_context_window_fallbacks_are_refused(
 ) -> None:
     assert caller_fallback.status_code == 400
     assert "caller_routing_not_permitted" in caller_fallback.body
+
+
+@requires_stack
+def test_a_router_alias_is_refused_before_routing(alias_answer: Answer) -> None:
+    assert alias_answer.status_code == 503
+    assert "model_not_a_group" in alias_answer.body
+
+
+@requires_stack
+def test_a_group_with_an_unpriced_deployment_is_refused(mixed_answer: Answer) -> None:
+    assert mixed_answer.status_code == 503
+    assert "unpriced_model" in mixed_answer.body
+
+
+@requires_stack
+def test_a_local_rate_limit_never_retries_on_a_router_fallback(
+    rate_limited: list[Answer],
+) -> None:
+    first, second = rate_limited
+
+    assert first.status_code == 200
+    assert first.headers["x-brownout-route-served"] == STRICT_ROUTE
+    assert second.status_code == 429
+    assert "x-brownout-route-served" not in second.headers
 
 
 @dataclass(frozen=True)

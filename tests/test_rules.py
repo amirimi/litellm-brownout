@@ -11,6 +11,7 @@ from brownout.rules import (
     GatewaySettings,
     ModelGroup,
     file_rules,
+    group_from_deployments,
     is_priced,
     route_rules,
     settings_rules,
@@ -174,3 +175,23 @@ def test_what_counts_as_priced(input_cost, output_cost, priced):
     assert (
         is_priced(group("g", input_cost=input_cost, output_cost=output_cost)) is priced
     )
+
+
+@pytest.mark.parametrize(
+    "unpriced",
+    [
+        pytest.param((None, None), id="missing"),
+        pytest.param((0.0, 0.0), id="zero-as-1.95.1-reports-it"),
+        pytest.param((-1.0, 0.002), id="negative"),
+    ],
+)
+def test_a_group_with_one_unpriced_deployment_is_unpriced(unpriced):
+    group = group_from_deployments("mixed", [(0.001, 0.002), unpriced], ())
+
+    assert not is_priced(group)
+
+
+def test_a_group_takes_the_highest_price_of_its_priced_deployments():
+    group = group_from_deployments("pair", [(0.001, 0.004), (0.003, 0.002)], ())
+
+    assert (group.input_cost_per_token, group.output_cost_per_token) == (0.003, 0.004)

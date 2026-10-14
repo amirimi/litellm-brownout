@@ -6,7 +6,9 @@ that worst case does not fit. LiteLLM 1.95.1 to 1.100 shrink the hold to fit ins
 [the envelope boundary](#the-envelope-boundary) sets out. The plugin's pre-call hook then runs the request rules,
 reads the counter, decides, checks the caller's permission only if it wants a downgrade, rewrites
 the request if the downgrade is allowed, announces any claimed transition on the gateway log, and
-writes the request's facts into its LiteLLM metadata. The provider answers, the plugin's post-call
+writes the request's facts into its LiteLLM metadata. The router then gathers the deployments that
+may serve the request, and the plugin's deployment filter refuses it unless every one belongs to the
+group the plugin decided and carries a price LiteLLM bills. The provider answers, the plugin's post-call
 hook sets the disclosure headers from those facts, LiteLLM reconciles the hold to the actual cost,
 and every LiteLLM logging integration receives the facts with the request's log.
 
@@ -31,7 +33,7 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
 | LiteLLM's budget alerts are off and `coordination_redis` is configured | `brownout check` fails | `no-native-budget-alerts`, `redis-configured` |
 | Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | `brownout check` fails before deploy. A pairing that breaks after deploy withholds the downgrade, so the primary serves and the platform gets an incident | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
-| Routes and fallbacks name concrete model groups | A wildcard group such as `openai/*` never matches a request, so it would never degrade | `manifest-schema` |
+| Routes, fallbacks and requests name concrete model groups | An alias, a routing group or a wildcard group reaches its deployments only after the pre-call hook, so the plugin could not govern it | `manifest-schema`, `model-is-a-group` |
 | Only chat completions are governed | Embeddings, images, audio, `/v1/messages` and `/v1/responses` pass through untouched, at full price and without headers | Documented |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade. A request without `max_tokens` reserves the model's whole output | Documented, not checked |
@@ -102,13 +104,15 @@ says.
 | Condition | Response |
 |---|---|
 | Route reaches its declared threshold | Serve the declared fallback with tier and degradation headers, and announce `brownout_route_degraded` once per route per window |
-| A router fallback is configured for the gateway, a key or a team | Ignored on every governed request, because the plugin empties `fallbacks`, `context_window_fallbacks` and `content_policy_fallbacks` before dispatch. Failover between deployments of one route still works |
+| A router fallback is configured for the gateway, a key or a team | Ignored on every governed request, because the plugin empties `fallbacks`, `context_window_fallbacks` and `content_policy_fallbacks` and sets `disable_fallbacks` before dispatch. The last one also stops the retry LiteLLM's local rate limiter makes on a router fallback, so a rate-limited request gets LiteLLM's 429. Failover between deployments of one route still works |
 | The route the plugin chose returns a provider error | The caller receives the provider's error, and nothing retries the primary |
 | Team reaches 100% of its budget | LiteLLM's budget refusal at reservation time, a 429 up to 1.103 and a 422 by default from 1.104. Setting `litellm_settings.budget_exceeded_status_code: 429` restores the 429, as run on the 1.104.2 lab image. The plugin never sees that request |
 | Caller supplies `fallbacks`, `context_window_fallbacks`, `content_policy_fallbacks` or `mock_testing_fallbacks` | 400 `caller_routing_not_permitted`, rule `no-caller-routing`, naming the refused keys |
 | Key has no team, or its team is absent from the manifest | 503 `team_not_in_manifest`, rule `team-in-manifest`, plus a platform incident |
 | Key carries its own `max_budget` | 503 `key_has_own_budget`, rule `key-has-no-budget`, plus a platform incident |
-| Requested model has no price | 503 `unpriced_model`, rule `model-priced`, plus a platform incident |
+| Requested model is not a configured model group, such as a router alias, a routing group, a name a wildcard group serves, a deployment id or a list of models | 503 `model_not_a_group`, rule `model-is-a-group`, plus a platform incident |
+| Requested model has a deployment without a price LiteLLM bills | 503 `unpriced_model`, rule `model-priced`, plus a platform incident |
+| The router's candidate deployments leave the group the plugin decided, or one has no price | 503 from the deployment filter with the same reason and rule, which LiteLLM places in `error.provider_specific_fields` |
 | Runtime `team.max_budget` drifts from `envelope_usd` | 503 `budget_ceiling_drift`, rule `ceiling-matches-envelope`, plus a platform incident |
 | A gateway setting breaks a rule | 503 `gateway_rule_violated` naming the rule and its subject, plus a platform incident |
 | A fallback pairing breaks a rule after deploy, because the fallback was deleted, unpriced or reclassified | Below `degrade_at`, nothing changes. When a downgrade is wanted, the primary serves, the response discloses `fallback_rejected`, `brownout_fallback_rejected` carries `fallback_rule_violated`, and a `gateway_rule_violated` incident names the rule once per window. The permission check does not run |
@@ -236,13 +240,12 @@ cannot hide it.
 
 A rejection is `outside_caller_allowlist`, `entitlement_check_unavailable` or
 `fallback_rule_violated`. Incident reasons are
-`team_not_in_manifest`, `key_has_own_budget`, `unpriced_model`, `budget_ceiling_drift`,
+`team_not_in_manifest`, `key_has_own_budget`, `model_not_a_group`, `unpriced_model`, `budget_ceiling_drift`,
 `gateway_rule_violated`, `spend_counter_unreadable` and `entitlement_check_unavailable`, and each
 incident names its rule. Incidents are deduplicated once per window on their own claim key. An
 incident is the page-worthy condition, and it reaches only the log line.
 
-An `unpriced_model` incident is keyed on the model only when the model is a group the gateway's
-config declares, because that is a gap in pricing. Any other name is the caller's choice, so it
-raises at most one incident per team per window. Keyed on the name, a key holder could raise an
-unbounded number of platform incidents by inventing model names. The incident's
-`model_group_served` field says which case it was, and the caller gets the same 503 either way.
+An `unpriced_model` incident is keyed on the model group, because an unpriced deployment is a gap
+in pricing. A name that is not a group is the caller's choice, so its `model_not_a_group` incident
+is raised at most once per team per window. Keyed on the name, a key holder could raise an unbounded
+number of platform incidents by inventing model names.

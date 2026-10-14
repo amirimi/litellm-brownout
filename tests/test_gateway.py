@@ -48,7 +48,8 @@ async def refused_with(handler, auth, model: str, extra: dict[str, Any] | None =
 
 async def test_an_unpriced_model_fails_closed_and_pages_the_platform(team):
     sink = RecordingSink()
-    handler = build_handler(team, sink, spend=100.0)
+    gateway = FakeGateway.from_lab_config().serving("never-priced")
+    handler = build_handler(team, sink, spend=100.0, gateway=gateway)
 
     error = await refused_with(handler, make_auth(team), "never-priced")
 
@@ -72,8 +73,33 @@ async def test_made_up_model_names_raise_one_incident_per_team_per_window(team):
     assert [incident.as_payload()["model"] for incident in sink.incidents] == [
         "made-up-1"
     ]
-    assert sink.incidents[0].as_payload()["model_group_served"] is False
+    assert sink.incidents[0].as_payload()["reason"] == "model_not_a_group"
     assert len(store.claimed) == 1
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("budget-lab-alias", id="router-alias"),
+        pytest.param("openai/*", id="wildcard"),
+        pytest.param("openai/gpt-4o", id="wildcard-served"),
+        pytest.param("budget-lab-primary,budget-lab-degraded", id="model-list"),
+        pytest.param("c4d0a284486c0891820152b42132ee9f", id="deployment-id"),
+    ],
+)
+async def test_a_name_that_is_not_a_model_group_is_refused(team, name):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=100.0)
+
+    error = await refused_with(handler, make_auth(team), name)
+
+    assert error.status_code == 503
+    assert (error.detail["rule"], error.detail["reason"]) == (
+        "model-is-a-group",
+        "model_not_a_group",
+    )
+    assert error.detail["model"] == name
+    assert sink.tiers == []
 
 
 async def test_an_unpriced_model_group_the_gateway_serves_is_reported_per_group(team):
@@ -86,10 +112,10 @@ async def test_an_unpriced_model_group_the_gateway_serves_is_reported_per_group(
     for name in ("served-unpriced-a", "served-unpriced-b", "served-unpriced-a"):
         await refused_with(handler, make_auth(team), name)
 
-    assert [
-        (incident.as_payload()["model"], incident.as_payload()["model_group_served"])
-        for incident in sink.incidents
-    ] == [("served-unpriced-a", True), ("served-unpriced-b", True)]
+    assert [incident.as_payload()["model"] for incident in sink.incidents] == [
+        "served-unpriced-a",
+        "served-unpriced-b",
+    ]
 
 
 async def test_an_unreadable_counter_refuses_and_pages_the_platform(team):
@@ -324,7 +350,8 @@ async def test_the_keys_own_spend_logs_metadata_is_never_mutated(team):
 
 
 async def test_a_refusal_discloses_its_reason_before_raising(team):
-    handler = build_handler(team, RecordingSink(), spend=100.0)
+    gateway = FakeGateway.from_lab_config().serving("never-priced")
+    handler = build_handler(team, RecordingSink(), spend=100.0, gateway=gateway)
     data: dict[str, Any] = {"model": "never-priced", "messages": []}
 
     with pytest.raises(HTTPException):
@@ -867,3 +894,134 @@ async def test_a_degrade_threshold_raises_no_team_tier_of_its_own(team):
 
     assert [event.tier for event in sink.tiers] == [75]
     assert [event.degrade_at for event in sink.route_degradations] == [85]
+
+
+def deployment(group: str, input_cost: float | None = 1e-6) -> dict[str, Any]:
+    return {
+        "model_name": group,
+        "litellm_params": {
+            "model": f"openai/{group}",
+            "input_cost_per_token": input_cost,
+            "output_cost_per_token": input_cost,
+        },
+        "model_info": {"id": f"{group}-{input_cost}"},
+    }
+
+
+def routed(applied: dict, team_id: str | None) -> dict[str, Any]:
+    metadata = dict(applied.get("metadata") or {})
+    metadata["user_api_key_team_id"] = team_id
+    return {**applied, "metadata": metadata}
+
+
+async def filtered(handler, applied, candidates, messages=None):
+    if messages is None:
+        messages = [{"role": "user", "content": "hi"}]
+    return await handler.async_filter_deployments(
+        model=applied["model"],
+        healthy_deployments=candidates,
+        messages=messages,
+        request_kwargs=applied,
+    )
+
+
+async def filter_refusal(handler, applied, candidates):
+    with pytest.raises(HTTPException) as raised:
+        await filtered(handler, applied, candidates)
+    return raised.value
+
+
+async def test_the_filter_passes_priced_candidates_of_the_decided_group(team):
+    handler = build_handler(team, RecordingSink(), spend=100.0)
+    applied = routed(
+        await request(handler, make_auth(team), "budget-lab-primary"), team.team_id
+    )
+    candidates = [
+        deployment("budget-lab-primary"),
+        deployment("budget-lab-primary", 2e-6),
+    ]
+
+    assert await filtered(handler, applied, candidates) is candidates
+
+
+async def test_the_filter_passes_a_downgrade_to_its_fallback(team):
+    handler = build_handler(team, RecordingSink(), spend=950.0)
+    applied = routed(
+        await request(handler, make_auth(team), "budget-lab-primary"), team.team_id
+    )
+    assert applied["model"] == "budget-lab-degraded"
+    candidates = [deployment("budget-lab-degraded")]
+
+    assert await filtered(handler, applied, candidates) is candidates
+
+
+async def test_the_filter_refuses_a_candidate_from_another_group(team):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=100.0)
+    applied = routed(
+        await request(handler, make_auth(team), "budget-lab-primary"), team.team_id
+    )
+
+    error = await filter_refusal(
+        handler, applied, [deployment("budget-lab-primary"), deployment("elsewhere")]
+    )
+
+    assert error.status_code == 503
+    assert error.detail["reason"] == "model_not_a_group"
+    assert [incident.as_payload()["reason"] for incident in sink.incidents] == [
+        "model_not_a_group"
+    ]
+
+
+async def test_the_filter_refuses_an_unpriced_candidate(team):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=100.0)
+    applied = routed(
+        await request(handler, make_auth(team), "budget-lab-primary"), team.team_id
+    )
+
+    error = await filter_refusal(
+        handler,
+        applied,
+        [deployment("budget-lab-primary"), deployment("budget-lab-primary", None)],
+    )
+
+    assert error.status_code == 503
+    assert (error.detail["rule"], error.detail["reason"]) == (
+        "model-priced",
+        "unpriced_model",
+    )
+
+
+async def test_the_filter_refuses_a_governed_chat_request_brownout_never_saw(team):
+    handler = build_handler(team, RecordingSink(), spend=100.0)
+    unseen = routed({"model": "budget-lab-primary", "metadata": {}}, team.team_id)
+
+    error = await filter_refusal(handler, unseen, [deployment("budget-lab-primary")])
+
+    assert error.detail["reason"] == "model_not_a_group"
+
+
+@pytest.mark.parametrize(
+    ("team_id", "messages"),
+    [
+        pytest.param(
+            "not-in-the-manifest", [{"role": "user", "content": "hi"}], id="ungoverned"
+        ),
+        pytest.param(None, [{"role": "user", "content": "hi"}], id="no-team"),
+        pytest.param("budget-lab", None, id="non-chat"),
+    ],
+)
+async def test_the_filter_leaves_other_requests_untouched(team, team_id, messages):
+    handler = build_handler(team, RecordingSink(), spend=100.0)
+    unseen = routed({"model": "anything", "metadata": {}}, team_id)
+    candidates = [deployment("anything", None)]
+
+    result = await handler.async_filter_deployments(
+        model="anything",
+        healthy_deployments=candidates,
+        messages=messages,
+        request_kwargs=unseen,
+    )
+
+    assert result is candidates
