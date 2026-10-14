@@ -119,6 +119,41 @@ def test_a_deployment_without_explicit_prices_is_priced_from_the_cost_map():
     assert mapped.output_cost_per_token is not None
 
 
+def test_a_deployment_priced_in_model_info_is_priced_as_litellm_bills_it():
+    gateway = gateway_file_of(
+        {
+            "model_list": [
+                {
+                    "model_name": "listed",
+                    "litellm_params": {"model": "openai/never-mapped"},
+                    "model_info": {
+                        "input_cost_per_token": 3e-6,
+                        "output_cost_per_token": 4e-6,
+                    },
+                }
+            ]
+        }
+    )
+
+    listed = gateway.groups["listed"]
+    assert (listed.input_cost_per_token, listed.output_cost_per_token) == (3e-6, 4e-6)
+
+
+def test_the_lab_passes_with_its_prices_moved_into_model_info(tmp_path):
+    config = lab_gateway_config()
+    for deployment in config["model_list"]:
+        params = deployment["litellm_params"]
+        moved = {
+            key: params.pop(key)
+            for key in ("input_cost_per_token", "output_cost_per_token")
+            if key in params
+        }
+        deployment["model_info"] = {**deployment.get("model_info", {}), **moved}
+    config_path = write(tmp_path / "config.yaml", config)
+
+    assert check(config_path, LAB_MANIFEST, {}) == []
+
+
 def test_a_group_is_unpriced_when_any_deployment_is():
     gateway = gateway_file_of(
         {

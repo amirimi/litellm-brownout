@@ -140,35 +140,48 @@ def _deployment(source: Path, where: str, entry: Any) -> Deployment:
     params: Final = _optional_mapping(
         source, f"{where} litellm_params", entry.get("litellm_params")
     )
+    model_info: Final = _optional_mapping(
+        source, f"{where} model_info", entry.get("model_info")
+    )
     model: Final = params.get("model")
     if not isinstance(model, str) or not model:
         raise DocumentError(f"{source} {where} needs a litellm_params.model string")
     return Deployment(
         model_name=model_name,
         model=model,
-        input_cost_per_token=_explicit_price(
-            source, where, params, "input_cost_per_token"
+        input_cost_per_token=_written_price(
+            source, where, params, model_info, "input_cost_per_token"
         ),
-        output_cost_per_token=_explicit_price(
-            source, where, params, "output_cost_per_token"
+        output_cost_per_token=_written_price(
+            source, where, params, model_info, "output_cost_per_token"
         ),
-        data_class=declared_data_class(
-            _optional_mapping(source, f"{where} model_info", entry.get("model_info"))
-        ),
+        data_class=declared_data_class(model_info),
     )
 
 
-def _explicit_price(
-    source: Path, where: str, params: Mapping[str, Any], key: str
+def _written_price(
+    source: Path,
+    where: str,
+    params: Mapping[str, Any],
+    model_info: Mapping[str, Any],
+    key: str,
 ) -> float | None:
-    value: Final = params.get(key)
+    from_params: Final = _explicit_price(source, where, "litellm_params", params, key)
+    from_info: Final = _explicit_price(source, where, "model_info", model_info, key)
+    if from_params is not None:
+        return from_params
+    return from_info
+
+
+def _explicit_price(
+    source: Path, where: str, block: str, fields: Mapping[str, Any], key: str
+) -> float | None:
+    value: Final = fields.get(key)
     if value is None:
         return None
     read: Final = price(value)
     if read is None:
-        raise DocumentError(
-            f"{source} {where} litellm_params.{key} must be a finite number"
-        )
+        raise DocumentError(f"{source} {where} {block}.{key} must be a finite number")
     return read
 
 

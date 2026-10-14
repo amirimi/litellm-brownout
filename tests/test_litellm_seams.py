@@ -471,6 +471,18 @@ def billing_router(monkeypatch) -> litellm.Router:
                 },
             },
             {
+                "model_name": "seam-split",
+                "litellm_params": {
+                    "model": "openai/seam-split",
+                    "api_key": "sk-seam",
+                    "input_cost_per_token": 1e-6,
+                },
+                "model_info": {
+                    "input_cost_per_token": 9e-6,
+                    "output_cost_per_token": 8e-6,
+                },
+            },
+            {
                 "model_name": "seam-mapped",
                 "litellm_params": {"model": "openai/gpt-4o-mini", "api_key": "sk-seam"},
             },
@@ -501,6 +513,7 @@ def _billed(router: litellm.Router, name: str) -> tuple[object, object]:
     [
         pytest.param("seam-explicit", (1e-6, 2e-6), id="litellm-params"),
         pytest.param("seam-info", (3e-6, 4e-6), id="model-info"),
+        pytest.param("seam-split", (1e-6, 8e-6), id="litellm-params-first"),
         pytest.param("seam-mapped", (1.5e-7, 6e-7), id="cost-map"),
     ],
 )

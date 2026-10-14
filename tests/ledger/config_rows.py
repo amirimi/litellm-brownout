@@ -13,6 +13,10 @@ INPUTS: Final = "tests/test_inputs.py::"
 RULES: Final = "tests/test_rules.py::"
 ONBOARDING: Final = "tests/test_onboarding.py::"
 GATEWAY: Final = "tests/test_gateway.py::"
+SEAMS: Final = "tests/test_litellm_seams.py::"
+PRICE_ORDER: Final = (
+    f"{CONFIG}test_a_deployment_takes_each_price_from_litellm_params_then_model_info"
+)
 
 
 def _unreadable(*tests: str) -> Refused:
@@ -177,11 +181,16 @@ CONFIG_ROWS: Final = (
         ),
     ),
     Input(
-        shape="config litellm_params.input_cost_per_token and output_cost_per_token",
+        shape="config litellm_params and model_info input_cost_per_token and "
+        "output_cost_per_token",
         source="brownout",
-        parser="gateway_config._explicit_price",
+        parser="gateway_config._written_price",
         reads=(),
-        cites=("litellm/router.py:264@1.95.1",),
+        cites=(
+            "litellm/router.py:264@1.95.1",
+            "litellm/router.py:7483@1.95.1",
+            "litellm/types/router.py:467@1.95.1",
+        ),
         forms=(
             Form(
                 "a number or a numeric string such as 1e-4",
@@ -194,28 +203,58 @@ CONFIG_ROWS: Final = (
                 ),
             ),
             Form(
-                "absent or null",
+                "absent or null in both",
                 "the cost map's price",
                 Supported(
                     (
                         f"{CLI}test_a_deployment_without_explicit_prices_is_priced_from_the_cost_map",
+                        f"{PRICE_ORDER}[neither]",
                     )
                 ),
             ),
             Form(
-                "text, a boolean, or a value that is not finite",
+                "set only in model_info",
+                "the model_info price",
+                Supported(
+                    (
+                        f"{PRICE_ORDER}[model-info-only]",
+                        f"{CLI}test_a_deployment_priced_in_model_info_is_priced_as_litellm_bills_it",
+                        f"{CLI}test_the_lab_passes_with_its_prices_moved_into_model_info",
+                        f"{SEAMS}test_seam_a_deployment_reports_the_price_litellm_bills[model-info]",
+                    )
+                ),
+            ),
+            Form(
+                "one price in litellm_params and the other in model_info",
+                "each price from where it is set",
+                Supported((f"{PRICE_ORDER}[split-across-both]",)),
+            ),
+            Form(
+                "the same price in both, with different values",
+                "the litellm_params price, as LiteLLM bills it",
+                Supported(
+                    (
+                        f"{PRICE_ORDER}[litellm-params-first]",
+                        f"{SEAMS}test_seam_a_deployment_reports_the_price_litellm_bills[litellm-params-first]",
+                    )
+                ),
+            ),
+            Form(
+                "text, a boolean, an os.environ/ reference, or a value that is not "
+                "finite, in either mapping",
                 "unreadable",
                 _unreadable(
                     f"{MALFORMED}[price-words]",
                     f"{MALFORMED}[price-boolean]",
                     f"{MALFORMED}[price-infinite]",
+                    f"{MALFORMED}[price-from-environment]",
+                    f"{MALFORMED}[info-price-words]",
+                    f"{MALFORMED}[info-price-boolean]",
+                    f"{MALFORMED}[info-price-not-a-number]",
+                    f"{MALFORMED}[info-price-from-environment]",
+                    f"{MALFORMED}[info-price-unreadable-under-a-readable-one]",
                     f"{CLI}test_an_explicit_price_litellm_cannot_read_is_refused",
                 ),
-            ),
-            Form(
-                "set in model_info instead of litellm_params",
-                "unpriced to check, priced to LiteLLM",
-                Open("model-info-prices"),
             ),
         ),
     ),
@@ -243,6 +282,12 @@ CONFIG_ROWS: Final = (
             Form(
                 "the cost map LiteLLM fetched at import differs from the one it bundles",
                 "check may price a model the gateway does not",
+                Open("cost-map-source"),
+            ),
+            Form(
+                "model_info.base_model names another model",
+                "check prices the deployment's own model, and LiteLLM bills the base "
+                "model's entry",
                 Open("cost-map-source"),
             ),
         ),

@@ -26,13 +26,10 @@ WALKED_RELEASES: Final = (
 )
 
 OPEN_FINDINGS: Final[Mapping[str, str]] = {
-    "model-info-prices": (
-        "LiteLLM bills a deployment priced in model_info, and check reads prices only "
-        "from litellm_params and the cost map"
-    ),
     "cost-map-source": (
         "check prices a model from whichever cost map LiteLLM loaded, fetched or "
-        "bundled, so it can differ from the gateway's"
+        "bundled, and ignores model_info.base_model, so it can differ from the "
+        "gateway's"
     ),
     "non-chat-pass-through": (
         "the plugin sees every call type and governs only chat completions, so other "
