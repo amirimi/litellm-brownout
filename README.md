@@ -52,6 +52,7 @@ one request.
 `init` reads the gateway with a read-only key. These commands, for bash or zsh, create one for a
 new `proxy_admin_viewer` user called `brownout-init` and run `init`.
 
+<!-- adoption: prepare -->
 ```bash
 read -rs LITELLM_MASTER_KEY && typeset +x LITELLM_MASTER_KEY
 BROWNOUT_INIT_KEY=$(curl -sSf http://localhost:4000/user/new \
@@ -86,6 +87,7 @@ exits `0`. Only then add `--write`, which refuses to overwrite an existing file.
 Check both files, then delete the `brownout-init` user, which deletes its key too. The same delete
 recovers a key lost with a closed shell before you run the block again.
 
+<!-- adoption: check -->
 ```bash
 uvx --from litellm-brownout brownout check --gateway-config brownout.config.yaml --manifest brownout.yaml
 curl -sSf http://localhost:4000/user/delete \
@@ -98,6 +100,7 @@ curl -sSf http://localhost:4000/user/delete \
 Add one line to the image your gateway runs. The LiteLLM image ships without `pip`, so the line
 bootstraps it first.
 
+<!-- adoption: install -->
 ```dockerfile
 FROM docker.litellm.ai/berriai/litellm:v1.104.2
 RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
@@ -114,6 +117,7 @@ inside the container, and restart it.
 LiteLLM's default log level hides brownout's load message, so a response header confirms it
 instead. Send one chat request with a key of a team in the manifest.
 
+<!-- adoption: confirm -->
 ```bash
 curl -s -D - -o /dev/null http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer <A TEAM KEY>" -H "Content-Type: application/json" \
@@ -130,6 +134,7 @@ A route degrades only after its owner gives it a fallback. Adding one takes an e
 
 In `brownout.yaml`, list the data classes least restricted first and give the route its fallback.
 
+<!-- adoption: fallback-manifest -->
 ```yaml
 version: "v1"
 data_class_order: [internal, customer_pii]
@@ -148,6 +153,7 @@ teams:
 In `brownout.config.yaml`, give every deployment of both model groups a class from that list. The
 fallback's class must be at least as restricted as the route's.
 
+<!-- adoption: fallback-config -->
 ```yaml
 model_list:
   - model_name: chat-qa

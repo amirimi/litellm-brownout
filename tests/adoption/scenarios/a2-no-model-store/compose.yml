@@ -1,0 +1,4 @@
+services:
+  litellm:
+    environment:
+      STORE_MODEL_IN_DB: "False"

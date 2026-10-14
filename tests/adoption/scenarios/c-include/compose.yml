@@ -1,0 +1,4 @@
+services:
+  litellm:
+    volumes:
+      - ./models.yaml:/app/models.yaml

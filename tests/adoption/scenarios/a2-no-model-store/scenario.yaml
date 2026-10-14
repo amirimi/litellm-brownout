@@ -1,0 +1,54 @@
+description: >
+  The field test's path without STORE_MODEL_IN_DB, so LiteLLM reads config.yaml only at startup.
+seed:
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: [chat, chat-cheap]
+  keys:
+    - alias: search-app
+      team: search
+    - alias: search-batch
+      team: search
+      max_budget: 0.1
+    - alias: dev-laptop
+choices:
+  - rule: team-in-manifest
+    subject: dev-laptop
+    values:
+      "<YOUR TEAM ID>": "{team:search}"
+  - rule: model-priced
+    subject: chat
+    values:
+      "<YOUR INPUT PRICE PER TOKEN>": "0.0001"
+      "<YOUR OUTPUT PRICE PER TOKEN>": "0.001"
+  - rule: model-priced
+    subject: chat-cheap
+    values:
+      "<YOUR INPUT PRICE PER TOKEN>": "0.00005"
+      "<YOUR OUTPUT PRICE PER TOKEN>": "0.0005"
+provisions:
+  "<YOUR REDIS HOST>":
+    gap: redis-configured:no-redis-guidance
+    compose: redis.compose.yml
+    value: redis
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps:
+  "v1.104.2":
+    - redis-configured:no-redis-guidance
+    - model-priced:needs-restart
+  "v1.95.1":
+    - redis-configured:no-redis-guidance
+    - confirm:no-header

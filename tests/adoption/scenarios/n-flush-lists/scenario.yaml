@@ -1,0 +1,26 @@
+description: >
+  The same setup as d-redis-cache, with config.yaml written with lists flush against their key, the
+  style PyYAML and yq produce.
+seed:
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: [chat, chat-cheap]
+  keys:
+    - alias: search-app
+      team: search
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps:
+  - check:failed

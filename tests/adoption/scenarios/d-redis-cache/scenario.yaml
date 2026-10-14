@@ -1,0 +1,25 @@
+description: >
+  Redis already serves LiteLLM's response cache through litellm_settings.cache_params, so init
+  can derive coordination_redis from it. Models are priced in config.yaml.
+seed:
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: [chat, chat-cheap]
+  keys:
+    - alias: search-app
+      team: search
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps: []

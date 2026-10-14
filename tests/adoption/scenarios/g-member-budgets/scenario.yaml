@@ -1,0 +1,37 @@
+description: >
+  A team member carries a budget inside the team below the team's own, and the team key belongs to
+  that member. init does not check member budgets, so LiteLLM's member limit can refuse first.
+seed:
+  teams:
+    - alias: search
+      max_budget: 1.0
+      budget_duration: 7d
+      models: [chat, chat-cheap]
+  members:
+    - team: search
+      user_id: alice
+      max_budget_in_team: 0.2
+  keys:
+    - alias: search-app
+      team: search
+      user_id: alice
+provisions:
+  "<YOUR REDIS HOST>":
+    gap: redis-configured:no-redis-guidance
+    compose: redis.compose.yml
+    value: redis
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps:
+  - redis-configured:no-redis-guidance
+  - drive:refused-before-downgrade

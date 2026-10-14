@@ -1,0 +1,23 @@
+description: >
+  Every caller uses the master key. There are no teams and no virtual keys, which is how many small
+  gateways start. There is no Redis, and models are priced in config.yaml.
+seed: {}
+provisions:
+  "<YOUR REDIS HOST>":
+    gap: redis-configured:no-redis-guidance
+    compose: redis.compose.yml
+    value: redis
+confirm:
+  key: search-app
+  model: chat
+fallback:
+  team: search
+  route: chat
+  fallback: chat-cheap
+  degrade_at: 75
+  data_class: internal
+drive:
+  key: search-app
+  model: chat
+expected_gaps:
+  - init:no-printed-resolution
