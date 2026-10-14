@@ -409,7 +409,7 @@ API_ROWS: Final = (
                 ),
             ),
             Form(
-                "a missing price on any deployment, or both at zero as 1.95.1 reports an "
+                "a missing price on any deployment, or both at zero as 1.101.6 reports an "
                 "unpriced model",
                 "refused",
                 Refused(

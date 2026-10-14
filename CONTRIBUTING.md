@@ -61,7 +61,7 @@ fallback and a drive to the downgrade. Mock responses keep every run free.
 
 ```bash
 BROWNOUT_ADOPTION=1 uv run pytest -m adoption
-BROWNOUT_ADOPTION=1 BROWNOUT_ADOPTION_SCENARIOS=a-config-models BROWNOUT_ADOPTION_RELEASES=v1.95.1 uv run pytest -m adoption
+BROWNOUT_ADOPTION=1 BROWNOUT_ADOPTION_SCENARIOS=a-config-models BROWNOUT_ADOPTION_RELEASES=v1.101.6 uv run pytest -m adoption
 ```
 
 A step the runner cannot take from printed text is a gap. Each scenario lists its gaps in
@@ -75,7 +75,7 @@ wheel for the PyPI package, and the LiteLLM image tag. Every step's command and 
 The README marks the blocks the runner runs with `<!-- adoption: name -->` comments, so a marker
 moves with its block. A scenario directory holds `scenario.yaml`, the gateway's `config.yaml`, and
 optionally a `compose.yml` overlay and any file the config includes. The `adoption` workflow runs
-every scenario on 1.95.1 and 1.104.2 weekly and on pull requests that touch `init`, `check`, the
+every scenario on 1.101.6 and 1.104.2 weekly and on pull requests that touch `init`, `check`, the
 README or the docs. It also runs `a-config-models` and `b-ui-models` on every supported release line,
 because those two run the README's commands against LiteLLM's API.
 
@@ -101,13 +101,11 @@ test for each form the row names.
 
 ## Supported LiteLLM releases
 
-Brownout supports LiteLLM 1.95.1 and newer. `SUPPORTED_FLOOR`, `REFUSE_WHOLE_FROM` and
-`TESTED_CEILING` in `src/brownout/bridge.py` hold the range and the budget boundary. Below the floor
-the handler refuses to start. On 1.95.1 to 1.100 it warns that LiteLLM shrinks an over-budget
-reservation instead of refusing it, and past the ceiling it warns that the release is untested. The
-floor moves only by a decision recorded in the pull request that moves it. Releases before 1.95
-differ in the guardrail merge and in the helpers the bridge calls, 1.95.0 carries a LiteLLM security
-advisory, and releases before 1.84 place no reservation at all.
+Brownout supports LiteLLM 1.101.6 and newer. `SUPPORTED_FLOOR` and `TESTED_CEILING` in
+`src/brownout/bridge.py` hold the range. Below the floor the handler refuses to start, and past the
+ceiling it warns that the release is untested. The floor moves only by a decision recorded in the
+pull request that moves it. Releases before 1.101 shrink an over-budget reservation to the remaining
+headroom instead of refusing it, so a window could close above the envelope.
 
 `pyproject.toml` pins the floor, so the ci workflow runs the unit and seam suites on it. The
 `litellm matrix` workflow runs every suite against the latest patch of each supported release line,

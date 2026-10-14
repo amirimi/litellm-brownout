@@ -32,8 +32,9 @@ from .lab import (
 pytestmark = [pytest.mark.e2e, requires_stack]
 
 FILLED_BUDGET: Final = "1.0"
-FILLED_DURATION: Final = '"7d"'
+FILLED_DURATION: Final = "7d"
 SUCCESS: Final = 200
+UNFILLED_REFUSED: Final = 400
 LAB_ROUTE: Final = "budget-lab-primary"
 LAB_FALLBACK: Final = "budget-lab-degraded"
 
@@ -191,6 +192,18 @@ def test_the_team_command_gives_a_team_its_budget_and_window(teams, suffix):
     assert [
         (entry.team_id, entry.envelope_usd, entry.budget_duration) for entry in entries
     ] == [(team_id, 1.0, "7d")]
+
+
+def test_litellm_refuses_a_duration_left_unfilled(teams, suffix):
+    team_id = f"contract-unfilled-{suffix}"
+    _post("/team/new", {"team_id": team_id, "max_budget": 1.0, "budget_duration": "2d"})
+    teams.append(team_id)
+    findings = team_findings([_team(team_id)], GATEWAY)
+    assert [finding.rule for finding in findings] == [RuleId.DURATION_TUMBLES]
+
+    assert run_printed(findings[0].resolution[0]) == UNFILLED_REFUSED
+
+    assert _team(team_id).budget_duration == "2d"
 
 
 def test_the_first_team_commands_create_a_governable_team_and_its_key(teams, suffix):

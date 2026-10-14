@@ -181,7 +181,7 @@ def test_what_counts_as_priced(input_cost, output_cost, priced):
     "unpriced",
     [
         pytest.param((None, None), id="missing"),
-        pytest.param((0.0, 0.0), id="zero-as-1.95.1-reports-it"),
+        pytest.param((0.0, 0.0), id="zero-as-1.101.6-reports-it"),
         pytest.param((-1.0, 0.002), id="negative"),
     ],
 )

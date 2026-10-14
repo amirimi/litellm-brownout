@@ -26,7 +26,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding._member_finding",
         reads=(),
-        cites=(f"{TEAMS}:2873@1.95.1",),
+        cites=(f"{TEAMS}:3431@1.101.6",),
         forms=_succeeds(
             f"{CONTRACT}test_the_member_command_clears_a_budget_set_on_one_member",
             f"{CONTRACT}test_the_member_command_clears_a_team_wide_budget_on_existing_members",
@@ -37,7 +37,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding._team_finding",
         reads=(),
-        cites=(f"{TEAMS}:1591@1.95.1",),
+        cites=(f"{TEAMS}:1905@1.101.6",),
         forms=_succeeds(
             f"{CONTRACT}test_the_team_command_gives_a_team_its_budget_and_window"
         ),
@@ -47,7 +47,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding.nothing_to_govern",
         reads=(),
-        cites=(f"{TEAMS}:911@1.95.1", f"{KEYS}:1467@1.95.1"),
+        cites=(f"{TEAMS}:1183@1.101.6", f"{KEYS}:1697@1.101.6"),
         forms=_succeeds(
             f"{CONTRACT}test_the_first_team_commands_create_a_governable_team_and_its_key"
         ),
@@ -57,7 +57,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding._missing_team",
         reads=(),
-        cites=(f"{TEAMS}:911@1.95.1",),
+        cites=(f"{TEAMS}:1183@1.101.6",),
         forms=_succeeds(
             f"{CONTRACT}test_the_missing_team_command_creates_the_manifest_team"
         ),
@@ -67,7 +67,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding._envelope_mismatch",
         reads=(),
-        cites=(f"{TEAMS}:1591@1.95.1",),
+        cites=(f"{TEAMS}:1905@1.101.6",),
         forms=_succeeds(
             f"{CONTRACT}test_the_alignment_commands_match_litellm_to_the_manifest"
         ),
@@ -77,7 +77,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding._duration_mismatch",
         reads=(),
-        cites=(f"{TEAMS}:1591@1.95.1",),
+        cites=(f"{TEAMS}:1905@1.101.6",),
         forms=_succeeds(
             f"{CONTRACT}test_the_alignment_commands_match_litellm_to_the_manifest"
         ),
@@ -87,7 +87,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding._unlisted_fallbacks",
         reads=(),
-        cites=(f"{TEAMS}:1591@1.95.1",),
+        cites=(f"{TEAMS}:1905@1.101.6",),
         forms=_succeeds(
             f"{CONTRACT}test_the_alignment_commands_match_litellm_to_the_manifest"
         ),
@@ -97,7 +97,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding.key_findings",
         reads=(),
-        cites=(f"{KEYS}:2496@1.95.1",),
+        cites=(f"{KEYS}:2829@1.101.6",),
         forms=_succeeds(
             f"{SMOKE}test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findings"
         ),
@@ -107,7 +107,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding.model_findings",
         reads=(),
-        cites=("litellm/router.py:264@1.95.1",),
+        cites=("litellm/router.py:322@1.101.6",),
         forms=_succeeds(ADOPTION),
     ),
     Input(
@@ -115,7 +115,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser="onboarding._violation_resolution",
         reads=(),
-        cites=("litellm/proxy/proxy_server.py:3673@1.95.1",),
+        cites=("litellm/proxy/proxy_server.py:4243@1.101.6",),
         forms=_succeeds(ADOPTION),
     ),
     Input(
@@ -123,7 +123,7 @@ PRINTED_ROWS: Final = (
         source="printed",
         parser=None,
         reads=(),
-        cites=(f"{USERS}:352@1.95.1", f"{MODELS}:169@1.95.1"),
+        cites=(f"{USERS}:437@1.101.6", f"{MODELS}:791@1.101.6"),
         forms=_succeeds(ADOPTION),
     ),
 )

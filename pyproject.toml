@@ -13,7 +13,7 @@ authors = [{ name = "Amir Karimi" }]
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28",
-    "litellm[proxy]>=1.95.1,<1.105",
+    "litellm[proxy]>=1.101.6,<1.105",
     "pyyaml>=6.0",
     "ruamel.yaml>=0.18",
 ]
@@ -36,7 +36,7 @@ dev = [
 ]
 
 [tool.uv]
-constraint-dependencies = ["litellm==1.95.1"]
+constraint-dependencies = ["litellm==1.101.6"]
 
 [tool.uv.build-backend]
 module-name = "brownout"

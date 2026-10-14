@@ -8,7 +8,7 @@ from brownout.refusals import RefusalReason, RuleId
 Source = Literal["brownout", "litellm", "release", "printed"]
 Stage = Literal["check", "init", "start", "request"]
 
-FIRST_MINOR: Final = 95
+FIRST_MINOR: Final = 101
 LAST_MINOR: Final = 104
 
 
@@ -41,20 +41,10 @@ Disposition = Supported | Refused | Documented | Open
 
 
 @dataclass(frozen=True)
-class Releases:
-    first: int = FIRST_MINOR
-    last: int = LAST_MINOR
-
-
-EVERY_RELEASE: Final = Releases()
-
-
-@dataclass(frozen=True)
 class Form:
     form: str
     becomes: str
     disposition: Disposition
-    releases: Releases = EVERY_RELEASE
 
 
 @dataclass(frozen=True)

@@ -10,13 +10,12 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, assert_never
+from typing import Any, Final
 
 import httpx
 import pytest
 from litellm.proxy._types import hash_token
 
-from brownout import bridge
 from brownout.manifest import Manifest
 
 from .lab import (
@@ -36,7 +35,6 @@ STRICT_ROUTE: Final = "budget-lab-strict"
 ALIAS_NAME: Final = "budget-lab-alias"
 MIXED_GROUP: Final = "budget-lab-mixed"
 LAB_ENVELOPE_USD: Final = 1.0
-LAB_PRIMARY_WORST_CASE_USD: Final = 0.0408
 MAX_TOKENS: Final = 40
 MAX_REQUESTS: Final = 80
 BUDGET_REFUSAL_STATUSES: Final = frozenset({422, 429})
@@ -328,16 +326,6 @@ def _gateway_release() -> str:
     return result.stdout.strip()
 
 
-def _settled_ceiling_usd(boundary: bridge.Boundary) -> float:
-    match boundary:
-        case "refuse_whole":
-            return LAB_ENVELOPE_USD
-        case "shrink_to_fit":
-            return LAB_ENVELOPE_USD + LAB_PRIMARY_WORST_CASE_USD
-        case _:
-            assert_never(boundary)
-
-
 def _announcements(since: str) -> list[dict[str, Any]]:
     deadline = time.monotonic() + LOG_SETTLE_SECONDS
     previous: list[dict[str, Any]] | None = None
@@ -432,12 +420,10 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(
     assert "budget" in drained.blocked_body.lower()
 
     release = _gateway_release()
-    boundary = bridge.boundary_for(release)
-    ceiling = _settled_ceiling_usd(boundary)
     counter = lab_spend_counter(LAB_TEAM_ID)
-    assert counter <= ceiling, (
-        f"the window closed with the counter at ${counter:.4f} against a "
-        f"${ceiling:.4f} ceiling for the {boundary} boundary of LiteLLM {release}"
+    assert counter <= LAB_ENVELOPE_USD, (
+        f"the window closed with the counter at ${counter:.4f} above the "
+        f"${LAB_ENVELOPE_USD:.4f} envelope on LiteLLM {release}"
     )
 
 

@@ -24,14 +24,9 @@ services:
 The plugin imports `pyyaml`, `fastapi` and `litellm`, all present in the image. Three of
 its LiteLLM imports are private helpers (`_can_object_call_model`,
 `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), and all of
-them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.95.1. It
-logs one warning on 1.95.1 to 1.100, whose budget boundary is weaker, and one on a release newer
-than the tested 1.104. CI runs both this mount and the README's wheel install.
-
-The LiteLLM images for 1.95.1 to 1.99.4 and for 1.101.0 ship PyJWT 2.13.0, urllib3 2.7.0, multidict
-6.7.1 and oauthlib 3.3.1, which carry known advisories. The 1.100.5, 1.101.6, 1.102.4, 1.103.4 and
-1.104.2 images ship fixed releases. On 1.95 to 1.99, upgrade those packages in your own image or
-move to a fixed patch.
+them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.101.6,
+and it logs a warning on a release newer than the tested 1.104. CI runs both this mount and the
+README's wheel install.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -84,9 +79,9 @@ Each finding prints as `rule-id<TAB>subject<TAB>detail`, followed by the command
 that resolve it. A value only the operator can choose, such as a team's budget, is left as a
 placeholder in angle brackets, and LiteLLM refuses the command until it is filled in. A team id's
 placeholder sits inside its JSON quotes, as in `"team_id": "<YOUR TEAM ID>"`, because LiteLLM
-refuses a team that does not exist. A budget's placeholder stands bare, because a budget is a
-number. A duration's placeholder also stands bare and asks for the quotes, because LiteLLM 1.95.1
-stores a duration it cannot parse.
+refuses a team that does not exist. A duration's placeholder sits inside its quotes too, because
+LiteLLM refuses a duration it cannot parse. A budget's placeholder stands bare, because a budget is
+a number.
 
 | Exit code | Meaning |
 |---|---|
@@ -136,8 +131,8 @@ model_list:
 
 | Setting | Why it is there |
 |---|---|
-| `fail_closed_budget_enforcement: true` | Decides the envelope boundary for the whole gateway, read from `general_settings` alone ([`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)). On, a worst case that does not fit the remaining headroom is refused whole at authentication ([`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)), and so is a reservation that cannot be written or a spend figure that cannot be verified. LiteLLM 1.95.1 to 1.100 lack the first refusal and shrink the hold to the headroom instead. Rule `fail-closed-on` requires it |
-| `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's claims reuse the same Redis, so one crossing is one announcement across every replica. Rule `redis-configured` requires it in `brownout check`. A Redis `cache_params` block does not substitute for it, because on LiteLLM 1.95.1 it leaves each replica counting alone. A coordination Redis saved from the admin UI lives in the database, where the check cannot see it |
+| `fail_closed_budget_enforcement: true` | Decides the envelope boundary for the whole gateway, read from `general_settings` alone ([`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)). On, a worst case that does not fit the remaining headroom is refused whole at authentication ([`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)), and so is a reservation that cannot be written or a spend figure that cannot be verified. Off, LiteLLM shrinks the hold to the headroom and serves the request. Rule `fail-closed-on` requires it |
+| `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's claims reuse the same Redis, so one crossing is one announcement across every replica. Rule `redis-configured` requires it in `brownout check`. A Redis `cache_params` block does not satisfy the rule, because only `coordination_redis` is verified to carry the counter on every supported release. `init` writes `coordination_redis` from a Redis it finds in `cache_params`. A coordination Redis saved from the admin UI lives in the database, where the check cannot see it |
 | `callbacks` | The dotted path to the handler `src/brownout/gateway.py` builds at import |
 | `budget_exceeded_status_code: 429` | Keeps LiteLLM's budget refusal a 429 from 1.104, whose default is a 422 (`litellm/__init__.py:404` in 1.104.2). Releases before 1.104 ignore it and refuse with a 429 anyway. Run on the 1.104.2 lab image |
 | `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. LiteLLM takes each price from `litellm_params` first and `model_info` second, and prices a deployment without either from its cost map. A model group counts as priced only when every deployment has both prices and one of them is above zero. Rules `route-priced` and `model-priced` refuse any other group |
@@ -255,7 +250,7 @@ settings.
 | `team-exists` | Every manifest team exists in LiteLLM | Init |
 | `fallback-in-team-models` | Every fallback is in its team's LiteLLM model list, unless the list allows every model | Init |
 | `member-has-no-budget` | No team member carries a budget inside the team, whether set per member or for every member | Init |
-| `supported-litellm` | LiteLLM is 1.95.1 or newer | Load |
+| `supported-litellm` | LiteLLM is 1.101.6 or newer | Load |
 
 ```bash
 uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml

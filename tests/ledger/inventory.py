@@ -13,12 +13,6 @@ from .printed_rows import PRINTED_ROWS
 from .request_rows import REQUEST_ROWS
 
 WALKED_RELEASES: Final = (
-    "1.95.1",
-    "1.96.2",
-    "1.97.0",
-    "1.98.1",
-    "1.99.4",
-    "1.100.5",
     "1.101.6",
     "1.102.4",
     "1.103.4",

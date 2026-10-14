@@ -8,7 +8,7 @@ choices:
     values:
       "<YOUR TEAM ID>": search
       "<YOUR BUDGET>": "1.0"
-      '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">': '"7d"'
+      "<YOUR DURATION, SUCH AS 7d>": 7d
 provisions:
   "<YOUR REDIS HOST>":
     readme: redis-service

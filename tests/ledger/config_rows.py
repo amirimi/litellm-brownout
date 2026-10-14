@@ -53,7 +53,7 @@ CONFIG_ROWS: Final = (
         parser="inputs.with_includes",
         reads=("key:include",),
         cites=(
-            "litellm/proxy/proxy_server.py:3893@1.95.1",
+            "litellm/proxy/proxy_server.py:4645@1.101.6",
             "litellm/proxy/common_utils/config_includes.py:117@1.104.2",
         ),
         forms=(
@@ -187,9 +187,9 @@ CONFIG_ROWS: Final = (
         parser="gateway_config._written_price",
         reads=(),
         cites=(
-            "litellm/router.py:264@1.95.1",
-            "litellm/router.py:7483@1.95.1",
-            "litellm/types/router.py:467@1.95.1",
+            "litellm/router.py:322@1.101.6",
+            "litellm/router.py:8653@1.101.6",
+            "litellm/types/router.py:564@1.101.6",
         ),
         forms=(
             Form(
@@ -322,7 +322,7 @@ CONFIG_ROWS: Final = (
         source="brownout",
         parser="gateway_config.settings_from_general",
         reads=("key:fail_closed_budget_enforcement",),
-        cites=("litellm/proxy/proxy_server.py:2139@1.95.1",),
+        cites=("litellm/proxy/proxy_server.py:2430@1.101.6",),
         forms=(
             Form(
                 "literally true",
@@ -351,7 +351,7 @@ CONFIG_ROWS: Final = (
         source="brownout",
         parser="gateway_config.settings_from_general",
         reads=("key:disable_budget_reservation",),
-        cites=("litellm/proxy/auth/user_api_key_auth.py:2437@1.95.1",),
+        cites=("litellm/proxy/auth/user_api_key_auth.py:2708@1.101.6",),
         forms=(
             Form(
                 "literally true",
@@ -460,7 +460,7 @@ CONFIG_ROWS: Final = (
         source="brownout",
         parser="gateway_config.read_gateway_config",
         reads=("key:coordination_redis",),
-        cites=("litellm/proxy/proxy_server.py:3673@1.95.1",),
+        cites=("litellm/proxy/proxy_server.py:4243@1.101.6",),
         forms=(
             Form(
                 "a mapping that names a connection",

@@ -145,16 +145,6 @@ def test_every_litellm_row_cites_code() -> None:
     assert not uncited, f"rows with no LiteLLM citation: {uncited}"
 
 
-def test_every_form_holds_inside_the_supported_releases() -> None:
-    outside: Final = [
-        f"{row.shape}, {form.form}"
-        for row in LEDGER
-        for form in row.forms
-        if not FIRST_MINOR <= form.releases.first <= form.releases.last <= LAST_MINOR
-    ]
-    assert not outside, f"forms outside 1.{FIRST_MINOR} to 1.{LAST_MINOR}: {outside}"
-
-
 def test_the_walked_releases_are_the_ci_matrix() -> None:
     workflow: Final = yaml.safe_load(MATRIX_WORKFLOW.read_text(encoding="utf-8"))
     matrix: Final = workflow["jobs"]["release-line"]["strategy"]["matrix"]["litellm"]
