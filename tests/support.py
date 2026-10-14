@@ -11,7 +11,7 @@ import yaml
 from litellm.proxy._types import UserAPIKeyAuth
 
 from brownout import bridge
-from brownout.cli import gateway_file
+from brownout.cli import gateway_file, litellm_alert_types, read_config
 from brownout.events import (
     Event,
     FallbackRejectedEvent,
@@ -23,7 +23,7 @@ from brownout.gateway import BrownoutHandler
 from brownout.manifest import Manifest, TeamPolicy
 from brownout.policy import Permission
 from brownout.ports import Caller, Guardrails, Permissions, ResetSchedule
-from brownout.rules import GatewaySettings, ModelGroup
+from brownout.rules import GatewayFile, GatewaySettings, ModelGroup
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 CONFIG_DIR: Final = REPO_ROOT / "config"
@@ -97,6 +97,12 @@ def lab_gateway_config() -> Mapping[str, Any]:
         return yaml.safe_load(handle)
 
 
+def gateway_file_of(config: Mapping[str, Any]) -> GatewayFile:
+    return gateway_file(
+        read_config(CONFIG_DIR / "config.yaml", config, litellm_alert_types())
+    )
+
+
 class FakeSpendCounter:
     def __init__(self, spend: float | Exception) -> None:
         self._spend: Final = spend
@@ -164,7 +170,7 @@ class FakeGateway:
 
     @classmethod
     def from_lab_config(cls) -> FakeGateway:
-        lab: Final = gateway_file(lab_gateway_config())
+        lab: Final = gateway_file_of(lab_gateway_config())
         return cls(lab.groups, lab.settings)
 
     def model_group(self, name: str) -> ModelGroup | None:

@@ -6,30 +6,17 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any, Final, Literal, assert_never
 
-from .gateway_api import LiteLLMKey, LiteLLMModel, LiteLLMTeam
+from .gateway_api import LiteLLMKey, LiteLLMTeam
+from .gateway_config import BUDGET_ALERTS, GatewayConfig
 from .manifest import WINDOW_SECONDS, Manifest, TeamPolicy
 from .refusals import RuleId, Violation
+from .rules import ModelGroup, is_priced
 
 HANDLER_PATH: Final = "brownout.gateway.handler"
 DEFAULT_WARN_TIERS: Final = (75, 90)
 EVERY_MODEL: Final = "all-proxy-models"
-BUDGET_ALERTS: Final = "budget_alerts"
 REFUSAL_STATUS: Final = 429
 CEILING_TOLERANCE_USD: Final = 1e-9
-REDIS_TARGETS: Final = ("host", "url", "startup_nodes", "sentinel_nodes")
-REDIS_CONNECTION_FIELDS: Final = (
-    "host",
-    "port",
-    "url",
-    "username",
-    "password",
-    "ssl",
-    "db",
-    "startup_nodes",
-    "sentinel_nodes",
-    "service_name",
-    "sentinel_password",
-)
 BUDGET_PLACEHOLDER: Final = "<YOUR BUDGET>"
 DURATION_PLACEHOLDER: Final = '<YOUR DURATION IN DOUBLE QUOTES, SUCH AS "7d">'
 TEAM_PLACEHOLDER: Final = "<YOUR TEAM ID>"
@@ -180,25 +167,25 @@ def key_findings(
     return findings
 
 
-def model_findings(models: Iterable[LiteLLMModel]) -> list[Finding]:
+def model_findings(groups: Mapping[str, ModelGroup]) -> list[Finding]:
     return [
         Finding(
             RuleId.MODEL_PRICED,
-            model.name,
+            name,
             "has no input and output price, so requests for it will be refused. Add "
             "the lines below to its deployments and restart the gateway, because init "
             "reads prices from the running gateway. A model added in the admin UI takes "
             "its price there instead",
             (
-                f"- model_name: {model.name}",
+                f"- model_name: {name}",
                 "  litellm_params:",
                 "    input_cost_per_token: <YOUR INPUT PRICE PER TOKEN>",
                 "    output_cost_per_token: <YOUR OUTPUT PRICE PER TOKEN>",
             ),
             True,
         )
-        for model in models
-        if not model.priced
+        for name, group in sorted(groups.items())
+        if not is_priced(group)
     ]
 
 
@@ -216,16 +203,11 @@ def reconcile_findings(
     return findings
 
 
-def config_plan(
-    config: Mapping[str, Any], default_alert_types: Sequence[str]
-) -> tuple[ConfigChange, ...]:
-    general: Final = _section(config, "general_settings")
-    litellm_settings: Final = _section(config, "litellm_settings")
+def config_plan(config: GatewayConfig) -> tuple[ConfigChange, ...]:
     changes: list[ConfigChange] = []
-    callbacks = litellm_settings.get("callbacks")
-    if not isinstance(callbacks, list) or HANDLER_PATH not in callbacks:
+    if HANDLER_PATH not in config.callbacks:
         changes.append(AppendSetting("litellm_settings", "callbacks", HANDLER_PATH))
-    if general.get("fail_closed_budget_enforcement") is not True:
+    if not config.settings.fail_closed_budget_enforcement:
         changes.append(
             SetSetting(
                 "general_settings",
@@ -234,10 +216,10 @@ def config_plan(
                 "sets the budget boundary for every budget on the gateway, governed or not",
             )
         )
-    if "disable_budget_reservation" in general:
+    if config.settings.disable_budget_reservation:
         changes.append(RemoveSetting("general_settings", "disable_budget_reservation"))
-    changes.extend(_alert_types(general, default_alert_types))
-    if "budget_exceeded_status_code" not in litellm_settings:
+    changes.extend(_alert_types(config))
+    if not config.budget_exceeded_status_code:
         changes.append(
             SetSetting(
                 "litellm_settings",
@@ -246,7 +228,7 @@ def config_plan(
                 "recommended. Keeps LiteLLM's budget refusal a 429 from 1.104",
             )
         )
-    changes.extend(_coordination_redis(general, litellm_settings))
+    changes.extend(_coordination_redis(config))
     return tuple(changes)
 
 
@@ -506,45 +488,27 @@ def _unlisted_fallbacks(
     ]
 
 
-def _alert_types(
-    general: Mapping[str, Any], default_alert_types: Sequence[str]
-) -> list[ConfigChange]:
-    if not general.get("alerting"):
-        return []
-    current = general.get("alert_types")
-    if current is None:
-        current = list(default_alert_types)
-    if BUDGET_ALERTS not in current:
+def _alert_types(config: GatewayConfig) -> list[ConfigChange]:
+    if not config.native_budget_alerts:
         return []
     return [
         SetSetting(
             "general_settings",
             "alert_types",
-            [alert for alert in current if alert != BUDGET_ALERTS],
+            [alert for alert in config.alert_types if alert != BUDGET_ALERTS],
             "drops budget_alerts and keeps LiteLLM's other alerts",
         )
     ]
 
 
-def _coordination_redis(
-    general: Mapping[str, Any], litellm_settings: Mapping[str, Any]
-) -> list[ConfigChange]:
-    if general.get("coordination_redis"):
-        return []
-    cache_params = litellm_settings.get("cache_params")
-    if not isinstance(cache_params, Mapping) or cache_params.get("type") != "redis":
-        return []
-    if not any(cache_params.get(target) for target in REDIS_TARGETS):
+def _coordination_redis(config: GatewayConfig) -> list[ConfigChange]:
+    if config.coordination_redis or config.cache_redis is None:
         return []
     return [
         SetSetting(
             "general_settings",
             "coordination_redis",
-            {
-                field: cache_params[field]
-                for field in REDIS_CONNECTION_FIELDS
-                if field in cache_params
-            },
+            dict(config.cache_redis),
             "reuses the Redis that litellm_settings.cache_params names",
         )
     ]
@@ -560,13 +524,6 @@ def _violation_resolution(rule: RuleId) -> tuple[str, ...]:
         "    port: 6379",
         "    password: os.environ/REDIS_PASSWORD",
     )
-
-
-def _section(config: Mapping[str, Any], name: Section) -> Mapping[str, Any]:
-    section = config.get(name)
-    if not isinstance(section, Mapping):
-        return {}
-    return section
 
 
 def _json(value: Any) -> str:

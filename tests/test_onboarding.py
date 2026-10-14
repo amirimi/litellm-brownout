@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Final
 
 import pytest
 
-from brownout.gateway_api import LiteLLMKey, LiteLLMModel, LiteLLMTeam
+from brownout.gateway_api import LiteLLMKey, LiteLLMTeam
+from brownout.gateway_config import GatewayConfig, read_gateway_config
 from brownout.manifest import Manifest
 from brownout.onboarding import (
     AppendSetting,
@@ -26,6 +28,7 @@ from brownout.onboarding import (
     violation_findings,
 )
 from brownout.refusals import RuleId, Violation
+from brownout.rules import ModelGroup
 
 GATEWAY: Final = "http://gateway.test"
 DEFAULT_ALERTS: Final = ("llm_exceptions", "budget_alerts", "outage_alerts")
@@ -39,6 +42,10 @@ READY_CONFIG: Final[dict[str, Any]] = {
         "budget_exceeded_status_code": 429,
     },
 }
+
+
+def planned(config: dict[str, Any]) -> GatewayConfig:
+    return read_gateway_config(Path("config.yaml"), config, DEFAULT_ALERTS)
 
 
 def team(
@@ -154,7 +161,10 @@ def test_teamless_and_self_budgeted_keys_are_findings_with_runnable_commands():
 
 def test_an_unpriced_model_is_a_finding_with_the_lines_to_add():
     findings = model_findings(
-        (LiteLLMModel("chat", True), LiteLLMModel("mystery", False))
+        {
+            "chat": ModelGroup("chat", 1e-6, 2e-6, ()),
+            "mystery": ModelGroup("mystery", None, None, ()),
+        }
     )
 
     assert [(f.rule, f.subject) for f in findings] == [(RuleId.MODEL_PRICED, "mystery")]
@@ -214,7 +224,7 @@ def test_a_team_that_allows_every_model_allows_its_fallbacks(models):
 
 
 def test_a_ready_config_needs_no_change():
-    assert config_plan(READY_CONFIG, DEFAULT_ALERTS) == ()
+    assert config_plan(planned(READY_CONFIG)) == ()
 
 
 def test_a_vanilla_config_gets_every_mechanical_fix():
@@ -235,7 +245,7 @@ def test_a_vanilla_config_gets_every_mechanical_fix():
         },
     }
 
-    changes = config_plan(config, DEFAULT_ALERTS)
+    changes = config_plan(planned(config))
 
     assert [type(change) for change in changes] == [
         AppendSetting,
@@ -272,7 +282,7 @@ def test_existing_alert_types_lose_only_budget_alerts():
         },
     }
 
-    assert config_plan(config, DEFAULT_ALERTS) == (
+    assert config_plan(planned(config)) == (
         SetSetting(
             "general_settings",
             "alert_types",
@@ -296,7 +306,7 @@ def test_no_coordination_redis_is_derived_without_a_redis_target(cache_params):
         },
     }
 
-    assert config_plan(config, DEFAULT_ALERTS) == ()
+    assert config_plan(planned(config)) == ()
 
 
 def test_a_missing_redis_violation_carries_the_block_to_add():

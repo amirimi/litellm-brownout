@@ -30,7 +30,10 @@ def read_text(path: Path) -> str:
 
 
 def load_yaml(path: Path) -> object:
-    text: Final = read_text(path)
+    return load_yaml_text(path, read_text(path))
+
+
+def load_yaml_text(path: Path, text: str) -> object:
     try:
         return yaml.safe_load(text)
     except yaml.YAMLError as error:
@@ -45,14 +48,13 @@ def mapping(path: Path, document: object) -> Mapping[str, Any]:
 
 def with_includes(path: Path, config: Mapping[str, Any]) -> dict[str, Any]:
     merged: Final = {key: value for key, value in config.items() if key != INCLUDE_KEY}
-    includes: Final = config.get(INCLUDE_KEY)
-    if includes is None:
-        return merged
-    if not isinstance(includes, list):
-        raise DocumentError(f"{path} include must list files")
-    for name in includes:
-        included_path = path.parent / str(name)
+    for included_path in _included_paths(path, config.get(INCLUDE_KEY)):
         included = mapping(included_path, load_yaml(included_path))
+        if INCLUDE_KEY in included:
+            raise DocumentError(
+                f"{included_path} includes more files, and LiteLLM resolves nested "
+                f"includes differently across releases. List every file in {path}"
+            )
         for key, value in included.items():
             existing = merged.get(key)
             if isinstance(value, list) and isinstance(existing, list):
@@ -60,6 +62,21 @@ def with_includes(path: Path, config: Mapping[str, Any]) -> dict[str, Any]:
             else:
                 merged[key] = value
     return merged
+
+
+def _included_paths(path: Path, includes: object) -> list[Path]:
+    if includes is None:
+        return []
+    if not isinstance(includes, list) or not all(
+        isinstance(name, str) for name in includes
+    ):
+        raise DocumentError(f"{path} include must list files")
+    paths: Final = [path.parent / name for name in includes]
+    resolved: Final = [included.resolve() for included in paths]
+    for index, included in enumerate(resolved):
+        if included in resolved[:index]:
+            raise DocumentError(f"{path} includes {includes[index]} twice")
+    return paths
 
 
 def positioned(path: Path, problem: str, mark: Mark | None) -> DocumentError:

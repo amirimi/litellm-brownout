@@ -19,9 +19,15 @@ from litellm.proxy._types import hash_token
 from brownout import bridge
 from brownout.manifest import Manifest
 
+from .lab import (
+    GATEWAY,
+    REQUEST_TIMEOUT_SECONDS,
+    admin_headers,
+    requires_stack,
+    run_printed,
+)
 from .support import FIELD_KEYS, REPO_ROOT, lab_spend_counter
 
-GATEWAY: Final = os.getenv("LITELLM_GATEWAY", "http://localhost:4000")
 LAB_TEAM_ID: Final = "budget-lab"
 LAB_ROUTE: Final = "budget-lab-primary"
 DEGRADED_ROUTE: Final = "budget-lab-degraded"
@@ -30,7 +36,6 @@ LAB_ENVELOPE_USD: Final = 1.0
 LAB_PRIMARY_WORST_CASE_USD: Final = 0.0408
 MAX_TOKENS: Final = 40
 MAX_REQUESTS: Final = 80
-REQUEST_TIMEOUT_SECONDS: Final = 30.0
 BUDGET_REFUSAL_STATUSES: Final = frozenset({422, 429})
 BUDGET_REFUSAL_MESSAGE: Final = "Budget has been exceeded"
 ANNOUNCEMENT_LINE: Final = re.compile(r"brownout (\{.*\})\s*$")
@@ -49,27 +54,6 @@ SPEND_LOG_WAIT_SECONDS: Final = 30.0
 POLL_INTERVAL_SECONDS: Final = 1.0
 
 pytestmark = pytest.mark.e2e
-
-
-def _stack_is_up() -> bool:
-    try:
-        return httpx.get(f"{GATEWAY}/health/liveliness", timeout=3.0).status_code == 200
-    except httpx.HTTPError:
-        return False
-
-
-def _stack_is_required() -> bool:
-    return os.getenv("LAB_REQUIRE_STACK", "").lower() in {"1", "true", "yes"}
-
-
-_STACK_UNAVAILABLE: Final = (
-    "the composed gateway is not reachable, run `docker compose up -d` first"
-)
-
-if _stack_is_required() and not _stack_is_up():
-    raise RuntimeError(f"LAB_REQUIRE_STACK is set and {_STACK_UNAVAILABLE}")
-
-requires_stack = pytest.mark.skipif(not _stack_is_up(), reason=_STACK_UNAVAILABLE)
 
 
 @dataclass(frozen=True)
@@ -185,7 +169,7 @@ def _require_zero_start() -> None:
     response = httpx.get(
         f"{GATEWAY}/team/info",
         params={"team_id": LAB_TEAM_ID},
-        headers=_admin_headers(),
+        headers=admin_headers(),
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
@@ -206,7 +190,7 @@ def _require_zero_start() -> None:
 def _set_team_router_settings(router_settings: dict[str, Any]) -> None:
     response = httpx.post(
         f"{GATEWAY}/team/update",
-        headers=_admin_headers(),
+        headers=admin_headers(),
         json={"team_id": LAB_TEAM_ID, "router_settings": router_settings},
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
@@ -230,10 +214,6 @@ def _ask(key: str, overrides: dict[str, Any]) -> Answer:
         headers={name.lower(): value for name, value in response.headers.items()},
         body=response.text,
     )
-
-
-def _admin_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {os.environ['LITELLM_MASTER_KEY']}"}
 
 
 def _drive_to_exhaustion(client: httpx.Client, key: str) -> Observation:
@@ -342,7 +322,7 @@ def _field_in_spend_logs(response_id: str) -> dict[str, Any]:
         response = httpx.get(
             f"{GATEWAY}/spend/logs",
             params={"request_id": response_id},
-            headers=_admin_headers(),
+            headers=admin_headers(),
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -525,7 +505,7 @@ class InitRun:
 def init_key(lab_run: LabRun) -> Iterator[str]:
     response = httpx.post(
         f"{GATEWAY}/user/new",
-        headers=_admin_headers(),
+        headers=admin_headers(),
         json={"user_role": "proxy_admin_viewer"},
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
@@ -535,7 +515,7 @@ def init_key(lab_run: LabRun) -> Iterator[str]:
     _delete_keys([viewer["key"]])
     httpx.post(
         f"{GATEWAY}/user/delete",
-        headers=_admin_headers(),
+        headers=admin_headers(),
         json={"user_ids": [viewer["user_id"]]},
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
@@ -595,20 +575,10 @@ def _run_init(arguments: list[str], key: str) -> InitRun:
     return InitRun(result.returncode, result.stdout)
 
 
-def _run_decision(command: str) -> int:
-    result = subprocess.run(
-        ["bash", "-c", f"{command} -s -o /dev/null -w '%{{http_code}}'"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return int(result.stdout or 0)
-
-
 def _generate_key(body: dict[str, Any]) -> str:
     response = httpx.post(
         f"{GATEWAY}/key/generate",
-        headers=_admin_headers(),
+        headers=admin_headers(),
         json=body,
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
@@ -619,7 +589,7 @@ def _generate_key(body: dict[str, Any]) -> str:
 def _delete_keys(keys: list[str]) -> None:
     httpx.post(
         f"{GATEWAY}/key/delete",
-        headers=_admin_headers(),
+        headers=admin_headers(),
         json={"keys": keys},
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
@@ -688,7 +658,7 @@ def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findi
             command = prepared.resolution(rule, subject)[0]
             if filled is not None:
                 command = command.replace("<YOUR TEAM ID>", filled)
-            assert _run_decision(command) == 200, command
+            assert run_printed(command) == 200, command
 
         resolved = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key)
         assert resolved.findings == baseline.findings

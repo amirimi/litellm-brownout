@@ -6,7 +6,8 @@ from typing import Any, Final
 
 import httpx
 
-from .rules import ModelGroup, group_price, has_usable_prices
+from .gateway_config import declared_data_class, price
+from .rules import ModelGroup, group_price
 
 KEY_PAGE_SIZE: Final = 100
 
@@ -35,26 +36,17 @@ class LiteLLMKey:
 
 
 @dataclass(frozen=True)
-class LiteLLMModel:
-    name: str
-    priced: bool
-
-
-@dataclass(frozen=True)
 class GatewaySnapshot:
     teams: tuple[LiteLLMTeam, ...]
     keys: tuple[LiteLLMKey, ...]
-    models: tuple[LiteLLMModel, ...]
     groups: Mapping[str, ModelGroup]
 
 
 def read_gateway(client: httpx.Client, on_page: PageProgress) -> GatewaySnapshot:
-    deployments: Final = _deployments(client)
     return GatewaySnapshot(
         teams=_teams(client),
         keys=_keys(client, on_page),
-        models=_models(deployments),
-        groups=_groups(deployments),
+        groups=read_model_groups(client),
     )
 
 
@@ -142,17 +134,12 @@ def _deployments(client: httpx.Client) -> list[Mapping[str, Any]]:
     listed: Final = _get(client, "/model/info", {})
     if not isinstance(listed, dict) or not isinstance(listed.get("data"), list):
         raise GatewayReadError("/model/info did not return a list of deployments")
-    return [deployment for deployment in listed["data"] if isinstance(deployment, dict)]
-
-
-def _models(deployments: list[Mapping[str, Any]]) -> tuple[LiteLLMModel, ...]:
-    priced: dict[str, bool] = {}
-    for deployment in deployments:
-        name = str(deployment.get("model_name") or "")
-        priced[name] = priced.get(name, False) or _has_prices(
-            deployment.get("model_info") or {}
+    deployments: Final = listed["data"]
+    if not all(isinstance(deployment, dict) for deployment in deployments):
+        raise GatewayReadError(
+            "/model/info returned a deployment that is not a mapping"
         )
-    return tuple(LiteLLMModel(name, priced[name]) for name in sorted(priced))
+    return deployments
 
 
 def _groups(deployments: list[Mapping[str, Any]]) -> dict[str, ModelGroup]:
@@ -167,33 +154,13 @@ def _group(name: str, infos: list[Mapping[str, Any]]) -> ModelGroup:
     return ModelGroup(
         name=name,
         input_cost_per_token=group_price(
-            [_number(info.get("input_cost_per_token")) for info in infos]
+            [price(info.get("input_cost_per_token")) for info in infos]
         ),
         output_cost_per_token=group_price(
-            [_number(info.get("output_cost_per_token")) for info in infos]
+            [price(info.get("output_cost_per_token")) for info in infos]
         ),
-        data_classes=tuple(_data_class(info) for info in infos),
+        data_classes=tuple(declared_data_class(info) for info in infos),
     )
-
-
-def _data_class(info: Mapping[str, Any]) -> str | None:
-    declared: Final = info.get("data_class")
-    if isinstance(declared, str):
-        return declared
-    return None
-
-
-def _has_prices(model_info: Mapping[str, Any]) -> bool:
-    return has_usable_prices(
-        _number(model_info.get("input_cost_per_token")),
-        _number(model_info.get("output_cost_per_token")),
-    )
-
-
-def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value)
 
 
 def _get(client: httpx.Client, path: str, params: Mapping[str, Any]) -> Any:

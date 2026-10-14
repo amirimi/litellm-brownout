@@ -7,10 +7,17 @@ import httpx
 import pytest
 import yaml
 
-from brownout.cli import InitOptions, check, gateway_file, init, main
+from brownout.cli import InitOptions, check, init, main
+from brownout.inputs import DocumentError
 from brownout.manifest import Manifest
 
-from .support import CONFIG_DIR, SECRET, config_with_inline_secrets, lab_gateway_config
+from .support import (
+    CONFIG_DIR,
+    SECRET,
+    config_with_inline_secrets,
+    gateway_file_of,
+    lab_gateway_config,
+)
 
 LAB_CONFIG = CONFIG_DIR / "config.yaml"
 LAB_MANIFEST = CONFIG_DIR / "manifest.yaml"
@@ -95,7 +102,7 @@ def test_litellm_alerting_without_budget_alerts_passes(tmp_path):
 
 
 def test_a_deployment_without_explicit_prices_is_priced_from_the_cost_map():
-    gateway = gateway_file(
+    gateway = gateway_file_of(
         {
             "model_list": [
                 {
@@ -113,7 +120,7 @@ def test_a_deployment_without_explicit_prices_is_priced_from_the_cost_map():
 
 
 def test_a_group_is_unpriced_when_any_deployment_is():
-    gateway = gateway_file(
+    gateway = gateway_file_of(
         {
             "model_list": [
                 {
@@ -544,12 +551,10 @@ def test_init_reports_a_malformed_manifest_by_position(tmp_path, capsys):
     [
         pytest.param("1e-4", True, id="scientific-without-a-point"),
         pytest.param("0.0001", True, id="decimal-string"),
-        pytest.param("not a price", False, id="text"),
-        pytest.param("nan", False, id="not-finite"),
     ],
 )
 def test_a_string_price_is_read_the_way_litellm_reads_it(written, priced):
-    gateway = gateway_file(
+    gateway = gateway_file_of(
         {
             "model_list": [
                 {
@@ -598,7 +603,7 @@ def test_check_sees_gateway_models_a_file_does_not_list(tmp_path):
     config = lab_gateway_config()
     database_models = {
         name: group
-        for name, group in gateway_file(config).groups.items()
+        for name, group in gateway_file_of(config).groups.items()
         if name.startswith("budget-lab")
     }
     config["model_list"] = [
@@ -629,3 +634,53 @@ def test_check_with_a_gateway_needs_the_init_key(tmp_path, monkeypatch, capsys):
 
     assert exit_code == 2
     assert "BROWNOUT_INIT_KEY" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("written", ["not a price", "nan"])
+def test_an_explicit_price_litellm_cannot_read_is_refused(written):
+    with pytest.raises(DocumentError, match="must be a finite number"):
+        gateway_file_of(
+            {
+                "model_list": [
+                    {
+                        "model_name": "chat",
+                        "litellm_params": {
+                            "model": "openai/never-mapped",
+                            "input_cost_per_token": written,
+                            "output_cost_per_token": written,
+                        },
+                    }
+                ]
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("model", "priced"),
+    [
+        pytest.param("gpt-4o", True, id="cost-map-key"),
+        pytest.param("openai/gpt-4o", True, id="bare-name-is-a-key"),
+        pytest.param("openai/never-mapped", False, id="not-in-the-cost-map"),
+    ],
+)
+def test_the_cost_map_prices_a_model_by_its_full_or_bare_name(model, priced):
+    gateway = gateway_file_of(
+        {"model_list": [{"model_name": "chat", "litellm_params": {"model": model}}]}
+    )
+
+    assert (gateway.groups["chat"].input_cost_per_token is not None) is priced
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param(["check", "--manifest", "m.yaml"], id="check-without-config"),
+        pytest.param(["init", "--gateway-config", "c.yaml"], id="init-without-gateway"),
+        pytest.param([], id="no-command"),
+    ],
+)
+def test_a_command_without_its_required_flags_exits_two(arguments):
+    with pytest.raises(SystemExit) as exited:
+        main(arguments)
+
+    assert exited.value.code == 2

@@ -218,3 +218,100 @@ def test_a_wildcard_group_cannot_be_a_route_or_a_fallback(routes):
 
     assert error.rule is RuleId.MANIFEST_SCHEMA
     assert "concrete model group" in str(error)
+
+
+def _without(doc: dict[str, Any], key: str) -> dict[str, Any]:
+    return {name: value for name, value in doc.items() if name != key}
+
+
+def _team_without(key: str) -> dict[str, Any]:
+    doc = document()
+    doc["teams"]["t"] = _without(doc["teams"]["t"], key)
+    return doc
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        pytest.param(["not", "a", "mapping"], id="manifest-not-a-mapping"),
+        pytest.param(_without(document(), "version"), id="version-missing"),
+        pytest.param(document(top={"version": ""}), id="version-empty"),
+        pytest.param(document(top={"version": 1}), id="version-not-a-string"),
+        pytest.param(_without(document(), "teams"), id="teams-missing"),
+        pytest.param(document(top={"teams": {}}), id="teams-empty"),
+        pytest.param(document(top={"teams": ["t"]}), id="teams-not-a-mapping"),
+        pytest.param(document(top={"data_class_order": []}), id="order-empty"),
+        pytest.param(
+            document(top={"data_class_order": "internal"}), id="order-not-a-list"
+        ),
+        pytest.param(
+            document(top={"data_class_order": ["internal", ""]}), id="order-entry-empty"
+        ),
+        pytest.param(
+            document(top={"data_class_order": ["internal", 3]}),
+            id="order-entry-not-a-string",
+        ),
+        pytest.param(
+            document(top={"teams": {"t": ["entry"]}}), id="team-not-a-mapping"
+        ),
+        pytest.param(_team_without("policy_epoch"), id="epoch-missing"),
+        pytest.param(document({"policy_epoch": 1}), id="epoch-not-a-string"),
+        pytest.param(document({"warn_tiers": 75}), id="team-tiers-not-a-list"),
+        pytest.param(document({"routes": ["a"]}), id="routes-not-a-mapping"),
+        pytest.param(document({"routes": {"a": ["b"]}}), id="route-not-a-mapping"),
+        pytest.param(
+            document({"routes": {"a": {"fallback": ""}}}), id="fallback-empty"
+        ),
+        pytest.param(
+            document({"routes": {"a": {"fallback": 3}}}), id="fallback-not-a-string"
+        ),
+        pytest.param(
+            document({"routes": {"a": {"warn_tiers": 75}}}), id="route-tiers-not-a-list"
+        ),
+        pytest.param(
+            document({"routes": {"a": {"warn_tiers": ["75"]}}}),
+            id="route-tier-not-an-integer",
+        ),
+        pytest.param(
+            document({"routes": {"a": {"fallback": "b", "degrade_at": 90.5}}}),
+            id="degrade-at-not-an-integer",
+        ),
+        pytest.param(
+            document({"routes": {"a": {"fallback": "b", "degrade_at": True}}}),
+            id="degrade-at-boolean",
+        ),
+        pytest.param(
+            document(top={"teams": {123: document()["teams"]["t"]}}),
+            id="team-id-a-number",
+        ),
+        pytest.param(
+            document(top={"teams": {True: document()["teams"]["t"]}}),
+            id="team-id-a-boolean",
+        ),
+        pytest.param(document({"routes": {7: {}}}), id="route-name-a-number"),
+    ],
+)
+def test_a_malformed_manifest_is_refused_by_schema(doc):
+    assert refused(doc).rule is RuleId.MANIFEST_SCHEMA
+
+
+def test_a_quoted_number_is_a_team_id():
+    loaded = load(document(top={"teams": {"0123": document()["teams"]["t"]}}))
+
+    assert loaded.team_ids == ("0123",)
+
+
+def test_tiers_listed_twice_collapse_into_one():
+    loaded = load(document({"warn_tiers": [90, 75, 90]}))
+
+    assert loaded.team_policy("t").warn_tiers == (75, 90)
+
+
+def test_a_route_declared_with_no_settings_never_degrades():
+    route = load(document({"routes": {"a": None}})).team_policy("t").routes["a"]
+
+    assert (route.fallback, route.degrade_at, route.warn_tiers) == (None, None, ())
+
+
+def test_a_team_without_routes_has_none():
+    assert load(document({"routes": None})).team_policy("t").routes == {}

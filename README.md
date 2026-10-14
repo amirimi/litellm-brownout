@@ -265,6 +265,8 @@ such as a refused downgrade and a broken manifest. `docker compose down` stops t
 
 - Routes name concrete model groups. A request through a wildcard group such as `openai/*` earns
   team tiers and never degrades, so the manifest refuses a wildcard route.
+- `check` and `init` read the config file you pass them. A gateway that loads its config from a
+  bucket needs that file downloaded first.
 - Brownout governs `/v1/chat/completions` only. Embeddings, images, audio, `/v1/messages` and
   `/v1/responses` pass through at full price and without headers.
 - Router fallbacks never apply to governed requests. A provider error on the chosen model group

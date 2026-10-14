@@ -13,7 +13,7 @@ import litellm
 import pytest
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.litellm_core_utils import litellm_logging
-from litellm.proxy._types import UserAPIKeyAuth
+from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.auth import auth_checks
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.spend_tracking import budget_reservation
@@ -224,3 +224,195 @@ def test_seam_the_router_keeps_custom_model_info(lab_router):
 
 def test_seam_the_router_lists_its_model_groups(lab_router):
     assert "seam-primary" in lab_router.get_model_names()
+
+
+@pytest.fixture
+def naming_router(monkeypatch) -> litellm.Router:
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    return litellm.Router(
+        model_list=[
+            {
+                "model_name": "openai/*",
+                "litellm_params": {"model": "openai/*", "api_key": "sk-seam"},
+            },
+            {
+                "model_name": "seam-mixed",
+                "litellm_params": {
+                    "model": "openai/seam-priced",
+                    "api_key": "sk-seam",
+                    "input_cost_per_token": 1e-6,
+                    "output_cost_per_token": 2e-6,
+                },
+            },
+            {
+                "model_name": "seam-mixed",
+                "litellm_params": {
+                    "model": "openai/seam-never-mapped",
+                    "api_key": "sk-seam",
+                },
+            },
+            {
+                "model_name": "seam-model-info",
+                "litellm_params": {
+                    "model": "openai/seam-never-mapped",
+                    "api_key": "sk-seam",
+                },
+                "model_info": {
+                    "input_cost_per_token": 1e-6,
+                    "output_cost_per_token": 2e-6,
+                },
+            },
+        ],
+        model_group_alias={
+            "seam-alias": "seam-mixed",
+            "seam-hidden": {"model": "seam-mixed", "hidden": True},
+        },
+    )
+
+
+def test_seam_a_wildcard_deployment_prices_a_name_no_group_has(naming_router):
+    info = naming_router.get_model_group_info(model_group="openai/gpt-4o")
+
+    assert info is not None
+    assert info.input_cost_per_token is not None
+    assert "openai/gpt-4o" not in naming_router.get_model_names()
+
+
+def test_seam_a_router_alias_reports_the_price_of_its_group(naming_router):
+    alias = naming_router.get_model_group_info(model_group="seam-alias")
+    group = naming_router.get_model_group_info(model_group="seam-mixed")
+
+    assert alias is not None
+    assert group is not None
+    assert (alias.input_cost_per_token, alias.output_cost_per_token) == (
+        group.input_cost_per_token,
+        group.output_cost_per_token,
+    )
+
+
+def test_seam_a_hidden_router_alias_reports_no_group(naming_router):
+    assert naming_router.get_model_group_info(model_group="seam-hidden") is None
+
+
+def test_seam_a_group_reports_the_highest_price_any_deployment_knows(naming_router):
+    info = naming_router.get_model_group_info(model_group="seam-mixed")
+
+    assert info is not None
+    assert (info.input_cost_per_token, info.output_cost_per_token) == (1e-6, 2e-6)
+
+
+def test_seam_a_price_in_model_info_prices_the_group(naming_router):
+    info = naming_router.get_model_group_info(model_group="seam-model-info")
+
+    assert info is not None
+    assert (info.input_cost_per_token, info.output_cost_per_token) == (1e-6, 2e-6)
+
+
+def test_seam_team_and_key_aliases_apply_before_the_pre_call_hook():
+    source = (LITELLM_ROOT / "proxy/common_request_processing.py").read_text(
+        encoding="utf-8"
+    )
+    aliases = ast.unparse(
+        _function_in_source(
+            "proxy/litellm_pre_call_utils.py", "add_litellm_data_to_request"
+        )
+    )
+
+    assert source.index("self.data = await add_litellm_data_to_request(") < (
+        source.index("self.data = await proxy_logging_obj.pre_call_hook(")
+    )
+    assert "_update_model_if_team_alias_exists(" in aliases
+    assert "_update_model_if_key_alias_exists(" in aliases
+
+
+PER_REQUEST_ALIASES_FROM: Final = (1, 97, 0)
+RESOLVES_PER_REQUEST_ALIASES: Final = _installed_release() >= PER_REQUEST_ALIASES_FROM
+
+
+def _pre_call_source() -> str:
+    return (LITELLM_ROOT / "proxy/common_request_processing.py").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        'general_settings.get("completion_model", None)',
+        'litellm.model_alias_map[self.data["model"]]',
+        'user_api_key_dict.aliases[self.data["model"]]',
+    ],
+)
+def test_seam_server_and_key_model_rewrites_apply_before_the_pre_call_hook(rewrite):
+    source = _pre_call_source()
+
+    assert source.index(rewrite) < source.index(
+        "self.data = await proxy_logging_obj.pre_call_hook("
+    )
+
+
+@pytest.mark.skipif(
+    not RESOLVES_PER_REQUEST_ALIASES, reason="per-request aliases arrive in 1.97.0"
+)
+def test_seam_key_and_team_router_aliases_apply_before_the_pre_call_hook():
+    source = _pre_call_source()
+
+    assert source.index("_resolve_per_request_model_group_alias(") < source.index(
+        "self.data = await proxy_logging_obj.pre_call_hook("
+    )
+
+
+def test_seam_a_local_rate_limit_retries_the_pre_call_logic_on_a_router_fallback():
+    source = _pre_call_source()
+
+    assert "except ProxyRateLimitError as original_exc:" in source
+    assert '.get("disable_fallbacks")' in source
+
+
+@pytest.mark.skipif(
+    not RESOLVES_PER_REQUEST_ALIASES,
+    reason="user budgets reach team keys only through a setting added in 1.97.0",
+)
+def test_seam_a_setting_lets_a_user_budget_refuse_team_keys():
+    check = ast.unparse(
+        _function_in_source("proxy/auth/auth_checks.py", "common_checks")
+    )
+
+    assert "apply_user_budget_to_team_keys" in check
+
+
+@pytest.mark.skipif(
+    RESOLVES_PER_REQUEST_ALIASES,
+    reason="1.97.0 adds a setting for user budgets on team keys",
+)
+def test_seam_before_1_97_a_user_budget_applies_to_personal_keys_only():
+    check = ast.unparse(
+        _function_in_source("proxy/auth/auth_checks.py", "common_checks")
+    )
+
+    assert "(team_object is None or team_object.team_id is None)" in check
+
+
+@pytest.mark.skipif(
+    not RESOLVES_PER_REQUEST_ALIASES, reason="the setting arrives in 1.97.0"
+)
+def test_seam_a_user_budget_skips_team_keys_unless_the_setting_is_true():
+    check = ast.unparse(
+        _function_in_source("proxy/auth/auth_checks.py", "common_checks")
+    )
+
+    assert (
+        "is_team_key and general_settings.get('apply_user_budget_to_team_keys') is not True"
+        in check
+    )
+
+
+def test_seam_a_model_outside_the_allowlist_raises_a_proxy_exception():
+    with pytest.raises(ProxyException):
+        auth_checks._can_object_call_model(
+            model="seam-outside",
+            llm_router=None,
+            models=["seam-inside"],
+            team_id="seam-team",
+            object_type="team",
+        )

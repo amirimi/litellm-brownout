@@ -16,6 +16,7 @@ from litellm.proxy.auth.auth_checks import (
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 
+from .gateway_config import declared_data_class, settings_from_general
 from .manifest import TeamPolicy
 from .policy import (
     Decision,
@@ -239,7 +240,7 @@ class LiteLLMGatewayState:
             input_cost_per_token=info.input_cost_per_token,
             output_cost_per_token=info.output_cost_per_token,
             data_classes=tuple(
-                (deployment.get("model_info") or {}).get("data_class")
+                declared_data_class(deployment.get("model_info") or {})
                 for deployment in router.get_model_list(model_name=name) or []
             ),
         )
@@ -251,13 +252,7 @@ class LiteLLMGatewayState:
         return name in router.get_model_names(team_id=team_id)
 
     def settings(self) -> GatewaySettings:
-        general = self._general_settings()
-        return GatewaySettings(
-            fail_closed_budget_enforcement=general.get("fail_closed_budget_enforcement")
-            is True,
-            disable_budget_reservation=general.get("disable_budget_reservation")
-            is True,
-        )
+        return settings_from_general(self._general_settings())
 
 
 class RedisClaimStore:

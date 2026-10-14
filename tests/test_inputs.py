@@ -109,3 +109,32 @@ def test_a_config_without_includes_is_unchanged(tmp_path):
     assert with_includes(tmp_path / "config.yaml", {"model_list": []}) == {
         "model_list": []
     }
+
+
+def test_an_included_file_that_is_not_a_mapping_is_refused(tmp_path):
+    (tmp_path / "models.yaml").write_text("- model_name: a\n", encoding="utf-8")
+
+    with pytest.raises(DocumentError, match="is not a YAML mapping"):
+        with_includes(tmp_path / "config.yaml", {"include": ["models.yaml"]})
+
+
+def test_an_included_file_that_includes_more_files_is_refused(tmp_path):
+    (tmp_path / "models.yaml").write_text("include:\n  - more.yaml\n", encoding="utf-8")
+    (tmp_path / "more.yaml").write_text("model_list: []\n", encoding="utf-8")
+
+    with pytest.raises(DocumentError, match="models.yaml includes more files"):
+        with_includes(tmp_path / "config.yaml", {"include": ["models.yaml"]})
+
+
+def test_a_file_included_twice_is_refused(tmp_path):
+    (tmp_path / "models.yaml").write_text("model_list: []\n", encoding="utf-8")
+
+    with pytest.raises(DocumentError, match=r"includes \./models\.yaml twice"):
+        with_includes(
+            tmp_path / "config.yaml", {"include": ["models.yaml", "./models.yaml"]}
+        )
+
+
+def test_an_include_entry_that_is_not_a_path_is_refused(tmp_path):
+    with pytest.raises(DocumentError, match="include must list files"):
+        with_includes(tmp_path / "config.yaml", {"include": [3]})

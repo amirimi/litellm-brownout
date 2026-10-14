@@ -15,8 +15,8 @@ uv sync
 uv run pytest -m "not e2e"
 ```
 
-The unit and seam suites hold 381 tests and need no Redis or gateway. One boundary seam skips on
-each release, because the shrink and refuse-whole seams split by release. `decide` and `resolve` are
+The unit and seam suites hold 551 tests and need no Redis or gateway. A few seams skip on each
+release, because the LiteLLM behaviours they pin begin or end at a release. `decide` and `resolve` are
 pure functions tested with plain values. Every outside dependency of the pipeline sits behind a
 protocol in `src/brownout/ports.py`, so the gateway tests inject fakes, and the permission and
 guardrail tests drive LiteLLM's real helpers. `tests/test_rules.py` and `tests/test_cli.py` run the
@@ -27,7 +27,9 @@ plugin depends on, such as the signature of a private helper, the shape of a res
 guardrails merging before the pre-call hook. A LiteLLM release that changes one of them fails with
 that behaviour's name.
 
-The end-to-end sequence holds 12 tests and runs on mock routes. It spends no provider money and
+The end-to-end sequence holds 12 tests and runs on mock routes. Six more tests in
+`tests/test_printed_commands_e2e.py` run the commands `init` prints against the gateway and read back
+the change. It spends no provider money and
 still exercises real reservations, a real Redis counter and the native ceiling. It reads the
 plugin's announcements from `docker compose logs litellm` and the request facts from LiteLLM's
 `/spend/logs`. Real-provider
@@ -74,7 +76,28 @@ The README marks the blocks the runner runs with `<!-- adoption: name -->` comme
 moves with its block. A scenario directory holds `scenario.yaml`, the gateway's `config.yaml`, and
 optionally a `compose.yml` overlay and any file the config includes. The `adoption` workflow runs
 every scenario on 1.95.1 and 1.104.2 weekly and on pull requests that touch `init`, `check`, the
-README or the docs.
+README or the docs. It also runs `a-config-models` and `b-ui-models` on every supported release line,
+because those two run the README's commands against LiteLLM's API.
+
+## Input ledger
+
+`tests/ledger/` lists every input that can change what brownout does, and `tests/test_ledger.py`
+keeps the list and the code in step. A new input gets one parsing function first, then a row, then a
+test for each form the row names.
+
+- A row names the input's shape, its parsing function, the raw reads that function makes, and the
+  forms the input can take. A form is supported, refused at the earliest stage that can see it,
+  documented when no stage can see it, or open while it waits on a decision. `OPEN_FINDINGS` in
+  `tests/ledger/inventory.py` names each open decision, so closing one removes its entry.
+- `tests/ledger/scan.py` finds every key, attribute, environment variable, flag and LiteLLM call
+  brownout reads. The ledger test fails on a read without a row and on a row whose read the code no
+  longer makes. The scan sees keys written as literals or module constants, so a helper that takes
+  the key as a parameter needs its row written by hand.
+- A row about LiteLLM cites its code as `path:line@release`, at a release the ledger walked.
+- Raising the `litellm[proxy]` bound in `pyproject.toml` fails the ledger test until the new minor
+  line is walked. Walk LiteLLM's config loading, its request path from `add_litellm_data_to_request`
+  to the router's deployment choice, and `common_checks` at the new release. Then add the release to
+  `WALKED_RELEASES`, `litellm-matrix.yml` and the adoption workflow's README scenarios.
 
 ## Supported LiteLLM releases
 
@@ -99,8 +122,8 @@ LITELLM_TAG=v1.104.2 docker compose up -d --wait
 LAB_REQUIRE_STACK=1 uv run --no-sync pytest -m e2e
 ```
 
-A new release joins the range when all three suites pass on it. Add the release to the workflow's
-matrix and raise `TESTED_CEILING`. The end-to-end sequence accepts LiteLLM's budget refusal as a 429
+A new release joins the range when it has been walked into the input ledger and all three suites
+pass on it. Add the release to the workflow's matrix and raise `TESTED_CEILING`. The end-to-end sequence accepts LiteLLM's budget refusal as a 429
 or a 422, because 1.104 changed the default code to 422. A seam failure names the LiteLLM behaviour
 that changed, and the fix belongs in `src/brownout/bridge.py`, the only module that touches
 LiteLLM's internals.

@@ -124,9 +124,10 @@ class Manifest:
         teams = document.get("teams")
         if not isinstance(teams, dict) or not teams:
             raise _schema(source, "'teams' must be a non-empty mapping")
+        _require_string_names(source, "team id", teams)
 
         policies = {
-            str(team_id): _build_team(source, str(team_id), entry)
+            team_id: _build_team(source, team_id, entry)
             for team_id, entry in teams.items()
         }
         data_class_order = _data_class_order(
@@ -166,6 +167,7 @@ def _build_team(source: str, team_id: str, entry: Any) -> TeamPolicy:
     routes_entry = entry.get("routes") or {}
     if not isinstance(routes_entry, dict):
         raise _schema(source, f"{where} 'routes' must be a mapping")
+    _require_string_names(source, f"{where} route", routes_entry)
 
     return TeamPolicy(
         team_id=team_id,
@@ -174,7 +176,7 @@ def _build_team(source: str, team_id: str, entry: Any) -> TeamPolicy:
         budget_duration=_budget_duration(source, where, entry.get("budget_duration")),
         warn_tiers=_tiers(source, where, entry.get("warn_tiers")),
         routes={
-            str(route): _build_route(source, team_id, str(route), route_entry)
+            route: _build_route(source, team_id, route, route_entry)
             for route, route_entry in routes_entry.items()
         },
     )
@@ -212,6 +214,16 @@ def _build_route(source: str, team_id: str, route: str, entry: Any) -> RoutePoli
         degrade_at=degrade_at,
         warn_tiers=_tiers(source, where, entry.get("warn_tiers")),
     )
+
+
+def _require_string_names(source: str, what: str, entries: Mapping[Any, Any]) -> None:
+    unquoted: Final = [name for name in entries if not isinstance(name, str)]
+    if unquoted:
+        raise _schema(
+            source,
+            f"{what} {unquoted[0]!r} is not a string. YAML reads an unquoted number or "
+            "yes, no, on and off as another type, so quote the name",
+        )
 
 
 def _require_concrete(source: str, where: str, group: str) -> None:

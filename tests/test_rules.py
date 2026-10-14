@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import pytest
 
-from brownout.cli import gateway_file
 from brownout.manifest import Manifest, RoutePolicy
 from brownout.refusals import RuleId
 from brownout.rules import (
@@ -17,7 +16,7 @@ from brownout.rules import (
     settings_rules,
 )
 
-from .support import DATA_CLASS_ORDER, lab_gateway_config
+from .support import DATA_CLASS_ORDER, gateway_file_of, lab_gateway_config
 
 PAIR = RoutePolicy(route="primary", fallback="cheaper", degrade_at=90, warn_tiers=())
 SAFE_SETTINGS = GatewaySettings(
@@ -50,7 +49,7 @@ def rules_for(*groups: ModelGroup) -> list[RuleId]:
 
 
 def test_the_lab_config_and_manifest_pass_every_rule(manifest):
-    assert file_rules(manifest, gateway_file(lab_gateway_config())) == []
+    assert file_rules(manifest, gateway_file_of(lab_gateway_config())) == []
 
 
 def test_a_served_priced_classified_pair_passes():
