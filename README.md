@@ -1,5 +1,9 @@
 # LiteLLM Brownout
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/amk9978/litellm-brownout/main/docs/assets/litellm-brownout.gif" width="540" alt="Team-a's weekly budget fills toward $500. The gateway log announces the 75% and 90% tiers, then chat-qa switches to its fallback chat-qa-degraded with x-brownout headers while code-review keeps its primary.">
+</p>
+
 Brownout moves chosen routes on a LiteLLM gateway to cheaper models as a team's budget fills, and
 tells each caller which model answered.
 
