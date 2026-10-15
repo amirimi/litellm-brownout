@@ -17,7 +17,6 @@ from .onboarding import (
     TeamEntry,
 )
 
-MANIFEST_VERSION: Final = "v1"
 LINE_WIDTH: Final = 4096
 DEFAULT_INDENT: Final = 2
 DEFAULT_SEQUENCE_INDENT: Final = 4
@@ -105,7 +104,6 @@ def new_manifest_document(entries: Iterable[TeamEntry]) -> YamlDocument:
     runtime: Final = yaml_runtime()
     document: Final = _parse(runtime, "")
     document.data = runtime.comments.CommentedMap()
-    document.data["version"] = MANIFEST_VERSION
     document.data["teams"] = {entry.team_id: entry.document() for entry in entries}
     return _parse(runtime, dump_document(document))
 

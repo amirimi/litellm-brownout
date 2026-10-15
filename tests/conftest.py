@@ -43,7 +43,6 @@ def strict_route() -> RoutePolicy:
 def team(degrading_route: RoutePolicy, strict_route: RoutePolicy) -> TeamPolicy:
     return TeamPolicy(
         team_id="budget-lab",
-        policy_epoch="test-1",
         envelope_usd=1000.0,
         budget_duration="7d",
         warn_tiers=(75, 90),

@@ -110,11 +110,7 @@ class BrownoutHandler(CustomLogger):
             claims=bridge.RedisClaimStore(bridge.live_spend_counter_redis),
             events=EventLog(),
         )
-        logger.info(
-            "brownout loaded: manifest=%s teams=%s",
-            manifest.version,
-            ",".join(manifest.team_ids),
-        )
+        logger.info("brownout loaded: teams=%s", ",".join(manifest.team_ids))
         return handler
 
     async def async_pre_call_hook(

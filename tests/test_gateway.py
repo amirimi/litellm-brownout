@@ -584,7 +584,29 @@ async def test_claims_carry_the_team_and_the_policy_epoch(team):
         "tier",
         "tier",
     ]
-    assert all(key.split(":")[1:3] == ["budget-lab", "test-1"] for key in store.claimed)
+    assert all(
+        key.split(":")[1:3] == ["budget-lab", team.policy_epoch]
+        for key in store.claimed
+    )
+
+
+async def test_a_tier_claimed_under_the_old_policy_fires_again_under_the_new(team):
+    store = FakeStore()
+    sink = RecordingSink()
+    changed = replace(team, warn_tiers=(75, 80))
+    spend = team.envelope_usd * 0.76
+    before = build_handler(team, sink, spend=spend, store=store)
+    after = build_handler(changed, sink, spend=spend, store=store)
+
+    await request(before, make_auth(team), "budget-lab-primary")
+    await request(before, make_auth(team), "budget-lab-primary")
+    await request(after, make_auth(changed), "budget-lab-primary")
+
+    assert [(event.tier, event.policy_epoch) for event in sink.tiers] == [
+        (75, team.policy_epoch),
+        (75, changed.policy_epoch),
+    ]
+    assert team.policy_epoch != changed.policy_epoch
 
 
 async def test_the_window_follows_the_gateways_reset_schedule(team, monkeypatch):
@@ -602,7 +624,7 @@ async def test_the_window_follows_the_gateways_reset_schedule(team, monkeypatch)
     await request(handler, make_auth(team), "budget-lab-primary")
 
     window = get_budget_reset_time(team.budget_duration).astimezone(UTC).isoformat()
-    assert store.claimed == {f"tier:budget-lab:test-1:{window}:team:75"}
+    assert store.claimed == {f"tier:budget-lab:{team.policy_epoch}:{window}:team:75"}
 
 
 async def test_no_permission_check_runs_below_the_degrade_threshold(team):
@@ -694,7 +716,7 @@ async def test_a_rejection_is_reported_after_another_route_claimed_the_tiers(tea
             "event": "brownout_fallback_rejected",
             "owner": "team",
             "team_id": "budget-lab",
-            "policy_epoch": "test-1",
+            "policy_epoch": team.policy_epoch,
             "window": sink.tiers[0].window,
             "route": "budget-lab-primary",
             "target": "budget-lab-degraded",
@@ -775,7 +797,6 @@ async def test_a_dearer_fallback_approved_in_the_manifest_is_served():
     )
     team = TeamPolicy(
         team_id="team-a",
-        policy_epoch="team-a-v1",
         envelope_usd=500.0,
         budget_duration="7d",
         warn_tiers=(),
@@ -803,7 +824,7 @@ async def test_a_route_that_starts_degrading_is_announced(team):
             "event": "brownout_route_degraded",
             "owner": "team",
             "team_id": "budget-lab",
-            "policy_epoch": "test-1",
+            "policy_epoch": team.policy_epoch,
             "window": sink.tiers[0].window,
             "route": "budget-lab-primary",
             "served_route": "budget-lab-degraded",

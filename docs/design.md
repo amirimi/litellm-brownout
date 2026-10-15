@@ -88,7 +88,7 @@ read from the LiteLLM 1.101.0 source that the links cite.
 | Rules over LiteLLM's own config, run in CI and on every request | LiteLLM validates its settings one at a time and has no notion of the assumptions a plugin makes about them |
 | Caller disclosure | No native header or logging field carries the served route or the route it degraded from |
 | Guardrail re-merge after a rewrite | The merge runs at stage 3 keyed on the requested model, so a stage 4 rewrite would drop the target's guardrails |
-| Versioned, cross-replica deduplication | Each claim carries team, policy epoch, window and transition, so an approved policy change re-arms its transitions |
+| Versioned, cross-replica deduplication | Each claim carries team, policy epoch, window and transition. The epoch is derived from the team's policy, so a policy change re-arms its transitions |
 
 ## Known limitations
 

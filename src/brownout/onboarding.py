@@ -41,7 +41,6 @@ class TeamEntry:
 
     def document(self) -> dict[str, Any]:
         return {
-            "policy_epoch": f"{self.team_id}-v1",
             "envelope_usd": self.envelope_usd,
             "budget_duration": self.budget_duration,
             "warn_tiers": list(DEFAULT_WARN_TIERS),

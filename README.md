@@ -165,11 +165,9 @@ In `brownout.yaml`, list the data classes least restricted first and give the ro
 
 <!-- adoption: fallback-manifest -->
 ```yaml
-version: "v1"
 data_class_order: [internal, customer_pii]
 teams:
   team-a:
-    policy_epoch: "team-a-v1"
     envelope_usd: 500.0
     budget_duration: "7d"
     warn_tiers: [75, 90]

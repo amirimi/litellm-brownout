@@ -397,7 +397,9 @@ def test_the_full_tier_sequence_is_observable_on_mock_routes(
         f"{drained.requests} requests"
     )
     assert events[0]["route"] == LAB_ROUTE
-    assert events[0]["policy_epoch"] == "budget-lab-v1"
+    lab_team = Manifest.from_file(LAB_MANIFEST).team_policy(LAB_TEAM_ID)
+    assert lab_team is not None
+    assert events[0]["policy_epoch"] == lab_team.policy_epoch
     assert events[0]["envelope_usd"] == LAB_ENVELOPE_USD
     assert events[0]["spend_usd"] >= 0.75
     assert events[1]["spend_usd"] >= 0.90
@@ -735,8 +737,8 @@ def test_init_merges_into_an_existing_manifest_and_reports_every_mismatch(
     theirs = tmp_path / "theirs.yaml"
     original = LAB_MANIFEST.read_text(encoding="utf-8")
     drifted = original.replace(
-        'policy_epoch: "budget-lab-v1"\n    envelope_usd: 1.0\n    budget_duration: "7d"',
-        'policy_epoch: "budget-lab-v1"\n    envelope_usd: 2.0\n    budget_duration: "1d"',
+        'envelope_usd: 1.0\n    budget_duration: "7d"',
+        'envelope_usd: 2.0\n    budget_duration: "1d"',
     )
     assert drifted != original
     theirs.write_text(drifted, encoding="utf-8")

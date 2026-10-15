@@ -178,15 +178,12 @@ platform incident when either breaks its assumption. The duration is invisible a
 ## Team manifest
 
 ```yaml
-version: "v1"
-
 data_class_order:
   - internal
   - customer_pii
 
 teams:
   team-a:
-    policy_epoch: "team-a-v1"
     envelope_usd: 500.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
@@ -200,10 +197,8 @@ teams:
 
 | Key | Type | Rule |
 |---|---|---|
-| `version` | string | Required. Reported in the handler's load log |
 | `data_class_order` | list of distinct strings, least restricted first | Required when any route declares a fallback |
 | `teams.<team_id>` | mapping | Keyed by the LiteLLM `team_id`. A key whose team is absent here is refused with a 503 and a platform incident |
-| `policy_epoch` | string | Required. Part of every claim key, so an approved policy change re-arms every transition inside the current window |
 | `envelope_usd` | positive finite number | The owner-approved budget. Must equal the LiteLLM team's `max_budget` |
 | `budget_duration` | `1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`, `24h`, `1d`, `7d`, `1w`, `30d`, `1mo`, `hourly`, `daily`, `weekly` or `monthly` | The windows that tumble with LiteLLM's resets. Any other value fails rule `duration-tumbles` |
 | `warn_tiers` | list of integers in 1..99, optional | Team tiers. Each raises one event with scope `team` per window. 100 belongs to LiteLLM's ceiling |
@@ -211,6 +206,14 @@ teams:
 | `routes.<model_group>.fallback` | model group name | The degradation target. It differs from its route (rule `fallback-distinct`), is served and priced, and is at least as restricted in data class. Its price relative to the route is the owner's call |
 | `routes.<model_group>.degrade_at` | integer in 1..99 | Requires `fallback`. A degrade threshold only, and never a tier |
 | `routes.<model_group>.warn_tiers` | list of integers in 1..99, optional | Route tiers. Each raises one event with scope `route` per window, on a request to that route |
+
+Brownout derives each team's policy epoch from its `envelope_usd`, `budget_duration`, `warn_tiers`
+and routes, as the first 12 hex characters of a SHA-256 over their parsed values. Every claim key and
+team event carries it. A change to any of those values gives that team a new epoch when the gateway
+restarts, so each tier and downgrade already announced in the current window can be announced once
+more. Key order, layout, comments and writing `500` for `500.0` leave the epoch unchanged, and other
+teams keep theirs. A manifest from an earlier release that still carries `version` or `policy_epoch`
+fails rule `manifest-schema`, which names the key to delete.
 
 An unknown key at any level fails rule `manifest-schema` and names the key, so a typo such as
 `degrade_At` stops the manifest from loading. A team id or a route name must be a string. YAML reads

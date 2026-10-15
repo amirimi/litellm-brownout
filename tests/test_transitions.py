@@ -55,10 +55,11 @@ def test_each_transition_has_its_own_key(team):
         )
     ]
 
+    epoch = team.policy_epoch
     assert keys == [
-        "tier:budget-lab:test-1:w:team:75",
-        "tier:budget-lab:test-1:w:route:budget-lab-primary:60",
-        "degraded:budget-lab:test-1:w:budget-lab-primary",
+        f"tier:budget-lab:{epoch}:w:team:75",
+        f"tier:budget-lab:{epoch}:w:route:budget-lab-primary:60",
+        f"degraded:budget-lab:{epoch}:w:budget-lab-primary",
     ]
 
 
@@ -77,9 +78,9 @@ def test_a_rejection_is_keyed_on_its_reason(team):
         )
     ]
 
-    assert (
-        keys[-1]
-        == "fallback_rejected:budget-lab:test-1:w:budget-lab-primary:outside_caller_allowlist"
+    assert keys[-1] == (
+        f"fallback_rejected:budget-lab:{team.policy_epoch}:w:budget-lab-primary:"
+        "outside_caller_allowlist"
     )
 
 
