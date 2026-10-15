@@ -61,7 +61,6 @@ def manifest_with(teams: dict[str, Any]) -> Manifest:
     return Manifest.from_document(
         "test",
         {
-            "version": "v1",
             "data_class_order": ["internal"],
             "teams": teams,
         },
@@ -80,7 +79,6 @@ def test_a_budgeted_team_becomes_an_entry_that_matches_litellm():
         TeamEntry("search", 500.0, "7d"),
     )
     assert entries[1].document() == {
-        "policy_epoch": "search-v1",
         "envelope_usd": 500.0,
         "budget_duration": "7d",
         "warn_tiers": [75, 90],
@@ -175,7 +173,6 @@ def test_reconciling_names_every_mismatch_with_litellm():
     manifest = manifest_with(
         {
             "search": {
-                "policy_epoch": "search-v1",
                 "envelope_usd": 400.0,
                 "budget_duration": "30d",
                 "routes": {
@@ -183,7 +180,6 @@ def test_reconciling_names_every_mismatch_with_litellm():
                 },
             },
             "ghost": {
-                "policy_epoch": "ghost-v1",
                 "envelope_usd": 10.0,
                 "budget_duration": "7d",
             },
@@ -210,7 +206,6 @@ def test_a_team_that_allows_every_model_allows_its_fallbacks(models):
     manifest = manifest_with(
         {
             "search": {
-                "policy_epoch": "search-v1",
                 "envelope_usd": 500.0,
                 "budget_duration": "7d",
                 "routes": {"chat": {"fallback": "chat-cheap", "degrade_at": 90}},

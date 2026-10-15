@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from math import isfinite
 from pathlib import Path
 from typing import Any, Final
@@ -27,9 +30,11 @@ WINDOW_SECONDS: Final[Mapping[str, int]] = {
     "monthly": LONGEST_MONTH_SECONDS,
 }
 
-MANIFEST_KEYS: Final = frozenset({"version", "data_class_order", "teams"})
+EPOCH_HEX_CHARACTERS: Final = 12
+
+MANIFEST_KEYS: Final = frozenset({"data_class_order", "teams"})
 TEAM_KEYS: Final = frozenset(
-    {"policy_epoch", "envelope_usd", "budget_duration", "warn_tiers", "routes"}
+    {"envelope_usd", "budget_duration", "warn_tiers", "routes"}
 )
 ROUTE_KEYS: Final = frozenset({"fallback", "degrade_at", "warn_tiers"})
 
@@ -68,7 +73,6 @@ class RoutePolicy:
 @dataclass(frozen=True)
 class TeamPolicy:
     team_id: str
-    policy_epoch: str
     envelope_usd: float
     budget_duration: str
     warn_tiers: tuple[int, ...]
@@ -76,7 +80,6 @@ class TeamPolicy:
 
     def __post_init__(self) -> None:
         assert self.team_id, "a team policy needs a team id"
-        assert self.policy_epoch, f"team {self.team_id!r} needs a policy epoch"
         assert isfinite(self.envelope_usd) and self.envelope_usd > 0, (
             f"team {self.team_id!r} envelope {self.envelope_usd} is not a positive "
             "finite number"
@@ -89,6 +92,28 @@ class TeamPolicy:
             f"team {self.team_id!r} has a warn tier outside 1..99"
         )
 
+    @cached_property
+    def policy_epoch(self) -> str:
+        canonical: Final = json.dumps(
+            {
+                "envelope_usd": self.envelope_usd,
+                "budget_duration": self.budget_duration,
+                "warn_tiers": list(self.warn_tiers),
+                "routes": {
+                    name: {
+                        "fallback": route.fallback,
+                        "degrade_at": route.degrade_at,
+                        "warn_tiers": list(route.warn_tiers),
+                    }
+                    for name, route in self.routes.items()
+                },
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest: Final = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return digest[:EPOCH_HEX_CHARACTERS]
+
     def route_policy(self, route: str) -> RoutePolicy:
         declared = self.routes.get(route)
         if declared is not None:
@@ -99,11 +124,9 @@ class TeamPolicy:
 class Manifest:
     def __init__(
         self,
-        version: str,
         data_class_order: tuple[str, ...],
         teams: Mapping[str, TeamPolicy],
     ) -> None:
-        self.version: Final = version
         self.data_class_order: Final = data_class_order
         self._teams: Final = dict(teams)
 
@@ -117,10 +140,6 @@ class Manifest:
             raise _schema(source, "a manifest must be a YAML mapping")
         _require_known_keys(source, "the manifest", document, MANIFEST_KEYS)
 
-        version = document.get("version")
-        if not isinstance(version, str) or not version:
-            raise _schema(source, "a manifest must carry a string 'version'")
-
         teams = document.get("teams")
         if not isinstance(teams, dict) or not teams:
             raise _schema(source, "'teams' must be a non-empty mapping")
@@ -133,7 +152,7 @@ class Manifest:
         data_class_order = _data_class_order(
             source, document.get("data_class_order"), policies
         )
-        return cls(version=version, data_class_order=data_class_order, teams=policies)
+        return cls(data_class_order=data_class_order, teams=policies)
 
     def team_policy(self, team_id: str | None) -> TeamPolicy | None:
         if team_id is None:
@@ -160,10 +179,6 @@ def _build_team(source: str, team_id: str, entry: Any) -> TeamPolicy:
         raise _schema(source, f"{where} must be a mapping")
     _require_known_keys(source, where, entry, TEAM_KEYS)
 
-    policy_epoch = entry.get("policy_epoch")
-    if not isinstance(policy_epoch, str) or not policy_epoch:
-        raise _schema(source, f"{where} must declare a string 'policy_epoch'")
-
     routes_entry = entry.get("routes") or {}
     if not isinstance(routes_entry, dict):
         raise _schema(source, f"{where} 'routes' must be a mapping")
@@ -171,7 +186,6 @@ def _build_team(source: str, team_id: str, entry: Any) -> TeamPolicy:
 
     return TeamPolicy(
         team_id=team_id,
-        policy_epoch=policy_epoch,
         envelope_usd=_envelope(source, where, entry.get("envelope_usd")),
         budget_duration=_budget_duration(source, where, entry.get("budget_duration")),
         warn_tiers=_tiers(source, where, entry.get("warn_tiers")),

@@ -258,9 +258,7 @@ class FailingGuardrails:
 
 
 def manifest_for(team: TeamPolicy) -> Manifest:
-    return Manifest(
-        version="test", data_class_order=DATA_CLASS_ORDER, teams={team.team_id: team}
-    )
+    return Manifest(data_class_order=DATA_CLASS_ORDER, teams={team.team_id: team})
 
 
 def build_handler(

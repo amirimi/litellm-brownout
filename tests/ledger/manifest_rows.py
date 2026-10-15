@@ -65,25 +65,6 @@ MANIFEST_ROWS: Final = (
         ),
     ),
     Input(
-        shape="manifest version",
-        source="brownout",
-        parser="manifest.Manifest.from_document",
-        reads=("key:version",),
-        cites=(),
-        forms=(
-            Form("a non-empty string", "accepted", Supported((LOADS,))),
-            Form(
-                "missing, empty or not a string",
-                "refused",
-                _schema(
-                    f"{MALFORMED}[version-missing]",
-                    f"{MALFORMED}[version-empty]",
-                    f"{MALFORMED}[version-not-a-string]",
-                ),
-            ),
-        ),
-    ),
-    Input(
         shape="manifest teams",
         source="brownout",
         parser="manifest.Manifest.from_document",
@@ -171,18 +152,37 @@ MANIFEST_ROWS: Final = (
         ),
     ),
     Input(
-        shape="manifest teams.<team>.policy_epoch",
+        shape="a team's policy epoch, derived from its parsed policy",
         source="brownout",
-        parser="manifest._build_team",
-        reads=("key:policy_epoch",),
+        parser="manifest.TeamPolicy.policy_epoch",
+        reads=(),
         cites=(),
         forms=(
-            Form("a non-empty string", "epoch", Supported((LOADS,))),
             Form(
-                "missing, empty or not a string",
-                "refused",
+                "the same policy in another key order, layout, comment or number form",
+                "the same epoch",
+                Supported(
+                    (
+                        f"{MANIFEST}test_key_order_formatting_comments_and_number_form_leave_the_epoch_alone",
+                        f"{MANIFEST}test_the_team_id_and_the_data_class_order_leave_the_epoch_alone",
+                    )
+                ),
+            ),
+            Form(
+                "a changed envelope, window, tier, route, fallback or degrade_at",
+                "a new epoch for that team alone, so its notices fire again",
+                Supported(
+                    (
+                        f"{MANIFEST}test_a_policy_change_moves_that_teams_epoch_and_no_other",
+                        "tests/test_gateway.py::test_a_tier_claimed_under_the_old_policy_fires_again_under_the_new",
+                    )
+                ),
+            ),
+            Form(
+                "version or policy_epoch written by an earlier release",
+                "refused by name as an unknown key",
                 _schema(
-                    f"{MALFORMED}[epoch-missing]", f"{MALFORMED}[epoch-not-a-string]"
+                    f"{MANIFEST}test_a_manifest_that_still_carries_a_bookkeeping_key_is_refused"
                 ),
             ),
         ),

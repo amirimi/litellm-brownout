@@ -84,7 +84,8 @@ charge. A counter that reads below the request's own hold floors at zero.
 The figure runs ahead of settled spend, so a tier fires early.
 
 Every transition is claimed once per window across every replica, with a Redis `SET NX` and a TTL
-of twice the window.
+of twice the window. The epoch in each key is derived from the team's policy, so a policy change
+re-arms that team's transitions.
 
 | Transition | Claim key |
 |---|---|
@@ -239,18 +240,18 @@ the same words.
 
 ```json
 {"event": "brownout_tier_crossed", "owner": "team", "team_id": "team-a",
- "policy_epoch": "team-a-v1", "window": "2026-09-21T00:00:00+00:00",
+ "policy_epoch": "132b42eb6dca", "window": "2026-09-21T00:00:00+00:00",
  "scope": "team", "route": "route-chat", "tier": 75,
  "served_route": "route-chat", "outcome": "served",
  "spend_usd": 376.2, "envelope_usd": 500.0}
 
 {"event": "brownout_route_degraded", "owner": "team", "team_id": "team-a",
- "policy_epoch": "team-a-v1", "window": "2026-09-21T00:00:00+00:00",
+ "policy_epoch": "132b42eb6dca", "window": "2026-09-21T00:00:00+00:00",
  "route": "route-chat", "served_route": "route-chat-degraded", "degrade_at": 90,
  "spend_usd": 452.1, "envelope_usd": 500.0}
 
 {"event": "brownout_fallback_rejected", "owner": "team", "team_id": "team-a",
- "policy_epoch": "team-a-v1", "window": "2026-09-21T00:00:00+00:00",
+ "policy_epoch": "132b42eb6dca", "window": "2026-09-21T00:00:00+00:00",
  "route": "route-chat", "target": "route-chat-degraded",
  "rejection": "outside_caller_allowlist", "degrade_at": 90,
  "spend_usd": 452.1, "envelope_usd": 500.0}

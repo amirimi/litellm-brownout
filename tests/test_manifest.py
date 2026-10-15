@@ -18,7 +18,6 @@ def document(
     team: dict[str, Any] | None = None, top: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        "policy_epoch": "test-1",
         "envelope_usd": 1.0,
         "budget_duration": "7d",
         "warn_tiers": [75],
@@ -26,7 +25,6 @@ def document(
     if team is not None:
         entry.update(team)
     doc: dict[str, Any] = {
-        "version": "v1",
         "data_class_order": ["internal"],
         "teams": {"t": entry},
     }
@@ -184,7 +182,6 @@ def test_a_team_cannot_be_built_with_an_unusable_envelope(envelope):
     with pytest.raises(AssertionError, match="envelope"):
         TeamPolicy(
             team_id="t",
-            policy_epoch="test-1",
             envelope_usd=envelope,
             budget_duration="7d",
             warn_tiers=(75,),
@@ -196,7 +193,6 @@ def test_a_team_cannot_be_built_with_a_window_that_does_not_tumble():
     with pytest.raises(AssertionError, match="tumble"):
         TeamPolicy(
             team_id="t",
-            policy_epoch="test-1",
             envelope_usd=1.0,
             budget_duration="2d",
             warn_tiers=(75,),
@@ -234,9 +230,6 @@ def _team_without(key: str) -> dict[str, Any]:
     "doc",
     [
         pytest.param(["not", "a", "mapping"], id="manifest-not-a-mapping"),
-        pytest.param(_without(document(), "version"), id="version-missing"),
-        pytest.param(document(top={"version": ""}), id="version-empty"),
-        pytest.param(document(top={"version": 1}), id="version-not-a-string"),
         pytest.param(_without(document(), "teams"), id="teams-missing"),
         pytest.param(document(top={"teams": {}}), id="teams-empty"),
         pytest.param(document(top={"teams": ["t"]}), id="teams-not-a-mapping"),
@@ -254,8 +247,6 @@ def _team_without(key: str) -> dict[str, Any]:
         pytest.param(
             document(top={"teams": {"t": ["entry"]}}), id="team-not-a-mapping"
         ),
-        pytest.param(_team_without("policy_epoch"), id="epoch-missing"),
-        pytest.param(document({"policy_epoch": 1}), id="epoch-not-a-string"),
         pytest.param(document({"warn_tiers": 75}), id="team-tiers-not-a-list"),
         pytest.param(document({"routes": ["a"]}), id="routes-not-a-mapping"),
         pytest.param(document({"routes": {"a": ["b"]}}), id="route-not-a-mapping"),
@@ -315,3 +306,109 @@ def test_a_route_declared_with_no_settings_never_degrades():
 
 def test_a_team_without_routes_has_none():
     assert load(document({"routes": None})).team_policy("t").routes == {}
+
+
+TWO_TEAMS_YAML = """
+data_class_order: [internal]
+teams:
+  t1:
+    envelope_usd: 500
+    budget_duration: "7d"
+    warn_tiers: [90, 75]
+    routes:
+      chat: {fallback: chat-small, degrade_at: 90}
+  t2:
+    envelope_usd: 100.0
+    budget_duration: "1d"
+"""
+
+REFORMATTED_YAML = """
+# the same policy, written differently
+teams:
+  t2: {budget_duration: "1d", envelope_usd: 100}
+  t1:
+    routes:
+      chat:
+        degrade_at: 90
+        fallback: chat-small
+    warn_tiers: [75, 90, 75]
+    budget_duration: "7d"
+    envelope_usd: 500.0
+data_class_order: [internal]
+"""
+
+
+def from_yaml(tmp_path, name: str, text: str) -> Manifest:
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return Manifest.from_file(path)
+
+
+def epochs(manifest: Manifest) -> dict[str, str]:
+    return {team.team_id: team.policy_epoch for team in manifest.teams}
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        pytest.param(document(top={"version": "v1"}), id="version"),
+        pytest.param(document({"policy_epoch": "t-v1"}), id="policy-epoch"),
+    ],
+)
+def test_a_manifest_that_still_carries_a_bookkeeping_key_is_refused(doc):
+    error = refused(doc)
+
+    assert error.rule is RuleId.MANIFEST_SCHEMA
+    assert "unknown key" in str(error)
+
+
+def test_the_epoch_is_twelve_hex_characters(tmp_path):
+    for epoch in epochs(from_yaml(tmp_path, "a.yaml", TWO_TEAMS_YAML)).values():
+        assert len(epoch) == 12
+        int(epoch, 16)
+
+
+def test_key_order_formatting_comments_and_number_form_leave_the_epoch_alone(
+    tmp_path,
+):
+    assert epochs(from_yaml(tmp_path, "a.yaml", TWO_TEAMS_YAML)) == epochs(
+        from_yaml(tmp_path, "b.yaml", REFORMATTED_YAML)
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        pytest.param("envelope_usd: 500", "envelope_usd: 600", id="envelope"),
+        pytest.param('budget_duration: "7d"', 'budget_duration: "30d"', id="duration"),
+        pytest.param("warn_tiers: [90, 75]", "warn_tiers: [90, 80]", id="team-tier"),
+        pytest.param("fallback: chat-small", "fallback: chat-tiny", id="fallback"),
+        pytest.param("degrade_at: 90}", "degrade_at: 85}", id="degrade-at"),
+        pytest.param(
+            "degrade_at: 90}", "degrade_at: 90, warn_tiers: [50]}", id="route-tier"
+        ),
+        pytest.param(
+            "      chat: {fallback: chat-small, degrade_at: 90}",
+            "      chat: {fallback: chat-small, degrade_at: 90}\n      summary: {}",
+            id="route-added",
+        ),
+    ],
+)
+def test_a_policy_change_moves_that_teams_epoch_and_no_other(tmp_path, old, new):
+    assert old in TWO_TEAMS_YAML
+    before = epochs(from_yaml(tmp_path, "a.yaml", TWO_TEAMS_YAML))
+    after = epochs(from_yaml(tmp_path, "b.yaml", TWO_TEAMS_YAML.replace(old, new)))
+
+    assert after["t1"] != before["t1"]
+    assert after["t2"] == before["t2"]
+
+
+def test_the_team_id_and_the_data_class_order_leave_the_epoch_alone(tmp_path):
+    before = epochs(from_yaml(tmp_path, "a.yaml", TWO_TEAMS_YAML))
+    renamed = TWO_TEAMS_YAML.replace("  t2:", "  t3:").replace(
+        "[internal]", "[internal, customer_pii]"
+    )
+
+    after = epochs(from_yaml(tmp_path, "b.yaml", renamed))
+
+    assert (after["t1"], after["t3"]) == (before["t1"], before["t2"])

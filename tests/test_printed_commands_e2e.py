@@ -113,11 +113,9 @@ def _manifest(team_id: str, team: dict[str, Any]) -> Manifest:
     return Manifest.from_document(
         "contract.yaml",
         {
-            "version": "v1",
             "data_class_order": ["internal", "customer_pii"],
             "teams": {
                 team_id: {
-                    "policy_epoch": f"{team_id}-v1",
                     "envelope_usd": 1.0,
                     "budget_duration": "7d",
                     **team,

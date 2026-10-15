@@ -41,7 +41,7 @@ def group(
 
 
 def manifest() -> Manifest:
-    return Manifest(version="test", data_class_order=DATA_CLASS_ORDER, teams={})
+    return Manifest(data_class_order=DATA_CLASS_ORDER, teams={})
 
 
 def rules_for(*groups: ModelGroup) -> list[RuleId]:

@@ -1,12 +1,9 @@
-version: "v1"
-
 data_class_order:
   - internal
   - customer_pii
 
 teams:
   team-a:
-    policy_epoch: "team-a-v1"
     envelope_usd: 500.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
@@ -16,7 +13,6 @@ teams:
         degrade_at: 90
 
   team-b:
-    policy_epoch: "team-b-v1"
     envelope_usd: 2000.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
@@ -24,7 +20,6 @@ teams:
       code-review: {}
 
   budget-lab:
-    policy_epoch: "budget-lab-v1"
     envelope_usd: 1.0
     budget_duration: "7d"
     warn_tiers: [75, 90]
@@ -36,7 +31,6 @@ teams:
       budget-lab-failing: {}
 
   kinds-lab:
-    policy_epoch: "kinds-lab-v1"
     envelope_usd: 5.0
     budget_duration: "7d"
     routes:

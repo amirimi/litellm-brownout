@@ -93,19 +93,20 @@ def test_appended_teams_leave_existing_entries_untouched():
     text = dump_document(document)
 
     assert text.startswith(original)
-    assert to_plain(load_document(SOURCE, text))["teams"]["search"]["policy_epoch"] == (
-        "search-v1"
-    )
+    assert set(to_plain(load_document(SOURCE, text))["teams"]["search"]) == {
+        "envelope_usd",
+        "budget_duration",
+        "warn_tiers",
+        "routes",
+    }
 
 
 def test_a_new_manifest_holds_only_the_given_teams():
     document = new_manifest_document((TeamEntry("search", 500.0, "7d"),))
 
     assert to_plain(load_document(SOURCE, dump_document(document))) == {
-        "version": "v1",
         "teams": {
             "search": {
-                "policy_epoch": "search-v1",
                 "envelope_usd": 500.0,
                 "budget_duration": "7d",
                 "warn_tiers": [75, 90],

@@ -322,7 +322,7 @@ def test_an_output_that_is_an_input_is_refused(tmp_path):
 
 
 def test_an_invalid_existing_manifest_stops_init_with_its_rule(tmp_path, capsys):
-    broken = write(tmp_path / "theirs.yaml", {"version": "v1", "teams": {}})
+    broken = write(tmp_path / "theirs.yaml", {"teams": {}})
 
     assert (
         init(
