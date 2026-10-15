@@ -17,11 +17,10 @@ from brownout.inputs import DocumentError
 from .support import lab_gateway_config
 
 SOURCE: Final = Path("config.yaml")
-DEFAULT_ALERTS: Final = ("llm_exceptions", "budget_alerts", "outage_alerts")
 
 
 def read(config: dict[str, Any]) -> Any:
-    return read_gateway_config(SOURCE, config, DEFAULT_ALERTS)
+    return read_gateway_config(SOURCE, config)
 
 
 def deployment(**fields: Any) -> dict[str, Any]:
@@ -39,7 +38,6 @@ def test_a_config_without_sections_reads_as_litellm_defaults():
     assert config.deployments == ()
     assert not config.settings.fail_closed_budget_enforcement
     assert not config.settings.disable_budget_reservation
-    assert not config.native_budget_alerts
     assert not config.coordination_redis
     assert config.cache_redis is None
     assert config.callbacks == ()
@@ -55,7 +53,7 @@ def test_null_sections_read_as_empty():
 
 
 def test_the_lab_config_reads_its_deployments():
-    config = read_gateway_config(SOURCE, lab_gateway_config(), DEFAULT_ALERTS)
+    config = read_gateway_config(SOURCE, lab_gateway_config())
 
     assert "budget-lab-primary" in {entry.model_name for entry in config.deployments}
 
@@ -199,11 +197,6 @@ def test_the_lab_config_reads_its_deployments():
             id="info-price-unreadable-under-a-readable-one",
         ),
         pytest.param(
-            {"general_settings": {"alert_types": "budget_alerts"}},
-            "alert_types must be a list",
-            id="alert-types",
-        ),
-        pytest.param(
             {"general_settings": {"coordination_redis": "redis"}},
             "coordination_redis must be a mapping",
             id="coordination-redis",
@@ -337,26 +330,6 @@ def test_a_deployment_takes_each_price_from_litellm_params_then_model_info(
 
     priced = config.deployments[0]
     assert (priced.input_cost_per_token, priced.output_cost_per_token) == prices
-
-
-@pytest.mark.parametrize(
-    ("general", "native"),
-    [
-        ({}, False),
-        ({"alerting": ["slack"]}, True),
-        ({"alerting": ["slack"], "alert_types": ["budget_alerts"]}, True),
-        ({"alerting": ["slack"], "alert_types": ["outage_alerts"]}, False),
-        ({"alert_types": ["budget_alerts"]}, False),
-    ],
-)
-def test_native_budget_alerts_follow_alerting_and_its_types(general, native):
-    assert read({"general_settings": general}).native_budget_alerts is native
-
-
-def test_alert_types_default_to_litellms_when_alerting_lists_none():
-    config = read({"general_settings": {"alerting": ["slack"]}})
-
-    assert config.alert_types == DEFAULT_ALERTS
 
 
 @pytest.mark.parametrize(

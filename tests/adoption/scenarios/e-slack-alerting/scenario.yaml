@@ -1,6 +1,6 @@
 description: >
-  Slack alerting is on with LiteLLM's default alert types, which include budget alerts. There is no
-  Redis, and models are priced in config.yaml.
+  Slack alerting is on with LiteLLM's default alert types, which include budget alerts, and stays
+  on after adoption. There is no Redis, and models are priced in config.yaml.
 seed:
   teams:
     - alias: search
@@ -24,7 +24,6 @@ fallback:
   route: chat
   fallback: chat-cheap
   degrade_at: 75
-  data_class: internal
 drive:
   key: search-app
   model: chat

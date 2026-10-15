@@ -11,7 +11,7 @@ import yaml
 from litellm.proxy._types import UserAPIKeyAuth
 
 from brownout import bridge
-from brownout.cli import gateway_file, litellm_alert_types, read_config
+from brownout.cli import gateway_file, read_config
 from brownout.events import (
     Event,
     FallbackRejectedEvent,
@@ -104,9 +104,7 @@ def lab_gateway_config() -> Mapping[str, Any]:
 
 
 def gateway_file_of(config: Mapping[str, Any]) -> GatewayFile:
-    return gateway_file(
-        read_config(CONFIG_DIR / "config.yaml", config, litellm_alert_types())
-    )
+    return gateway_file(read_config(CONFIG_DIR / "config.yaml", config))
 
 
 class FakeSpendCounter:
@@ -257,8 +255,10 @@ class FailingGuardrails:
         raise RuntimeError("guardrail merge failed")
 
 
-def manifest_for(team: TeamPolicy) -> Manifest:
-    return Manifest(data_class_order=DATA_CLASS_ORDER, teams={team.team_id: team})
+def manifest_for(
+    team: TeamPolicy, data_class_order: tuple[str, ...] = DATA_CLASS_ORDER
+) -> Manifest:
+    return Manifest(data_class_order=data_class_order, teams={team.team_id: team})
 
 
 def build_handler(
@@ -270,6 +270,7 @@ def build_handler(
     schedule: ResetSchedule | None = None,
     permissions: Permissions | None = None,
     guardrails: Guardrails | None = None,
+    data_class_order: tuple[str, ...] = DATA_CLASS_ORDER,
 ) -> BrownoutHandler:
     if store is None:
         store = FakeStore()
@@ -282,7 +283,7 @@ def build_handler(
     if guardrails is None:
         guardrails = bridge.LiteLLMGuardrails(lambda: None)
     return BrownoutHandler(
-        manifest=manifest_for(team),
+        manifest=manifest_for(team, data_class_order),
         spend_counter=FakeSpendCounter(spend),
         permissions=permissions,
         schedule=schedule,

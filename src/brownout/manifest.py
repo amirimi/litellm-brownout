@@ -149,9 +149,7 @@ class Manifest:
             team_id: _build_team(source, team_id, entry)
             for team_id, entry in teams.items()
         }
-        data_class_order = _data_class_order(
-            source, document.get("data_class_order"), policies
-        )
+        data_class_order = _data_class_order(source, document.get("data_class_order"))
         return cls(data_class_order=data_class_order, teams=policies)
 
     def team_policy(self, team_id: str | None) -> TeamPolicy | None:
@@ -250,21 +248,8 @@ def _require_concrete(source: str, where: str, group: str) -> None:
         )
 
 
-def _data_class_order(
-    source: str, value: Any, teams: Mapping[str, TeamPolicy]
-) -> tuple[str, ...]:
-    declares_fallback = any(
-        route.fallback is not None
-        for team in teams.values()
-        for route in team.routes.values()
-    )
+def _data_class_order(source: str, value: Any) -> tuple[str, ...]:
     if value is None:
-        if declares_fallback:
-            raise _schema(
-                source,
-                "'data_class_order' is required when a route declares a fallback, "
-                "listing data classes least restricted first",
-            )
         return ()
     if not isinstance(value, list) or not value:
         raise _schema(source, "'data_class_order' must be a non-empty list")

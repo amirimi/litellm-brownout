@@ -375,87 +375,6 @@ CONFIG_ROWS: Final = (
         ),
     ),
     Input(
-        shape="general_settings.alerting",
-        source="brownout",
-        parser="gateway_config.read_gateway_config",
-        reads=("key:alerting",),
-        cites=(),
-        forms=(
-            Form(
-                "a non-empty value",
-                "alerting on",
-                Supported(
-                    (
-                        f"{CONFIG}test_native_budget_alerts_follow_alerting_and_its_types",
-                    )
-                ),
-            ),
-            Form(
-                "absent or empty",
-                "alerting off",
-                Supported(
-                    (
-                        f"{CONFIG}test_native_budget_alerts_follow_alerting_and_its_types",
-                    )
-                ),
-            ),
-        ),
-    ),
-    Input(
-        shape="general_settings.alert_types",
-        source="brownout",
-        parser="gateway_config.read_gateway_config",
-        reads=("key:alert_types",),
-        cites=(),
-        forms=(
-            Form(
-                "absent",
-                "LiteLLM's default alert types",
-                Supported(
-                    (
-                        f"{CONFIG}test_alert_types_default_to_litellms_when_alerting_lists_none",
-                    )
-                ),
-            ),
-            Form(
-                "a list",
-                "those alert types",
-                Supported(
-                    (f"{ONBOARDING}test_existing_alert_types_lose_only_budget_alerts",)
-                ),
-            ),
-            Form("not a list", "unreadable", _unreadable(f"{MALFORMED}[alert-types]")),
-        ),
-    ),
-    Input(
-        shape="LiteLLM budget alerts",
-        source="brownout",
-        parser="gateway_config.GatewayConfig.native_budget_alerts",
-        reads=("key:budget_alerts",),
-        cites=(),
-        forms=(
-            Form(
-                "alerting on with budget_alerts among its types",
-                "refused",
-                Refused(
-                    stage="check",
-                    rule=RuleId.NO_NATIVE_BUDGET_ALERTS,
-                    tests=(
-                        f"{CLI}test_litellm_budget_alerts_fail_with_their_rule_id",
-                        f"{ONBOARDING}test_existing_alert_types_lose_only_budget_alerts",
-                    ),
-                ),
-            ),
-            Form(
-                "alerting off, or budget_alerts not among its types",
-                "no native budget alerts",
-                Supported(
-                    (f"{CLI}test_litellm_alerting_without_budget_alerts_passes",)
-                ),
-            ),
-        ),
-    ),
-    Input(
         shape="general_settings.coordination_redis",
         source="brownout",
         parser="gateway_config.read_gateway_config",
@@ -478,7 +397,7 @@ CONFIG_ROWS: Final = (
                     stage="check",
                     rule=RuleId.REDIS_CONFIGURED,
                     tests=(
-                        f"{RULES}test_native_budget_alerts_and_a_missing_redis_are_file_violations",
+                        f"{RULES}test_a_missing_redis_is_a_file_violation",
                         f"{ONBOARDING}test_a_missing_redis_violation_carries_the_block_to_add",
                     ),
                 ),
@@ -631,7 +550,17 @@ CONFIG_ROWS: Final = (
                 Supported((f"{RULES}test_a_served_priced_classified_pair_passes",)),
             ),
             Form(
-                "absent or not a string on a route or a fallback",
+                "any value while the manifest declares no data_class_order",
+                "ignored",
+                Supported(
+                    (
+                        f"{RULES}test_without_a_data_class_order_a_pairing_needs_only_to_be_served_and_priced",
+                    )
+                ),
+            ),
+            Form(
+                "absent or not a string on a route or a fallback, while the manifest "
+                "declares a data_class_order",
                 "refused",
                 Refused(
                     stage="check",
@@ -639,6 +568,7 @@ CONFIG_ROWS: Final = (
                     tests=(
                         f"{CONFIG}test_a_data_class_is_a_string_or_undeclared",
                         f"{RULES}test_deployments_that_disagree_on_a_data_class_are_a_violation",
+                        "tests/test_cli.py::test_a_fallback_without_data_classes_fails_when_the_manifest_lists_them",
                     ),
                 ),
             ),

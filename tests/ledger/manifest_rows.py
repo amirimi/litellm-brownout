@@ -103,18 +103,16 @@ MANIFEST_ROWS: Final = (
         forms=(
             Form("a list of distinct non-empty strings", "order", Supported((LOADS,))),
             Form(
-                "absent while no route declares a fallback",
-                "no order",
+                "absent, with or without fallbacks",
+                "no order, so no data-class rule runs",
                 Supported(
                     (
-                        f"{MANIFEST}test_a_manifest_without_fallbacks_needs_no_data_class_order",
+                        f"{MANIFEST}test_a_manifest_needs_no_data_class_order",
+                        "tests/test_rules.py::test_without_a_data_class_order_a_pairing_needs_only_to_be_served_and_priced",
+                        "tests/test_cli.py::test_a_fallback_without_data_classes_passes_when_the_manifest_lists_none",
+                        "tests/test_gateway.py::test_without_a_data_class_order_an_unclassified_fallback_is_served",
                     )
                 ),
-            ),
-            Form(
-                "absent while a route declares a fallback",
-                "refused",
-                _schema(f"{MANIFEST}test_a_fallback_requires_a_data_class_order"),
             ),
             Form(
                 "empty, not a list, or holding an empty or non-string entry",

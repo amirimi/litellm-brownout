@@ -79,26 +79,21 @@ def check_with_general_settings(tmp_path, extra: dict[str, Any]) -> int:
 @pytest.mark.parametrize(
     "alerting",
     [
-        {"alerting": ["slack"]},
-        {"alerting": ["slack"], "alert_types": ["llm_exceptions", "budget_alerts"]},
+        pytest.param({"alerting": ["slack"]}, id="default-types"),
+        pytest.param(
+            {"alerting": ["slack"], "alert_types": ["llm_exceptions", "budget_alerts"]},
+            id="budget-alerts",
+        ),
+        pytest.param(
+            {"alerting": ["slack"], "alert_types": ["outage_alerts"]},
+            id="no-budget-alerts",
+        ),
     ],
 )
-def test_litellm_budget_alerts_fail_with_their_rule_id(tmp_path, capsys, alerting):
-    exit_code = check_with_general_settings(tmp_path, alerting)
-
-    assert exit_code == 1
-    assert "no-native-budget-alerts\tgeneral_settings.alert_types" in (
-        capsys.readouterr().out
-    )
-
-
-def test_litellm_alerting_without_budget_alerts_passes(tmp_path):
-    exit_code = check_with_general_settings(
-        tmp_path,
-        {"alerting": ["slack"], "alert_types": ["llm_exceptions", "outage_alerts"]},
-    )
-
-    assert exit_code == 0
+def test_litellm_alerting_passes_the_check_with_or_without_budget_alerts(
+    tmp_path, alerting
+):
+    assert check_with_general_settings(tmp_path, alerting) == 0
 
 
 def test_a_deployment_without_explicit_prices_is_priced_from_the_cost_map():
@@ -186,7 +181,6 @@ def test_every_lab_deployment_declares_its_output_ceiling():
         )
 
 
-DEFAULT_ALERTS: Final = ("llm_exceptions", "budget_alerts")
 INIT_TOKEN: Final = "hash-init"
 BUDGETED_TEAMS: Final = [
     {"team_id": "budget-lab", "max_budget": 1.0, "budget_duration": "7d", "models": []},
@@ -248,7 +242,7 @@ def options(tmp_path: Path, **overrides: Any) -> InitOptions:
 def test_init_writes_a_manifest_and_config_that_pass_the_check(tmp_path, capsys):
     chosen = options(tmp_path)
 
-    exit_code = init(chosen, fake_gateway(), DEFAULT_ALERTS, INIT_TOKEN)
+    exit_code = init(chosen, fake_gateway(), INIT_TOKEN)
 
     assert exit_code == 0
     manifest = Manifest.from_file(chosen.manifest_out)
@@ -284,7 +278,6 @@ def test_a_dry_run_writes_nothing_and_still_reports(tmp_path, capsys):
                 },
             ]
         ),
-        DEFAULT_ALERTS,
         INIT_TOKEN,
     )
 
@@ -302,7 +295,7 @@ def test_init_never_overwrites_an_existing_output(tmp_path, taken):
     outputs = {"manifest_out": chosen.manifest_out, "config_out": chosen.config_out}
     outputs[taken].write_text("keep me\n", encoding="utf-8")
 
-    assert init(chosen, fake_gateway(), DEFAULT_ALERTS, INIT_TOKEN) == 2
+    assert init(chosen, fake_gateway(), INIT_TOKEN) == 2
     assert outputs[taken].read_text(encoding="utf-8") == "keep me\n"
 
 
@@ -314,7 +307,6 @@ def test_an_output_that_is_an_input_is_refused(tmp_path):
         init(
             options(tmp_path, gateway_config=config, config_out=config),
             fake_gateway(),
-            DEFAULT_ALERTS,
             INIT_TOKEN,
         )
         == 2
@@ -328,7 +320,6 @@ def test_an_invalid_existing_manifest_stops_init_with_its_rule(tmp_path, capsys)
         init(
             options(tmp_path, manifest=broken),
             fake_gateway(),
-            DEFAULT_ALERTS,
             INIT_TOKEN,
         )
         == 2
@@ -340,7 +331,7 @@ def test_merging_keeps_their_manifest_and_appends_missing_teams(tmp_path):
     original = LAB_MANIFEST.read_text(encoding="utf-8")
     chosen = options(tmp_path, manifest=LAB_MANIFEST)
 
-    init(chosen, fake_gateway(), DEFAULT_ALERTS, INIT_TOKEN)
+    init(chosen, fake_gateway(), INIT_TOKEN)
 
     merged = chosen.manifest_out.read_text(encoding="utf-8")
     assert merged.startswith(original)
@@ -348,10 +339,7 @@ def test_merging_keeps_their_manifest_and_appends_missing_teams(tmp_path):
 
 
 def test_an_unreadable_gateway_exits_two(tmp_path, capsys):
-    assert (
-        init(options(tmp_path), fake_gateway(status=401), DEFAULT_ALERTS, INIT_TOKEN)
-        == 2
-    )
+    assert init(options(tmp_path), fake_gateway(status=401), INIT_TOKEN) == 2
     assert "gateway" in capsys.readouterr().err
 
 
@@ -370,7 +358,6 @@ def test_a_gateway_with_nothing_to_govern_writes_no_manifest(tmp_path, capsys):
                 }
             ]
         ),
-        DEFAULT_ALERTS,
         INIT_TOKEN,
     )
 
@@ -387,7 +374,7 @@ def test_init_prints_no_value_from_the_gateway_config(tmp_path, capsys, write_fi
         write=write_files,
     )
 
-    init(chosen, fake_gateway(), DEFAULT_ALERTS, INIT_TOKEN)
+    init(chosen, fake_gateway(), INIT_TOKEN)
 
     printed = capsys.readouterr()
     assert SECRET not in printed.out + printed.err
@@ -420,7 +407,6 @@ def test_an_unreadable_config_is_reported_by_position_only(
     exit_code = init(
         options(tmp_path, gateway_config=config),
         fake_gateway(),
-        DEFAULT_ALERTS,
         INIT_TOKEN,
     )
 
@@ -436,7 +422,7 @@ def test_the_config_copy_keeps_the_source_permissions(tmp_path):
     config.chmod(0o600)
     chosen = options(tmp_path, gateway_config=config)
 
-    init(chosen, fake_gateway(), DEFAULT_ALERTS, INIT_TOKEN)
+    init(chosen, fake_gateway(), INIT_TOKEN)
 
     assert chosen.config_out.stat().st_mode & 0o777 == 0o600
 
@@ -468,7 +454,6 @@ def test_the_key_init_runs_with_does_not_block_readiness(tmp_path):
     exit_code = init(
         options(tmp_path),
         fake_gateway(keys=[TEAM_KEY, own_key]),
-        DEFAULT_ALERTS,
         INIT_TOKEN,
     )
 
@@ -478,7 +463,7 @@ def test_the_key_init_runs_with_does_not_block_readiness(tmp_path):
 def test_a_team_key_running_init_is_left_out_of_the_admin_keys_notice(tmp_path, capsys):
     own_key = {**TEAM_KEY, "token": INIT_TOKEN}
 
-    init(options(tmp_path), fake_gateway(keys=[own_key]), DEFAULT_ALERTS, INIT_TOKEN)
+    init(options(tmp_path), fake_gateway(keys=[own_key]), INIT_TOKEN)
 
     notice = next(
         line
@@ -490,6 +475,35 @@ def test_a_team_key_running_init_is_left_out_of_the_admin_keys_notice(tmp_path, 
 
 def check_files(config: Path, manifest: Path) -> int:
     return main(["check", "--gateway-config", str(config), "--manifest", str(manifest)])
+
+
+def test_a_fallback_without_data_classes_passes_when_the_manifest_lists_none(tmp_path):
+    config = yaml.safe_load(LAB_CONFIG.read_text(encoding="utf-8"))
+    for deployment in config["model_list"]:
+        deployment["model_info"].pop("data_class", None)
+    manifest = yaml.safe_load(LAB_MANIFEST.read_text(encoding="utf-8"))
+    del manifest["data_class_order"]
+
+    assert (
+        check_files(
+            write(tmp_path / "config.yaml", config),
+            write(tmp_path / "manifest.yaml", manifest),
+        )
+        == 0
+    )
+
+
+def test_a_fallback_without_data_classes_fails_when_the_manifest_lists_them(
+    tmp_path, capsys
+):
+    config = yaml.safe_load(LAB_CONFIG.read_text(encoding="utf-8"))
+    for deployment in config["model_list"]:
+        deployment["model_info"].pop("data_class", None)
+
+    exit_code = check_files(write(tmp_path / "config.yaml", config), LAB_MANIFEST)
+
+    assert exit_code == 1
+    assert "data-class-declared\t" in capsys.readouterr().out
 
 
 def test_check_blames_a_malformed_manifest_on_the_manifest(tmp_path, capsys):
@@ -556,7 +570,6 @@ def test_init_refuses_a_gateway_config_it_cannot_use(
     exit_code = init(
         options(tmp_path, gateway_config=config),
         fake_gateway(),
-        DEFAULT_ALERTS,
         INIT_TOKEN,
     )
 
@@ -571,7 +584,6 @@ def test_init_reports_a_malformed_manifest_by_position(tmp_path, capsys):
     exit_code = init(
         options(tmp_path, manifest=manifest),
         fake_gateway(),
-        DEFAULT_ALERTS,
         INIT_TOKEN,
     )
 
@@ -629,7 +641,7 @@ def test_init_reads_models_from_included_files(tmp_path):
         manifest_out=tmp_path / "out.yaml",
     )
 
-    init(chosen, fake_gateway(), DEFAULT_ALERTS, INIT_TOKEN)
+    init(chosen, fake_gateway(), INIT_TOKEN)
 
     assert check_files(chosen.config_out, chosen.manifest_out) == 0
 

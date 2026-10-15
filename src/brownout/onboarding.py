@@ -7,7 +7,7 @@ from math import isfinite
 from typing import Any, Final, Literal, assert_never
 
 from .gateway_api import LiteLLMKey, LiteLLMTeam
-from .gateway_config import BUDGET_ALERTS, GatewayConfig
+from .gateway_config import GatewayConfig
 from .manifest import WINDOW_SECONDS, Manifest, TeamPolicy
 from .refusals import RuleId, Violation
 from .rules import ModelGroup, is_priced
@@ -217,7 +217,6 @@ def config_plan(config: GatewayConfig) -> tuple[ConfigChange, ...]:
         )
     if config.settings.disable_budget_reservation:
         changes.append(RemoveSetting("general_settings", "disable_budget_reservation"))
-    changes.extend(_alert_types(config))
     if not config.budget_exceeded_status_code:
         changes.append(
             SetSetting(
@@ -484,19 +483,6 @@ def _unlisted_fallbacks(
         )
         for route in policy.routes.values()
         if route.fallback is not None and route.fallback not in team.models
-    ]
-
-
-def _alert_types(config: GatewayConfig) -> list[ConfigChange]:
-    if not config.native_budget_alerts:
-        return []
-    return [
-        SetSetting(
-            "general_settings",
-            "alert_types",
-            [alert for alert in config.alert_types if alert != BUDGET_ALERTS],
-            "drops budget_alerts and keeps LiteLLM's other alerts",
-        )
     ]
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
@@ -11,7 +11,6 @@ from .rules import GatewaySettings
 
 GENERAL_SETTINGS: Final = "general_settings"
 LITELLM_SETTINGS: Final = "litellm_settings"
-BUDGET_ALERTS: Final = "budget_alerts"
 REDIS_CACHE_TYPE: Final = "redis"
 REDIS_TARGETS: Final = ("host", "url", "startup_nodes", "sentinel_nodes")
 REDIS_CONNECTION_FIELDS: Final = (
@@ -42,30 +41,18 @@ class Deployment:
 class GatewayConfig:
     deployments: tuple[Deployment, ...]
     settings: GatewaySettings
-    alerting: bool
-    alert_types: tuple[str, ...]
     coordination_redis: bool
     cache_redis: Mapping[str, Any] | None
     callbacks: tuple[str, ...]
     budget_exceeded_status_code: bool
 
-    @property
-    def native_budget_alerts(self) -> bool:
-        return self.alerting and BUDGET_ALERTS in self.alert_types
 
-
-def read_gateway_config(
-    source: Path, config: Mapping[str, Any], default_alert_types: Sequence[str]
-) -> GatewayConfig:
+def read_gateway_config(source: Path, config: Mapping[str, Any]) -> GatewayConfig:
     general: Final = _section(source, config, GENERAL_SETTINGS)
     litellm_settings: Final = _section(source, config, LITELLM_SETTINGS)
     return GatewayConfig(
         deployments=_deployments(source, config.get("model_list")),
         settings=settings_from_general(general),
-        alerting=bool(general.get("alerting")),
-        alert_types=_alert_types(
-            source, general.get("alert_types"), default_alert_types
-        ),
         coordination_redis=bool(
             _optional_mapping(
                 source, "coordination_redis", general.get("coordination_redis")
@@ -183,16 +170,6 @@ def _explicit_price(
     if read is None:
         raise DocumentError(f"{source} {where} {block}.{key} must be a finite number")
     return read
-
-
-def _alert_types(
-    source: Path, value: Any, default_alert_types: Sequence[str]
-) -> tuple[str, ...]:
-    if value is None:
-        return tuple(default_alert_types)
-    if not isinstance(value, list):
-        raise DocumentError(f"{source} general_settings.alert_types must be a list")
-    return tuple(str(alert_type) for alert_type in value)
 
 
 def _callbacks(source: Path, value: Any) -> tuple[str, ...]:

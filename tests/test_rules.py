@@ -115,6 +115,41 @@ def test_a_less_restricted_fallback_is_a_violation():
     ) == [RuleId.FALLBACK_DATA_CLASS]
 
 
+def unordered() -> Manifest:
+    return Manifest(data_class_order=(), teams={})
+
+
+@pytest.mark.parametrize(
+    "fallback",
+    [
+        pytest.param(group("cheaper", data_classes=(None,)), id="unclassified"),
+        pytest.param(
+            group("cheaper", data_classes=("internal",)), id="less-restricted"
+        ),
+        pytest.param(
+            group("cheaper", data_classes=("customer_pii", "internal")), id="split"
+        ),
+    ],
+)
+def test_without_a_data_class_order_a_pairing_needs_only_to_be_served_and_priced(
+    fallback,
+):
+    lookup = {item.name: item for item in (group("primary", (None,)), fallback)}
+
+    assert route_rules(unordered(), PAIR, lookup.get) == []
+
+
+def test_without_a_data_class_order_an_unpriced_fallback_is_still_a_violation():
+    lookup = {
+        item.name: item
+        for item in (group("primary", (None,)), group("cheaper", (None,), None))
+    }
+
+    assert [
+        violation.rule for violation in route_rules(unordered(), PAIR, lookup.get)
+    ] == [RuleId.ROUTE_PRICED]
+
+
 def test_a_route_without_a_fallback_needs_only_to_be_served_and_priced():
     plain = RoutePolicy(route="primary", fallback=None, degrade_at=None, warn_tiers=())
     unclassified = group("primary", data_classes=(None,))
@@ -143,21 +178,13 @@ def test_safe_settings_pass():
     assert settings_rules(SAFE_SETTINGS) == []
 
 
-def test_native_budget_alerts_and_a_missing_redis_are_file_violations():
-    gateway = GatewayFile(
-        groups={},
-        settings=SAFE_SETTINGS,
-        native_budget_alerts=True,
-        redis_configured=False,
-    )
+def test_a_missing_redis_is_a_file_violation():
+    gateway = GatewayFile(groups={}, settings=SAFE_SETTINGS, redis_configured=False)
 
     violations = file_rules(manifest(), gateway)
 
-    assert [violation.rule for violation in violations] == [
-        RuleId.NO_NATIVE_BUDGET_ALERTS,
-        RuleId.REDIS_CONFIGURED,
-    ]
-    assert "Redis cache" in violations[1].message
+    assert [violation.rule for violation in violations] == [RuleId.REDIS_CONFIGURED]
+    assert "Redis cache" in violations[0].message
 
 
 @pytest.mark.parametrize(

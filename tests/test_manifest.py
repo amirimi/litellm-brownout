@@ -141,15 +141,15 @@ def test_an_unknown_key_is_refused_by_name(doc, key):
     assert repr(key) in str(error)
 
 
-def test_a_fallback_requires_a_data_class_order():
-    doc = document({"routes": {"a": {"fallback": "b", "degrade_at": 90}}})
-    del doc["data_class_order"]
-
-    assert "data_class_order" in str(refused(doc))
-
-
-def test_a_manifest_without_fallbacks_needs_no_data_class_order():
-    doc = document()
+@pytest.mark.parametrize(
+    "routes",
+    [
+        pytest.param({"a": {"fallback": "b", "degrade_at": 90}}, id="with-a-fallback"),
+        pytest.param({"a": {}}, id="without-fallbacks"),
+    ],
+)
+def test_a_manifest_needs_no_data_class_order(routes):
+    doc = document({"routes": routes})
     del doc["data_class_order"]
 
     assert load(doc).data_class_order == ()

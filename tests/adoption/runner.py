@@ -30,8 +30,6 @@ README_GATEWAY: Final = "http://localhost:4000"
 README_UVX: Final = "uvx --from litellm-brownout "
 README_IMAGE: Final = "FROM docker.litellm.ai/berriai/litellm:v1.104.2"
 README_REQUIREMENT: Final = "litellm-brownout==0.1.0"
-README_UI_GROUP: Final = 'select(.model_name == "chat-qa")'
-README_UI_CLASS: Final = '"data_class": "internal"'
 INIT_COMMAND: Final = "brownout init"
 CHECK_COMMAND: Final = "brownout check"
 CHECK_PASSED: Final = "brownout check passed"
@@ -365,8 +363,7 @@ class Adoption:
 
     def _add_fallback(self) -> None:
         plan: Final = self.scenario.fallback
-        route_keys, class_order = _manifest_template(self.blocks["fallback-manifest"])
-        info_key, class_key = _config_template(self.blocks["fallback-config"])
+        route_keys: Final = _manifest_template(self.blocks["fallback-manifest"])
         team_id: Final = self.seeded.resolve(plan.team)
         manifest_document: Final = read_styled(self.workdir / WRITTEN_MANIFEST)
         manifest: Final = manifest_document.data
@@ -375,7 +372,6 @@ class Adoption:
                 "fallback:team-not-in-manifest",
                 f"{WRITTEN_MANIFEST} has no entry for team {plan.team}",
             )
-        manifest["data_class_order"] = class_order
         manifest["teams"][team_id]["routes"] = {
             **(manifest["teams"][team_id].get("routes") or {}),
             plan.route: dict(
@@ -383,25 +379,13 @@ class Adoption:
             ),
         }
         manifest_document.save()
-        documents: Final = self._config_documents(WRITTEN_CONFIG)
-        database_groups: list[str] = []
-        for group in (plan.route, plan.fallback):
-            deployments = [
-                deployment
-                for document in documents
-                for deployment in document.data.get("model_list") or []
-                if deployment.get("model_name") == group
-            ]
-            if not deployments:
-                database_groups.append(group)
-            for deployment in deployments:
-                deployment.setdefault(info_key, {})[class_key] = plan.data_class
-        for document in documents:
-            document.save()
-        for group in database_groups:
-            self._patch_database_group(group, plan.data_class)
+        file_groups: Final = {
+            deployment.get("model_name")
+            for document in self._config_documents(WRITTEN_CONFIG)
+            for deployment in document.data.get("model_list") or []
+        }
         check_script = self.check_line
-        if database_groups:
+        if not {plan.route, plan.fallback} <= file_groups:
             check_script = self._readme_block("fallback-ui-check")
         checked: Final = self.shell.run(check_script)
         if CHECK_PASSED not in checked.stdout:
@@ -411,22 +395,6 @@ class Adoption:
                 f"{_excerpt(checked.stdout + checked.stderr)}",
             )
         self._gateway_step("fallback", self.gateway.restart)
-
-    def _patch_database_group(self, group: str, data_class: str) -> None:
-        block: Final = adapt(
-            self._readme_block("fallback-ui"),
-            [
-                (README_UI_GROUP, f'select(.model_name == "{group}")'),
-                (README_UI_CLASS, f'"data_class": "{data_class}"'),
-            ],
-        )
-        patched: Final = self.shell.run(block)
-        if patched.returncode != 0 or not patched.stdout.strip():
-            raise PathStop(
-                "fallback:nowhere-to-add",
-                f"neither the config files nor the gateway's database define {group}: "
-                f"{_excerpt(patched.stdout + patched.stderr)}",
-            )
 
     def _drive(self) -> None:
         call: Final = self.scenario.drive
@@ -519,7 +487,7 @@ def _line_with(block: str, command: str) -> str:
     return lines[0]
 
 
-def _manifest_template(block: str) -> tuple[tuple[str, ...], list[str]]:
+def _manifest_template(block: str) -> tuple[str, ...]:
     template: Final = yaml.safe_load(block)
     team: Final = next(iter(template["teams"].values()))
     route: Final = next(iter(team["routes"].values()))
@@ -528,21 +496,7 @@ def _manifest_template(block: str) -> tuple[tuple[str, ...], list[str]]:
         raise PathStop(
             "readme:block-changed", f"the fallback example's route keys are {keys}"
         )
-    return keys, list(template["data_class_order"])
-
-
-def _config_template(block: str) -> tuple[str, str]:
-    deployment: Final = yaml.safe_load(block)["model_list"][0]
-    info_keys: Final = [
-        key for key in deployment if key not in {"model_name", "litellm_params"}
-    ]
-    if len(info_keys) != 1 or len(deployment[info_keys[0]]) != 1:
-        raise PathStop(
-            "readme:block-changed",
-            f"the fallback config example declares {info_keys} beyond the model",
-        )
-    info_key: Final = info_keys[0]
-    return info_key, next(iter(deployment[info_key]))
+    return keys
 
 
 def _named(findings: list[PrintedFinding] | tuple[PrintedFinding, ...]) -> str:

@@ -11,7 +11,6 @@ from typing import Any, Final
 import httpx
 import litellm
 from litellm.proxy._types import hash_token
-from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
 
 from . import settings
 from .bridge import running_litellm
@@ -140,15 +139,10 @@ def _init_command(arguments: argparse.Namespace) -> int:
         headers={"Authorization": f"Bearer {key}"},
         timeout=GATEWAY_TIMEOUT_SECONDS,
     ) as client:
-        return init(options, client, litellm_alert_types(), hash_token(key))
+        return init(options, client, hash_token(key))
 
 
-def init(
-    options: InitOptions,
-    client: httpx.Client,
-    default_alert_types: Sequence[str],
-    own_token: str,
-) -> int:
+def init(options: InitOptions, client: httpx.Client, own_token: str) -> int:
     taken: Final = _taken_outputs(options)
     if taken:
         for path in taken:
@@ -158,7 +152,7 @@ def init(
             )
         return UNREADY
     try:
-        prepared = _prepare(options, client, default_alert_types, own_token)
+        prepared = _prepare(options, client, own_token)
     except (DocumentError, GatewayReadError) as error:
         print(
             f"init could not read its inputs or the gateway: {error}", file=sys.stderr
@@ -225,17 +219,12 @@ def _taken_outputs(options: InitOptions) -> list[Path]:
     ]
 
 
-def _prepare(
-    options: InitOptions,
-    client: httpx.Client,
-    default_alert_types: Sequence[str],
-    own_token: str,
-) -> Prepared:
+def _prepare(options: InitOptions, client: httpx.Client, own_token: str) -> Prepared:
     config_document: Final = load_document(
         options.gateway_config, read_text(options.gateway_config)
     )
     config: Final = read_config(
-        options.gateway_config, load_yaml(options.gateway_config), default_alert_types
+        options.gateway_config, load_yaml(options.gateway_config)
     )
     existing: Final = _existing_manifest(options.manifest)
     snapshot: Final = read_gateway(client, _key_page_progress)
@@ -245,7 +234,6 @@ def _prepare(
     written_config: Final = read_config(
         options.gateway_config,
         load_yaml_text(options.config_out, config_out_text),
-        default_alert_types,
     )
     manifest_text, manifest_document = _manifest_documents(options, existing, snapshot)
     manifest_out_text: str | None = None
@@ -409,22 +397,12 @@ def check(
         manifest = Manifest.from_file(manifest_path)
     except ManifestError as error:
         return [Violation(error.rule, str(manifest_path), str(error))]
-    config: Final = read_config(
-        gateway_config, load_yaml(gateway_config), litellm_alert_types()
-    )
+    config: Final = read_config(gateway_config, load_yaml(gateway_config))
     return file_rules(manifest, with_live_groups(gateway_file(config), live_groups))
 
 
-def read_config(
-    path: Path, document: object, default_alert_types: Sequence[str]
-) -> GatewayConfig:
-    return read_gateway_config(
-        path, with_includes(path, mapping(path, document)), default_alert_types
-    )
-
-
-def litellm_alert_types() -> list[str]:
-    return [alert_type.value for alert_type in DEFAULT_ALERT_TYPES]
+def read_config(path: Path, document: object) -> GatewayConfig:
+    return read_gateway_config(path, with_includes(path, mapping(path, document)))
 
 
 def with_live_groups(
@@ -443,7 +421,6 @@ def gateway_file(config: GatewayConfig) -> GatewayFile:
             for name, deployments in deployments_by_group.items()
         },
         settings=config.settings,
-        native_budget_alerts=config.native_budget_alerts,
         redis_configured=config.coordination_redis,
     )
 
