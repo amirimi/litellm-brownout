@@ -1296,3 +1296,22 @@ async def test_the_filter_refuses_an_unpriced_compaction_candidate(team):
         await filtered(handler, applied, [deployment("budget-lab-primary", None)], None)
 
     assert raised.value.detail["reason"] == "unpriced_model"
+
+
+@pytest.mark.parametrize("call_type", ["acompletion", "aembedding"])
+async def test_the_filter_leaves_an_empty_candidate_list_to_litellm(team, call_type):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=10.0)
+    applied = routed(
+        await call(
+            handler,
+            make_auth(team),
+            call_type,
+            {"model": "budget-lab-primary", "messages": []},
+        ),
+        team.team_id,
+    )
+    cooled_down: list[dict[str, Any]] = []
+
+    assert await filtered(handler, applied, cooled_down, None) is cooled_down
+    assert sink.incidents == []

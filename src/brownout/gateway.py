@@ -160,7 +160,7 @@ class BrownoutHandler(CustomLogger):
     ) -> list:
         routed: Final = request_kwargs or {}
         team: Final = self._manifest.team_policy(bridge.request_team(routed))
-        if team is None:
+        if team is None or not healthy_deployments:
             return healthy_deployments
         refusal: Final = self._verify(model, team, routed, healthy_deployments)
         if refusal is None:

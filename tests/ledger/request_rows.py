@@ -790,6 +790,15 @@ REQUEST_ROWS: Final = (
         cites=("litellm/router.py:12414@1.101.6",),
         forms=(
             Form(
+                "no healthy deployment, as when every one is cooling down",
+                "left to LiteLLM, which reports that no deployment is available",
+                Supported(
+                    (
+                        f"{GATEWAY}test_the_filter_leaves_an_empty_candidate_list_to_litellm",
+                    )
+                ),
+            ),
+            Form(
                 "a governed request after the router resolved its name",
                 "verified",
                 Supported(
