@@ -54,8 +54,8 @@ bridge writes the request's facts into its LiteLLM metadata.
 | `events.py` | Event types and the `brownout` log line | No |
 | `settings.py` | Environment variables | No |
 | `cli.py` | `brownout check` | Its cost map only |
-| `bridge.py` | Every LiteLLM touchpoint, including the three private helpers, the version check and the request facts field | Yes |
-| `gateway.py` | The two hooks, the request pipeline and the one place a refusal becomes an `HTTPException` | Through the bridge |
+| `bridge.py` | Every LiteLLM touchpoint, including the three private helpers, the version check, the table of admitted call types and the request facts field | Yes |
+| `gateway.py` | The three hooks, the request pipeline per call kind and the one place a refusal becomes an `HTTPException` | Through the bridge |
 
 The pairing rules and the permission check run only when `decide` wants a downgrade, because they
 are the checks whose answers the decision may not need. A broken pairing withholds the downgrade and
@@ -108,7 +108,7 @@ lists the ones a rule enforces.
 |---|---|
 | Request compatibility between a route and its fallback goes unchecked | Context capacity, tools, structured output and modalities can differ. With `drop_params: true`, as in the lab config, a parameter the fallback does not support may be dropped silently. Check each fallback against the workload before it carries real traffic |
 | The counter resets after the window does | LiteLLM's reset job zeroes the counter every 597 to 605 seconds by default, and later if the job is delayed. Until it runs, the previous window's spend can degrade requests and consume the new window's claims. A team that ends a window above a tier therefore gets false announcements at the next boundary, and none when it really crosses that tier later in the window. Closing this needs the team's persisted `budget_reset_at` |
-| Router fallbacks never apply to governed chat completions | The plugin empties every fallback list and sets `disable_fallbacks` on each governed request, so a gateway, key or team that relies on cross-group fallbacks for outage resilience loses them on chat. Failover between deployments of one route by `order` and cooldown still works |
+| Router fallbacks never apply to governed model calls | The plugin empties every fallback list and sets `disable_fallbacks` on each call that names a model, so a gateway, key or team that relies on cross-group fallbacks for outage resilience loses them. Failover between deployments of one route by `order` and cooldown still works |
 | A fallback that errors fails the request | The caller receives the provider's error, and nothing retries the primary. When a large team crosses `degrade_at`, all its traffic for that route moves to the fallback at once, so the provider quota behind the fallback has to absorb the jump |
 | Losing Redis keys repeats announcements | A flush, or an eviction policy such as `volatile-lru` that evicts keys with a TTL first, removes the plugin's claims, and every transition in the window is announced again |
 | A LiteLLM release that renames a private helper stops startup | The bridge imports three private helpers when LiteLLM loads the callback, so a rename fails the import and the gateway does not start. Pin the image tag and upgrade only to a release the `litellm matrix` workflow has passed |

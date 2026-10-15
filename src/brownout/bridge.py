@@ -4,10 +4,14 @@ import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
+from enum import StrEnum
 from importlib.metadata import version as installed_version
 from typing import Any, Final, Literal, assert_never
 
 from fastapi import HTTPException, status
+from litellm.litellm_core_utils.core_helpers import (
+    get_metadata_variable_name_from_kwargs,
+)
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.auth.auth_checks import (
     _can_object_call_model,
@@ -43,11 +47,12 @@ logger: Final = logging.getLogger("brownout")
 SUPPORTED_FLOOR: Final = (1, 101, 6)
 TESTED_CEILING: Final = (1, 104)
 
-CHAT_COMPLETION_CALL_TYPES: Final = frozenset({"completion", "acompletion"})
 SPEND_LOGS_METADATA_KEY: Final = "spend_logs_metadata"
 FIELD_KEY: Final = "brownout"
 OUTCOME_REFUSED: Final = "refused"
 OUTCOME_DEGRADED: Final = "degraded"
+OUTCOME_ADMITTED: Final = "admitted"
+KIND_KEY: Final = "kind"
 CALLER_ROUTING_KEYS: Final = (
     "fallbacks",
     "context_window_fallbacks",
@@ -74,6 +79,73 @@ HEADER_DEGRADED_FROM: Final = "x-brownout-degraded-from"
 HEADER_DEGRADATION_REASON: Final = "x-brownout-degradation-reason"
 
 RouterProvider = Callable[[], Any | None]
+
+
+class CallKind(StrEnum):
+    TEXT = "text"
+    EMBEDDING = "embedding"
+    COMPACTION = "compaction"
+    OTHER_MODEL = "other_model"
+    NO_MODEL = "no_model"
+
+
+CALL_KINDS: Final[Mapping[str, CallKind]] = {
+    "acompletion": CallKind.TEXT,
+    "atext_completion": CallKind.TEXT,
+    "text_completion": CallKind.TEXT,
+    "anthropic_messages": CallKind.TEXT,
+    "aresponses": CallKind.TEXT,
+    "agenerate_content": CallKind.TEXT,
+    "agenerate_content_stream": CallKind.TEXT,
+    "aembedding": CallKind.EMBEDDING,
+    "acompact_responses": CallKind.COMPACTION,
+    "image_generation": CallKind.OTHER_MODEL,
+    "aimage_generation": CallKind.OTHER_MODEL,
+    "aimage_edit": CallKind.OTHER_MODEL,
+    "aspeech": CallKind.OTHER_MODEL,
+    "transcription": CallKind.OTHER_MODEL,
+    "atranscription": CallKind.OTHER_MODEL,
+    "moderation": CallKind.OTHER_MODEL,
+    "amoderation": CallKind.OTHER_MODEL,
+    "rerank": CallKind.OTHER_MODEL,
+    "arerank": CallKind.OTHER_MODEL,
+    "aocr": CallKind.OTHER_MODEL,
+    "avideo_generation": CallKind.OTHER_MODEL,
+    "call_mcp_tool": CallKind.NO_MODEL,
+    "aget_responses": CallKind.NO_MODEL,
+    "adelete_responses": CallKind.NO_MODEL,
+    "acancel_responses": CallKind.NO_MODEL,
+    "alist_input_items": CallKind.NO_MODEL,
+    "acreate_file": CallKind.NO_MODEL,
+    "afile_content": CallKind.NO_MODEL,
+    "afile_retrieve": CallKind.NO_MODEL,
+    "afile_delete": CallKind.NO_MODEL,
+    "avector_store_create": CallKind.NO_MODEL,
+    "avector_store_retrieve": CallKind.NO_MODEL,
+    "avector_store_list": CallKind.NO_MODEL,
+    "avector_store_update": CallKind.NO_MODEL,
+    "avector_store_delete": CallKind.NO_MODEL,
+    "avector_store_search": CallKind.NO_MODEL,
+    "avector_store_file_create": CallKind.NO_MODEL,
+    "avector_store_file_list": CallKind.NO_MODEL,
+    "avector_store_file_retrieve": CallKind.NO_MODEL,
+    "avector_store_file_content": CallKind.NO_MODEL,
+    "avector_store_file_update": CallKind.NO_MODEL,
+    "avector_store_file_delete": CallKind.NO_MODEL,
+    "acreate_container": CallKind.NO_MODEL,
+    "alist_containers": CallKind.NO_MODEL,
+    "aretrieve_container": CallKind.NO_MODEL,
+    "adelete_container": CallKind.NO_MODEL,
+    "aupload_container_file": CallKind.NO_MODEL,
+    "alist_container_files": CallKind.NO_MODEL,
+    "aretrieve_container_file": CallKind.NO_MODEL,
+    "aretrieve_container_file_content": CallKind.NO_MODEL,
+    "adelete_container_file": CallKind.NO_MODEL,
+    "avideo_status": CallKind.NO_MODEL,
+    "avideo_content": CallKind.NO_MODEL,
+    "avideo_list": CallKind.NO_MODEL,
+    "avideo_get_character": CallKind.NO_MODEL,
+}
 
 
 class UnsupportedLiteLLM(Exception):
@@ -346,6 +418,14 @@ def request_team(data: Mapping[str, Any]) -> str | None:
     return None
 
 
+def field_kind(field: Mapping[str, Any]) -> CallKind | None:
+    written: Final = field.get(KIND_KEY)
+    for kind in CallKind:
+        if kind.value == written:
+            return kind
+    return None
+
+
 def decided_route(field: Mapping[str, Any] | None) -> str | None:
     if field is None:
         return None
@@ -353,6 +433,10 @@ def decided_route(field: Mapping[str, Any] | None) -> str | None:
     if isinstance(route, str):
         return route
     return None
+
+
+def call_kind(call_type: str) -> CallKind | None:
+    return CALL_KINDS.get(call_type)
 
 
 def requested_model(data: dict) -> str:
@@ -374,10 +458,11 @@ def clear_field(data: dict) -> None:
 
 
 def write_field(data: dict, field: dict[str, Any]) -> None:
-    metadata = data.get("metadata")
+    container: Final = get_metadata_variable_name_from_kwargs(data)
+    metadata = data.get(container)
     if not isinstance(metadata, dict):
         metadata = {}
-        data["metadata"] = metadata
+        data[container] = metadata
     existing: Final = metadata.get(SPEND_LOGS_METADATA_KEY)
     if isinstance(existing, dict):
         metadata[SPEND_LOGS_METADATA_KEY] = {**existing, FIELD_KEY: field}
@@ -385,23 +470,25 @@ def write_field(data: dict, field: dict[str, Any]) -> None:
         metadata[SPEND_LOGS_METADATA_KEY] = {FIELD_KEY: field}
 
 
-def read_field(data: dict) -> dict[str, Any] | None:
-    metadata = data.get("metadata")
-    if not isinstance(metadata, dict):
-        return None
-    spend_logs_metadata = metadata.get(SPEND_LOGS_METADATA_KEY)
-    if not isinstance(spend_logs_metadata, dict):
-        return None
-    field = spend_logs_metadata.get(FIELD_KEY)
-    if not isinstance(field, dict):
-        return None
-    return field
+def read_field(data: Mapping[str, Any]) -> dict[str, Any] | None:
+    for container in METADATA_CONTAINERS:
+        metadata = data.get(container)
+        if not isinstance(metadata, dict):
+            continue
+        spend_logs_metadata = metadata.get(SPEND_LOGS_METADATA_KEY)
+        if not isinstance(spend_logs_metadata, dict):
+            continue
+        field = spend_logs_metadata.get(FIELD_KEY)
+        if isinstance(field, dict):
+            return field
+    return None
 
 
 def governed_field(
-    team: TeamPolicy, decision: Decision, outcome: Outcome
+    kind: CallKind, team: TeamPolicy, decision: Decision, outcome: Outcome
 ) -> dict[str, Any]:
     field: dict[str, Any] = {
+        KIND_KEY: kind.value,
         "requested_route": decision.route,
         "outcome": outcome_name(outcome),
         SERVED_ROUTE_KEY: served_route(outcome),
@@ -418,6 +505,10 @@ def governed_field(
         decision.spend_usd / team.envelope_usd * 100.0, 4
     )
     return field
+
+
+def admitted_field() -> dict[str, Any]:
+    return {KIND_KEY: CallKind.NO_MODEL.value, "outcome": OUTCOME_ADMITTED}
 
 
 def refused_field(data: dict, refusal: Refusal) -> dict[str, Any]:
@@ -497,6 +588,7 @@ def http_error(refusal: Refusal) -> HTTPException:
             | RefusalReason.GATEWAY_RULE_VIOLATED
             | RefusalReason.SPEND_COUNTER_UNREADABLE
             | RefusalReason.MODEL_NOT_A_GROUP
+            | RefusalReason.CALL_TYPE_NOT_GOVERNED
         ):
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             error = "brownout_unavailable"

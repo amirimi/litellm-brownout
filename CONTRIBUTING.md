@@ -41,9 +41,14 @@ set -a && source .env && set +a
 uv run pytest -m e2e
 ```
 
-The sequence skips itself when the gateway is unreachable. `LAB_REQUIRE_STACK=1` turns an
-unreachable gateway into a failure, which is what CI does. The sequence provisions the one lab team
-the manifest names, so two copies cannot run at once.
+`tests/test_call_kinds_e2e.py` drives a second lab team, `kinds-lab`, through each call kind. It
+sends every text endpoint past the downgrade tier, then embeddings, a direct MCP tool call, an MCP
+tool loop and a batch that brownout refuses. The `lab-tools` service answers the tool loop and the
+embeddings and serves the MCP tool. It runs on the LiteLLM image, so no request leaves the lab.
+
+The suites skip themselves when the gateway is unreachable. `LAB_REQUIRE_STACK=1` turns an
+unreachable gateway into a failure, which is what CI does. The suites provision the `budget-lab`
+and `kinds-lab` teams the manifest names, so two copies cannot run at once.
 
 `tests/setup_lab.py` is rerunnable at about eleven seconds, because a spend reset takes more than one
 write. LiteLLM buffers spend per team and flushes it every `PROXY_BATCH_WRITE_AT` seconds. A counter

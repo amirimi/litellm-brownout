@@ -30,6 +30,7 @@ class RuleId(StrEnum):
     FALLBACK_IN_TEAM_MODELS = "fallback-in-team-models"
     MEMBER_HAS_NO_BUDGET = "member-has-no-budget"
     MODEL_IS_A_GROUP = "model-is-a-group"
+    CALL_TYPE_GOVERNED = "call-type-governed"
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class RefusalReason(StrEnum):
     GATEWAY_RULE_VIOLATED = "gateway_rule_violated"
     SPEND_COUNTER_UNREADABLE = "spend_counter_unreadable"
     MODEL_NOT_A_GROUP = "model_not_a_group"
+    CALL_TYPE_NOT_GOVERNED = "call_type_not_governed"
 
 
 @dataclass(frozen=True)

@@ -53,6 +53,10 @@ def guardrails() -> bridge.LiteLLMGuardrails:
     return bridge.LiteLLMGuardrails(lambda: router)
 
 
+def kind_members(kind: bridge.CallKind) -> set[str]:
+    return {name for name, member in bridge.CALL_KINDS.items() if member is kind}
+
+
 def decision(
     wants: Admit | WantsDegrade, team_tiers: tuple[int, ...] = (90,)
 ) -> Decision:
@@ -190,6 +194,125 @@ def test_a_failed_request_with_nothing_to_disclose_carries_no_headers():
     assert bridge.headers(data, None, None) is None
 
 
+def test_text_generation_is_chat_text_messages_responses_and_generate_content():
+    assert kind_members(bridge.CallKind.TEXT) == {
+        "acompletion",
+        "atext_completion",
+        "text_completion",
+        "anthropic_messages",
+        "aresponses",
+        "agenerate_content",
+        "agenerate_content_stream",
+    }
+
+
+def test_embeddings_are_the_other_model_call_priced_per_token():
+    assert kind_members(bridge.CallKind.EMBEDDING) == {"aembedding"}
+
+
+def test_compaction_is_its_own_kind():
+    assert kind_members(bridge.CallKind.COMPACTION) == {"acompact_responses"}
+
+
+def test_other_model_calls_are_the_endpoints_litellm_prices_in_their_own_units():
+    assert kind_members(bridge.CallKind.OTHER_MODEL) == {
+        "image_generation",
+        "aimage_generation",
+        "aimage_edit",
+        "aspeech",
+        "transcription",
+        "atranscription",
+        "moderation",
+        "amoderation",
+        "rerank",
+        "arerank",
+        "aocr",
+        "avideo_generation",
+    }
+
+
+def test_calls_without_a_model_are_tools_files_stores_containers_and_records():
+    assert kind_members(bridge.CallKind.NO_MODEL) == {
+        "call_mcp_tool",
+        "aget_responses",
+        "adelete_responses",
+        "acancel_responses",
+        "alist_input_items",
+        "acreate_file",
+        "afile_content",
+        "afile_retrieve",
+        "afile_delete",
+        "avector_store_create",
+        "avector_store_retrieve",
+        "avector_store_list",
+        "avector_store_update",
+        "avector_store_delete",
+        "avector_store_search",
+        "avector_store_file_create",
+        "avector_store_file_list",
+        "avector_store_file_retrieve",
+        "avector_store_file_content",
+        "avector_store_file_update",
+        "avector_store_file_delete",
+        "acreate_container",
+        "alist_containers",
+        "aretrieve_container",
+        "adelete_container",
+        "aupload_container_file",
+        "alist_container_files",
+        "aretrieve_container_file",
+        "aretrieve_container_file_content",
+        "adelete_container_file",
+        "avideo_status",
+        "avideo_content",
+        "avideo_list",
+        "avideo_get_character",
+    }
+
+
+@pytest.mark.parametrize(
+    "call_type",
+    [
+        "pass_through_endpoint",
+        "allm_passthrough_route",
+        "_arealtime",
+        "_aresponses_websocket",
+        "acreate_batch",
+        "acreate_fine_tuning_job",
+        "asearch",
+        "asend_message",
+        "avideo_remix",
+        "adecisions",
+        "completion",
+        "a-call-type-litellm-adds-later",
+    ],
+)
+def test_a_call_type_outside_the_allow_list_has_no_kind(call_type):
+    assert bridge.call_kind(call_type) is None
+
+
+def test_the_field_is_written_where_litellm_keeps_its_metadata():
+    data: dict[str, Any] = {"metadata": {"user_id": "caller"}, "litellm_metadata": {}}
+
+    bridge.write_field(data, {"outcome": "served"})
+
+    assert data["metadata"] == {"user_id": "caller"}
+    assert data["litellm_metadata"] == {
+        "spend_logs_metadata": {"brownout": {"outcome": "served"}}
+    }
+
+
+@pytest.mark.parametrize("container", ["metadata", "litellm_metadata"])
+def test_the_field_is_read_from_either_container(container):
+    data: dict[str, Any] = {
+        "metadata": {},
+        "litellm_metadata": {},
+        container: {"spend_logs_metadata": {"brownout": {"outcome": "served"}}},
+    }
+
+    assert bridge.read_field(data) == {"outcome": "served"}
+
+
 def test_a_refused_request_carries_no_disclosure_headers():
     data = with_field(
         {"requested_route": "chat", "outcome": "refused", "refusal": "unpriced_model"}
@@ -310,6 +433,7 @@ def test_every_governed_request_has_its_fallbacks_emptied(guardrails, outcome):
             "caller_routing_not_permitted",
         ),
         (RefusalReason.UNPRICED_MODEL, 503, "brownout_unavailable"),
+        (RefusalReason.CALL_TYPE_NOT_GOVERNED, 503, "brownout_unavailable"),
     ],
 )
 def test_a_refusal_becomes_one_http_error(reason, status_code, error):

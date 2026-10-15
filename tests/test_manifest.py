@@ -47,7 +47,7 @@ def refused(doc: dict[str, Any]) -> ManifestError:
 
 def test_the_lab_manifest_loads(manifest):
     assert manifest.data_class_order == ("internal", "customer_pii")
-    assert set(manifest.team_ids) == {"team-a", "team-b", "budget-lab"}
+    assert set(manifest.team_ids) == {"team-a", "team-b", "budget-lab", "kinds-lab"}
 
 
 @pytest.mark.parametrize("tier", [0, 100, 150, True, 75.5, "75"])

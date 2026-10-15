@@ -16,8 +16,10 @@ keeps the primary until LiteLLM stops the team at $500.
 ## What it adds
 
 LiteLLM already reserves each request's worst-case cost, counts team spend across replicas in Redis
-and refuses requests past the budget. Brownout adds four things to `/v1/chat/completions`, and every
-other endpoint passes through untouched.
+and refuses requests past the budget. Brownout adds four things on top. Text generation through
+`/v1/chat/completions`, `/v1/completions`, `/v1/messages`, `/v1/responses` and Google's
+`generateContent` gets all four. Embeddings, images, audio and the other model calls get the
+warnings and the disclosure, and always keep the model they named.
 
 - **Warnings at any percentage.** The team and each route declare their own tiers, and each tier is
   logged once per window across all replicas. LiteLLM's own budget alerts fire at 85% and 95% only.
@@ -33,10 +35,13 @@ other endpoint passes through untouched.
 
 ## Requirements
 
-Brownout governs every chat completion on the gateway, so the whole gateway has to meet these.
+Brownout governs every model call on the gateway, so the whole gateway has to meet these.
 
-- Every key that sends chat traffic belongs to a team in the manifest.
+- Every key that calls a model, an MCP tool, files, vector stores or containers belongs to a team
+  in the manifest.
 - No key carries a budget of its own.
+- Calls use the call types brownout has reviewed. Provider pass-through routes, realtime, batches,
+  fine-tuning and search tools get a 503 naming the call type.
 - `fail_closed_budget_enforcement` is on, `coordination_redis` is configured and LiteLLM's budget
   alerts are off.
 - LiteLLM runs a release from 1.101.6 to 1.104, pinned by image tag.
@@ -145,7 +150,7 @@ curl -s -i http://localhost:4000/v1/chat/completions \
 
 The response carries `x-brownout-route-served` with the model group that answered. A refused request
 prints its reason instead, such as `"reason":"model_not_a_group"` for a name that is not a model
-group the gateway configures. Brownout refuses chat calls made with the master key or the viewer
+group the gateway configures. Brownout refuses model calls made with the master key or the viewer
 key, because neither belongs to a team.
 
 ## Add a fallback
@@ -270,8 +275,20 @@ such as a refused downgrade and a broken manifest. `docker compose down` stops t
   with a 503 `model_not_a_group`, and the manifest refuses a wildcard route.
 - `check` and `init` read the config file you pass them. A gateway that loads its config from a
   bucket needs that file downloaded first.
-- Brownout governs `/v1/chat/completions` only. Embeddings, images, audio, `/v1/messages` and
-  `/v1/responses` pass through at full price and without headers.
+- Brownout downgrades text generation only. Embeddings, Codex's `/v1/responses/compact`, images,
+  audio, rerank, moderation, OCR and video keep the model they named at any spend, and their spend
+  counts toward the team's budget.
+- Brownout checks per-token prices on text generation and embeddings. LiteLLM prices images, audio,
+  rerank, OCR and video per image, second, character, query or page, so brownout leaves those
+  prices to LiteLLM, and a deployment LiteLLM cannot price records $0.
+- A call type brownout has not reviewed gets a 503 `call_type_not_governed`. This covers provider
+  pass-through routes such as `/anthropic/v1/messages`, realtime, batches, fine-tuning, search tools
+  and any call type a later LiteLLM release adds. Use the unified routes instead.
+- LiteLLM runs no plugin hook on its assistants, threads and runs endpoints, so brownout can neither
+  govern nor refuse them.
+- The team owner picks a fallback every client of its route can reach. LiteLLM sends
+  `/v1/messages` to an OpenAI-style deployment as a Responses API call, so a fallback on a server
+  without that API fails those calls with the provider's error.
 - Router fallbacks never apply to governed requests, including the retry LiteLLM's local rate limiter
   makes. A provider error on the chosen model group reaches the caller, while failover between
   deployments of one group still works.

@@ -28,7 +28,7 @@ note: settings saved through LiteLLM's admin UI live in its database and are not
 @@ -0,0 +1,2 @@
 +version: v1
 +teams: {}
-team-in-manifest\tdev-laptop\thas no team, so its chat calls will be refused
+team-in-manifest\tdev-laptop\thas no team, so its model calls will be refused
     curl -X POST http://localhost:4000/key/update -H "Authorization: Bearer $LITELLM_MASTER_KEY" -d '{"key": "abc", "team_id": "<YOUR TEAM ID>"}'
 team-in-manifest\tadmin keys\tthe master key has no team
 model-priced\tchat\thas no input and output price, so requests for it will be refused

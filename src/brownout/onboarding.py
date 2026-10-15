@@ -128,7 +128,7 @@ def key_findings(
                 Finding(
                     RuleId.TEAM_IN_MANIFEST,
                     subject,
-                    "has no team, so its chat calls will be refused",
+                    "has no team, so its model calls will be refused",
                     (
                         _post(
                             gateway,
@@ -147,7 +147,7 @@ def key_findings(
                 Finding(
                     RuleId.KEY_HAS_NO_BUDGET,
                     subject,
-                    f"carries its own {', '.join(key.own_budgets)}, so its chat calls "
+                    f"carries its own {', '.join(key.own_budgets)}, so its model calls "
                     "will be refused",
                     (
                         _post(
@@ -250,16 +250,16 @@ def admin_keys_notice(own_key_teamless: bool) -> Finding:
         return Finding(
             RuleId.TEAM_IN_MANIFEST,
             "admin keys",
-            "the master key and the key init runs with have no team, so chat calls "
-            "made with them will be refused. Send chat traffic with team keys",
+            "the master key and the key init runs with have no team, so model calls "
+            "made with them will be refused. Send model traffic with team keys",
             (),
             False,
         )
     return Finding(
         RuleId.TEAM_IN_MANIFEST,
         "master key",
-        "the master key has no team, so chat calls made with it will be refused. "
-        "Send chat traffic with team keys",
+        "the master key has no team, so model calls made with it will be refused. "
+        "Send model traffic with team keys",
         (),
         False,
     )
@@ -279,7 +279,7 @@ def nothing_to_govern(gateway: str, teams_exist: bool) -> Finding:
         RuleId.TEAM_IN_MANIFEST,
         "manifest",
         "the gateway has no team, so there is no manifest to write. Create a team with "
-        "a budget and a key for it with the commands below, then send chat traffic with "
+        "a budget and a key for it with the commands below, then send model traffic with "
         "that key",
         (
             _post(
@@ -367,7 +367,7 @@ def _team_finding(team: LiteLLMTeam, gateway: str) -> Finding:
         RuleId.DURATION_TUMBLES,
         team.team_id,
         f"has budget_duration {team.budget_duration!r}, which the manifest does not "
-        "accept, so its chat calls will be refused",
+        "accept, so its model calls will be refused",
         command,
         True,
     )
@@ -419,7 +419,7 @@ def _envelope_mismatch(policy: TeamPolicy, team: LiteLLMTeam, gateway: str) -> F
         RuleId.CEILING_MATCHES_ENVELOPE,
         policy.team_id,
         f"envelope_usd is {policy.envelope_usd} and LiteLLM's max_budget is "
-        f"{team.max_budget}, so its chat calls will be refused",
+        f"{team.max_budget}, so its model calls will be refused",
         (
             _post(
                 gateway,

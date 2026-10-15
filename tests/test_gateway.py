@@ -25,6 +25,7 @@ from .support import (
     RecordingSink,
     SequenceSchedule,
     build_handler,
+    call,
     disclosed,
     headers_for,
     make_auth,
@@ -273,23 +274,17 @@ async def test_a_forged_field_is_overwritten_rather_than_refused(team):
     assert headers["x-brownout-route-served"] == "budget-lab-primary"
 
 
-async def test_a_forged_field_on_a_non_chat_call_is_removed(team):
+async def test_a_forged_field_on_a_model_call_is_replaced(team):
     handler = build_handler(team, RecordingSink(), spend=10.0)
     forged = {
-        "model": "embedding-model",
+        "model": "budget-lab-primary",
         "input": "hello",
         "metadata": {"spend_logs_metadata": {"brownout": {"served_route": "forged"}}},
     }
 
-    data = await handler.async_pre_call_hook(
-        user_api_key_dict=make_auth(team),
-        cache=None,
-        data=forged,
-        call_type="aembedding",
-    )
+    data = await call(handler, make_auth(team), "aembedding", forged)
 
-    assert data["metadata"]["spend_logs_metadata"] == {}
-    assert bridge.headers(data, object(), None) is None
+    assert disclosed(data)["served_route"] == "budget-lab-primary"
 
 
 async def test_a_governed_request_discloses_only_facts_about_itself(team):
@@ -304,6 +299,7 @@ async def test_a_governed_request_discloses_only_facts_about_itself(team):
         "budget_tier": "90",
         "degradation_reason": "degrade_tier_reached",
         "utilisation_percent": 93.0,
+        "kind": "text",
     }
 
 
@@ -391,25 +387,6 @@ async def test_a_caller_routing_refusal_discloses_no_incident(team):
         "outcome": "refused",
         "refusal": "caller_routing_not_permitted",
     }
-
-
-async def test_a_non_chat_call_is_passed_through_untouched(team):
-    handler = build_handler(team, RecordingSink(), spend=999.0)
-    original = {
-        "model": "never-priced",
-        "input": "hello",
-        "fallbacks": ["caller-owned-fallback"],
-        "metadata": {"x-brownout-caller-field": "not governed on this endpoint"},
-    }
-
-    data = await handler.async_pre_call_hook(
-        user_api_key_dict=make_auth(team),
-        cache=None,
-        data=dict(original),
-        call_type="aembedding",
-    )
-
-    assert data == original
 
 
 async def test_an_envelope_that_no_longer_matches_the_team_ceiling_pages_the_platform(
@@ -993,13 +970,21 @@ async def test_the_filter_refuses_an_unpriced_candidate(team):
     )
 
 
-async def test_the_filter_refuses_a_governed_chat_request_brownout_never_saw(team):
+@pytest.mark.parametrize(
+    "messages",
+    [
+        pytest.param([{"role": "user", "content": "hi"}], id="chat"),
+        pytest.param(None, id="responses-or-embeddings"),
+    ],
+)
+async def test_the_filter_refuses_a_governed_request_brownout_never_saw(team, messages):
     handler = build_handler(team, RecordingSink(), spend=100.0)
     unseen = routed({"model": "budget-lab-primary", "metadata": {}}, team.team_id)
 
-    error = await filter_refusal(handler, unseen, [deployment("budget-lab-primary")])
+    with pytest.raises(HTTPException) as raised:
+        await filtered(handler, unseen, [deployment("budget-lab-primary")], messages)
 
-    assert error.detail["reason"] == "model_not_a_group"
+    assert raised.value.detail["reason"] == "model_not_a_group"
 
 
 @pytest.mark.parametrize(
@@ -1009,10 +994,9 @@ async def test_the_filter_refuses_a_governed_chat_request_brownout_never_saw(tea
             "not-in-the-manifest", [{"role": "user", "content": "hi"}], id="ungoverned"
         ),
         pytest.param(None, [{"role": "user", "content": "hi"}], id="no-team"),
-        pytest.param("budget-lab", None, id="non-chat"),
     ],
 )
-async def test_the_filter_leaves_other_requests_untouched(team, team_id, messages):
+async def test_the_filter_leaves_other_teams_untouched(team, team_id, messages):
     handler = build_handler(team, RecordingSink(), spend=100.0)
     unseen = routed({"model": "anything", "metadata": {}}, team_id)
     candidates = [deployment("anything", None)]
@@ -1025,3 +1009,290 @@ async def test_the_filter_leaves_other_requests_untouched(team, team_id, message
     )
 
     assert result is candidates
+
+
+def kind_calls(kind: bridge.CallKind) -> list[str]:
+    return sorted(name for name, member in bridge.CALL_KINDS.items() if member is kind)
+
+
+def metadata_container(call_type: str) -> str:
+    if call_type in {"anthropic_messages", "aresponses"}:
+        return "litellm_metadata"
+    return "metadata"
+
+
+@pytest.mark.parametrize("call_type", kind_calls(bridge.CallKind.TEXT))
+async def test_every_text_call_is_downgraded_past_its_tier(team, call_type):
+    handler = build_handler(team, RecordingSink(), spend=950.0)
+    container = metadata_container(call_type)
+
+    applied = await call(
+        handler,
+        make_auth(team),
+        call_type,
+        {"model": "budget-lab-primary", container: {}},
+    )
+
+    field = applied[container]["spend_logs_metadata"]["brownout"]
+    assert applied["model"] == "budget-lab-degraded"
+    assert applied["disable_fallbacks"] is True
+    assert (field["kind"], field["outcome"]) == ("text", "degraded")
+
+
+MODEL_CALLS = (
+    kind_calls(bridge.CallKind.EMBEDDING)
+    + kind_calls(bridge.CallKind.COMPACTION)
+    + kind_calls(bridge.CallKind.OTHER_MODEL)
+)
+
+
+@pytest.mark.parametrize("call_type", MODEL_CALLS)
+async def test_a_model_call_is_served_by_the_model_it_named_at_any_spend(
+    team, call_type
+):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=999.0)
+
+    applied = await call(
+        handler, make_auth(team), call_type, {"model": "budget-lab-primary"}
+    )
+
+    assert applied["model"] == "budget-lab-primary"
+    assert applied["disable_fallbacks"] is True
+    assert applied["fallbacks"] == []
+    assert disclosed(applied) == {
+        "kind": bridge.call_kind(call_type),
+        "requested_route": "budget-lab-primary",
+        "outcome": "served",
+        "served_route": "budget-lab-primary",
+        "budget_tier": "90",
+        "utilisation_percent": 99.9,
+    }
+    assert [event.tier for event in sink.tiers] == [75, 90]
+    assert sink.route_degradations == []
+    assert sink.fallback_rejections == []
+
+
+@pytest.mark.parametrize("call_type", ["aembedding", "aspeech"])
+async def test_an_unreadable_counter_refuses_a_model_call(team, call_type):
+    handler = build_handler(team, RecordingSink(), spend=RuntimeError("redis down"))
+
+    with pytest.raises(HTTPException) as raised:
+        await call(handler, make_auth(team), call_type, {"model": "budget-lab-primary"})
+
+    assert raised.value.detail["reason"] == "spend_counter_unreadable"
+
+
+@pytest.mark.parametrize("call_type", kind_calls(bridge.CallKind.OTHER_MODEL))
+async def test_another_model_call_is_not_judged_on_a_per_token_price(team, call_type):
+    gateway = FakeGateway.from_lab_config().serving("priced-per-image")
+    handler = build_handler(team, RecordingSink(), spend=10.0, gateway=gateway)
+
+    applied = await call(
+        handler, make_auth(team), call_type, {"model": "priced-per-image"}
+    )
+
+    assert disclosed(applied)["served_route"] == "priced-per-image"
+
+
+@pytest.mark.parametrize("call_type", kind_calls(bridge.CallKind.NO_MODEL))
+async def test_a_call_without_a_model_is_admitted_on_its_team_and_key(team, call_type):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=RuntimeError("never read"))
+    original = {"model": "mcp-tool-call", "metadata": {}}
+
+    applied = await call(handler, make_auth(team), call_type, dict(original))
+
+    assert applied["model"] == "mcp-tool-call"
+    assert "disable_fallbacks" not in applied
+    assert disclosed(applied) == {"kind": "no_model", "outcome": "admitted"}
+    assert bridge.headers(applied, object(), None) is None
+    assert sink.events == []
+
+
+@pytest.mark.parametrize(
+    "call_type",
+    ["pass_through_endpoint", "_arealtime", "acreate_batch", "asearch", "adecisions"],
+)
+async def test_a_call_type_outside_the_allow_list_is_refused(team, call_type):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=10.0)
+    data: dict[str, Any] = {"model": "budget-lab-primary", "metadata": {}}
+
+    with pytest.raises(HTTPException) as raised:
+        await call(handler, make_auth(team), call_type, data)
+    for _ in range(2):
+        with contextlib.suppress(HTTPException):
+            await call(handler, make_auth(team), call_type, dict(data))
+
+    assert raised.value.status_code == 503
+    assert (raised.value.detail["rule"], raised.value.detail["reason"]) == (
+        "call-type-governed",
+        "call_type_not_governed",
+    )
+    assert raised.value.detail["call_type"] == call_type
+    assert "/v1/messages" in raised.value.detail["message"]
+    assert [incident.detail["call_type"] for incident in sink.incidents] == [call_type]
+
+
+def teamless(team: TeamPolicy):
+    auth = make_auth(team)
+    auth.team_id = None
+    return auth
+
+
+def with_key_budget(team: TeamPolicy):
+    auth = make_auth(team)
+    auth.max_budget = 5.0
+    return auth
+
+
+def with_drifted_ceiling(team: TeamPolicy):
+    auth = make_auth(team)
+    auth.team_max_budget = team.envelope_usd * 2
+    return auth
+
+
+@pytest.mark.parametrize(
+    "call_type", ["acompletion", "aresponses", "aembedding", "call_mcp_tool"]
+)
+@pytest.mark.parametrize(
+    ("auth_for", "rule"),
+    [
+        pytest.param(teamless, "team-in-manifest", id="teamless"),
+        pytest.param(with_key_budget, "key-has-no-budget", id="key-budget"),
+        pytest.param(with_drifted_ceiling, "ceiling-matches-envelope", id="ceiling"),
+    ],
+)
+async def test_team_and_key_checks_hold_on_every_kind(team, call_type, auth_for, rule):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+
+    with pytest.raises(HTTPException) as raised:
+        await call(
+            handler,
+            auth_for(team),
+            call_type,
+            {"model": "budget-lab-primary", "metadata": {}},
+        )
+
+    assert (raised.value.status_code, raised.value.detail["rule"]) == (503, rule)
+
+
+@pytest.mark.parametrize(
+    "call_type",
+    ["acompletion", "anthropic_messages", "aembedding", "acompact_responses"],
+)
+async def test_an_unpriced_model_is_refused_on_every_kind_priced_per_token(
+    team, call_type
+):
+    gateway = FakeGateway.from_lab_config().serving("never-priced")
+    handler = build_handler(team, RecordingSink(), spend=10.0, gateway=gateway)
+
+    with pytest.raises(HTTPException) as raised:
+        await call(handler, make_auth(team), call_type, {"model": "never-priced"})
+
+    assert raised.value.detail["rule"] == "model-priced"
+
+
+@pytest.mark.parametrize("call_type", ["aembedding", "call_mcp_tool"])
+async def test_caller_routing_is_refused_on_every_kind(team, call_type):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+
+    with pytest.raises(HTTPException) as raised:
+        await call(
+            handler,
+            make_auth(team),
+            call_type,
+            {"model": "budget-lab-primary", "fallbacks": ["budget-lab-degraded"]},
+        )
+
+    assert raised.value.status_code == 400
+
+
+async def test_the_filter_verifies_a_model_call_against_the_group_it_named(team):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+    applied = routed(
+        await call(
+            handler, make_auth(team), "aembedding", {"model": "budget-lab-primary"}
+        ),
+        team.team_id,
+    )
+    candidates = [deployment("budget-lab-primary")]
+
+    assert await filtered(handler, applied, candidates, None) is candidates
+    with pytest.raises(HTTPException) as raised:
+        await filtered(handler, applied, [deployment("budget-lab-degraded")], None)
+    assert raised.value.detail["reason"] == "model_not_a_group"
+
+
+async def test_the_filter_passes_a_call_without_a_model(team):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+    applied = routed(
+        await call(
+            handler, make_auth(team), "acreate_file", {"model": "", "metadata": {}}
+        ),
+        team.team_id,
+    )
+    candidates = [deployment("anything", None)]
+
+    assert await filtered(handler, applied, candidates, None) is candidates
+
+
+async def test_the_filter_reads_the_field_from_litellm_metadata(team):
+    handler = build_handler(team, RecordingSink(), spend=950.0)
+    applied = await call(
+        handler,
+        make_auth(team),
+        "aresponses",
+        {"model": "budget-lab-primary", "litellm_metadata": {}},
+    )
+    applied["litellm_metadata"]["user_api_key_team_id"] = team.team_id
+    candidates = [deployment("budget-lab-degraded")]
+
+    assert await filtered(handler, applied, candidates, None) is candidates
+
+
+async def test_the_filter_refuses_an_unpriced_embedding_candidate(team):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+    applied = routed(
+        await call(
+            handler, make_auth(team), "aembedding", {"model": "budget-lab-primary"}
+        ),
+        team.team_id,
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        await filtered(handler, applied, [deployment("budget-lab-primary", None)], None)
+
+    assert raised.value.detail["reason"] == "unpriced_model"
+
+
+async def test_the_filter_admits_another_model_call_without_a_per_token_price(team):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+    applied = routed(
+        await call(
+            handler, make_auth(team), "aspeech", {"model": "budget-lab-primary"}
+        ),
+        team.team_id,
+    )
+    candidates = [deployment("budget-lab-primary", None)]
+
+    assert await filtered(handler, applied, candidates, None) is candidates
+
+
+async def test_the_filter_refuses_an_unpriced_compaction_candidate(team):
+    handler = build_handler(team, RecordingSink(), spend=10.0)
+    applied = routed(
+        await call(
+            handler,
+            make_auth(team),
+            "acompact_responses",
+            {"model": "budget-lab-primary"},
+        ),
+        team.team_id,
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        await filtered(handler, applied, [deployment("budget-lab-primary", None)], None)
+
+    assert raised.value.detail["reason"] == "unpriced_model"
