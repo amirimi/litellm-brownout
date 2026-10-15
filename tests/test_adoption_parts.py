@@ -50,9 +50,7 @@ def test_every_marked_readme_block_is_found():
         "install",
         "confirm",
         "fallback-manifest",
-        "fallback-config",
         "redis-service",
-        "fallback-ui",
         "fallback-ui-check",
     }
     assert "brownout init" in blocks["prepare"]

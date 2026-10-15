@@ -107,9 +107,9 @@ exits `0`. Only then add `--write`, which refuses to overwrite an existing file.
   budget and window, warns at 75% and 90%, and declares no fallback yet. Pass
   `--manifest yours.yaml` to extend a manifest you already have.
 - `brownout.config.yaml` is your gateway config with comments kept. It adds the callback, turns on
-  `fail_closed_budget_enforcement`, removes `budget_alerts` from `alert_types`, sets
-  `budget_exceeded_status_code: 429` and derives `coordination_redis` from a Redis cache if you have
-  one.
+  `fail_closed_budget_enforcement`, sets `budget_exceeded_status_code: 429` and derives
+  `coordination_redis` from a Redis cache if you have one. Your alerting stays as it was, so LiteLLM's
+  own budget alerts keep firing at 85% and 95% next to brownout's tiers.
 
 Check both files, then delete the `brownout-init` user, which deletes its key too. The same delete
 recovers a key lost with a closed shell before you run the block again.
@@ -159,13 +159,11 @@ key, because neither belongs to a team.
 
 ## Add a fallback
 
-A route degrades only after its owner gives it a fallback. Adding one takes an edit to each file.
-
-In `brownout.yaml`, list the data classes least restricted first and give the route its fallback.
+A route degrades only after its owner gives it a fallback. In `brownout.yaml`, give the route its
+fallback and the percentage of the team's budget at which to use it.
 
 <!-- adoption: fallback-manifest -->
 ```yaml
-data_class_order: [internal, customer_pii]
 teams:
   team-a:
     envelope_usd: 500.0
@@ -175,38 +173,6 @@ teams:
       chat-qa:
         fallback: chat-qa-small
         degrade_at: 90
-```
-
-In `brownout.config.yaml`, give every deployment of both model groups a class from that list. The
-fallback's class must be at least as restricted as the route's.
-
-<!-- adoption: fallback-config -->
-```yaml
-model_list:
-  - model_name: chat-qa
-    litellm_params:
-      model: openai/gpt-4o
-    model_info:
-      data_class: internal
-  - model_name: chat-qa-small
-    litellm_params:
-      model: openai/gpt-4o-mini
-    model_info:
-      data_class: internal
-```
-
-A model added in the admin UI lives in LiteLLM's database instead of a file, so it takes its class
-through LiteLLM's model patch. This loop patches every deployment of `chat-qa`. Run it for the
-fallback too.
-
-<!-- adoption: fallback-ui -->
-```bash
-for id in $(curl -sSf http://localhost:4000/model/info -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-    | jq -r '.data[] | select(.model_name == "chat-qa") | .model_info.id'); do
-  curl -sSf -X PATCH "http://localhost:4000/model/$id/update" \
-    -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-    -d '{"model_info": {"data_class": "internal"}}'
-done
 ```
 
 The team's model list in LiteLLM must include the fallback, or the primary keeps serving. Run
@@ -235,6 +201,27 @@ LiteLLM reserves each request's worst-case cost before brownout runs, sized on t
 asked for. A gpt-4o request without `max_tokens` reserves its whole output, about $0.16. On a $0.50
 budget LiteLLM refuses such requests from 67%, before a `degrade_at` of 75% is reached. Set
 `max_tokens`, or keep `degrade_at` below 100% minus the largest reservation's share of the budget.
+
+### Data classes
+
+Brownout can also refuse a fallback cleared for less sensitive data than its route, such as a public
+provider standing in for a private deployment. The check runs once the manifest lists data classes,
+least restricted first.
+
+```yaml
+data_class_order: [internal, customer_pii]
+```
+
+Every deployment of a route with a fallback, and of that fallback, then needs a
+`model_info.data_class` from the list, and the fallback's class must be at least as restricted as
+the route's. `check` names each deployment that lacks one. A model added in the admin UI takes its
+class through LiteLLM's model update.
+
+```bash
+curl -sSf -X PATCH "http://localhost:4000/model/<MODEL ID>/update" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"model_info": {"data_class": "internal"}}'
+```
 
 ## Use with Claude Code and Codex
 

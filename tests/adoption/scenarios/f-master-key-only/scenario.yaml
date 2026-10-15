@@ -21,7 +21,6 @@ fallback:
   route: chat
   fallback: chat-cheap
   degrade_at: 75
-  data_class: internal
 drive:
   key: printed-key
   model: chat

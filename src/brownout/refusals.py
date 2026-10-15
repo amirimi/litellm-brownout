@@ -16,7 +16,6 @@ class RuleId(StrEnum):
     FALLBACK_DATA_CLASS = "fallback-data-class"
     FAIL_CLOSED_ON = "fail-closed-on"
     RESERVATION_ON = "reservation-on"
-    NO_NATIVE_BUDGET_ALERTS = "no-native-budget-alerts"
     REDIS_CONFIGURED = "redis-configured"
     SUPPORTED_LITELLM = "supported-litellm"
     NO_CALLER_ROUTING = "no-caller-routing"

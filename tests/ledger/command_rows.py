@@ -118,25 +118,6 @@ COMMAND_ROWS: Final = (
         ),
     ),
     Input(
-        shape="LiteLLM's default alert types",
-        source="brownout",
-        parser="cli.litellm_alert_types",
-        reads=("litellm:DEFAULT_ALERT_TYPES",),
-        cites=(),
-        forms=(
-            Form(
-                "a list that includes budget_alerts",
-                "the alert types a config without alert_types gets",
-                Supported(
-                    (
-                        f"{SEAMS}test_seam_litellm_sends_budget_alerts_by_default",
-                        f"{ONBOARDING}test_a_vanilla_config_gets_every_mechanical_fix",
-                    )
-                ),
-            ),
-        ),
-    ),
-    Input(
         shape="LiteLLM release",
         source="release",
         parser="bridge.running_litellm",

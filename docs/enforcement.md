@@ -56,8 +56,8 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | The team's model list includes each fallback | The primary serves and a `brownout_fallback_rejected` event fires | The permission check |
 | `fail_closed_budget_enforcement` is on and reservations are on | 503 and a platform incident | `fail-closed-on`, `reservation-on` |
 | A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
-| LiteLLM's budget alerts are off and `coordination_redis` is configured | `brownout check` fails | `no-native-budget-alerts`, `redis-configured` |
-| Every manifest route and fallback is served and priced, and a fallback pairing's deployments declare one data class each | `brownout check` fails before deploy. A pairing that breaks after deploy withholds the downgrade, so the primary serves and the platform gets an incident | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
+| `coordination_redis` is configured | `brownout check` fails | `redis-configured` |
+| Every manifest route and fallback is served and priced, and with `data_class_order` declared a fallback pairing's deployments declare one data class each | `brownout check` fails before deploy. A pairing that breaks after deploy withholds the downgrade, so the primary serves and the platform gets an incident | `route-served`, `route-priced`, `data-class-declared`, `fallback-data-class` |
 | Routes, fallbacks and requests name concrete model groups | An alias, a routing group or a wildcard group reaches its deployments only after the pre-call hook, so the plugin could not govern it | `manifest-schema`, `model-is-a-group` |
 | Every call uses a call type the plugin has reviewed | 503 naming the call type, plus a platform incident | `call-type-governed` |
 | LiteLLM can price each image, audio, rerank, OCR and video deployment | A deployment LiteLLM cannot price records $0 | Documented, not checked |

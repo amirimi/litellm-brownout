@@ -136,15 +136,12 @@ model_list:
 | `callbacks` | The dotted path to the handler `src/brownout/gateway.py` builds at import |
 | `budget_exceeded_status_code: 429` | Keeps LiteLLM's budget refusal a 429 from 1.104, whose default is a 422 (`litellm/__init__.py:404` in 1.104.2). Releases before 1.104 ignore it and refuse with a 429 anyway. Run on the 1.104.2 lab image |
 | `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. LiteLLM takes each price from `litellm_params` first and `model_info` second, and prices a deployment without either from its cost map. A model group counts as priced only when every deployment has both prices and one of them is above zero. Rules `route-priced` and `model-priced` refuse any other group |
-| `model_info.data_class` | Read for a route that declares a fallback and for the fallback. Every deployment of the group declares the same class, from the manifest's `data_class_order`. Rules `data-class-declared` and `fallback-data-class` |
+| `model_info.data_class` | Read only when the manifest declares `data_class_order`, for a route that declares a fallback and for the fallback. Every deployment of the group then declares the same class from that list. Rules `data-class-declared` and `fallback-data-class` |
 
 `general_settings.disable_budget_reservation` must not be `true`, because that would remove the hold
-from every budget on the gateway, which rule `reservation-on` refuses. LiteLLM's own alerting may stay on
-for outages, latency and deployments. Its budget alerts must stay off, because LiteLLM's hardcoded
-85% and 95% budget alerter would become a second owner of tier announcements. Rule
-`no-native-budget-alerts` fails when `general_settings.alerting` is set and `alert_types` is absent
-or includes `budget_alerts`, so list the alert types the gateway wants without `budget_alerts`. An
-`alert_types` list saved from the admin UI lives in the database, where the check cannot see it.
+from every budget on the gateway, which rule `reservation-on` refuses. LiteLLM's own alerting may stay
+on, budget alerts included. Its budget alerter fires at a fixed 85% and 95%, next to the tiers the
+manifest declares, and brownout leaves it as configured.
 
 Router fallbacks may stay in the config, and they never apply to governed model calls. On every
 governed request the plugin sets `fallbacks`, `context_window_fallbacks` and
@@ -197,13 +194,13 @@ teams:
 
 | Key | Type | Rule |
 |---|---|---|
-| `data_class_order` | list of distinct strings, least restricted first | Required when any route declares a fallback |
+| `data_class_order` | list of distinct strings, least restricted first | Optional. Declaring it turns on the data-class rules for every fallback pairing |
 | `teams.<team_id>` | mapping | Keyed by the LiteLLM `team_id`. A key whose team is absent here is refused with a 503 and a platform incident |
 | `envelope_usd` | positive finite number | The owner-approved budget. Must equal the LiteLLM team's `max_budget` |
 | `budget_duration` | `1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`, `24h`, `1d`, `7d`, `1w`, `30d`, `1mo`, `hourly`, `daily`, `weekly` or `monthly` | The windows that tumble with LiteLLM's resets. Any other value fails rule `duration-tumbles` |
 | `warn_tiers` | list of integers in 1..99, optional | Team tiers. Each raises one event with scope `team` per window. 100 belongs to LiteLLM's ceiling |
 | `routes.<model_group>` | mapping, may be empty | Keyed by LiteLLM model group name. A route absent from the manifest still spends against the envelope and still earns team tier events. It never degrades. A wildcard group such as `openai/*` cannot be a route or a fallback, because requests name concrete models and never match it |
-| `routes.<model_group>.fallback` | model group name | The degradation target. It differs from its route (rule `fallback-distinct`), is served and priced, and is at least as restricted in data class. Its price relative to the route is the owner's call |
+| `routes.<model_group>.fallback` | model group name | The degradation target. It differs from its route (rule `fallback-distinct`) and is served and priced. With `data_class_order` declared, it is also at least as restricted in data class. Its price relative to the route is the owner's call |
 | `routes.<model_group>.degrade_at` | integer in 1..99 | Requires `fallback`. A degrade threshold only, and never a tier |
 | `routes.<model_group>.warn_tiers` | list of integers in 1..99, optional | Route tiers. Each raises one event with scope `route` per window, on a request to that route |
 
@@ -236,11 +233,10 @@ settings.
 | `fallback-distinct` | A fallback differs from its route | Check, load |
 | `route-served` | Every manifest route and fallback is a gateway model group | Check, downgrade |
 | `route-priced` | Every manifest route and fallback has input and output prices | Check, downgrade |
-| `data-class-declared` | A fallback pairing's deployments each declare one class from `data_class_order` | Check, downgrade |
-| `fallback-data-class` | A fallback is at least as restricted as its route | Check, downgrade |
+| `data-class-declared` | With `data_class_order` declared, a fallback pairing's deployments each declare one class from it | Check, downgrade |
+| `fallback-data-class` | With `data_class_order` declared, a fallback is at least as restricted as its route | Check, downgrade |
 | `fail-closed-on` | `fail_closed_budget_enforcement` is `true` | Check, request |
 | `reservation-on` | `disable_budget_reservation` is absent or `false` | Check, request |
-| `no-native-budget-alerts` | LiteLLM alerting is off, or `alert_types` is set and excludes `budget_alerts` | Check |
 | `redis-configured` | `coordination_redis` is set | Check |
 | `no-caller-routing` | The caller sent no fallback list | Request |
 | `team-in-manifest` | The key's team is in the manifest | Request |
@@ -281,11 +277,11 @@ model group the files do not define. A group defined in a file keeps the file's 
 
 A declared fallback is checked in two places, and the permission check runs last.
 
-The rules cover what the gateway config and the manifest decide. The fallback is served, priced,
-distinct from its route and at least as restricted in data class. `brownout check` catches a bad
-pairing before deploy. On a running gateway, an admin can delete a model or change its data class
-without any notice to the plugin, so the plugin checks the pairing again whenever a downgrade is
-wanted. A broken pairing withholds the downgrade. The primary serves the request it was asked for,
+The rules cover what the gateway config and the manifest decide. The fallback is served, priced and
+distinct from its route, and with `data_class_order` declared it is at least as restricted in data
+class. `brownout check` catches a bad pairing before deploy. On a running gateway, an admin can delete
+a model or change its data class without any notice to the plugin, so the plugin checks the pairing
+again whenever a downgrade is wanted. A broken pairing withholds the downgrade. The primary serves the request it was asked for,
 the response discloses `fallback_rejected`, and a `gateway_rule_violated` incident names the rule
 once per window. A request below `degrade_at` never touches the pairing, so a broken fallback costs
 the team its downgrade and nothing else.

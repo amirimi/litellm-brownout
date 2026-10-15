@@ -31,7 +31,6 @@ from brownout.refusals import RuleId, Violation
 from brownout.rules import ModelGroup
 
 GATEWAY: Final = "http://gateway.test"
-DEFAULT_ALERTS: Final = ("llm_exceptions", "budget_alerts", "outage_alerts")
 READY_CONFIG: Final[dict[str, Any]] = {
     "general_settings": {
         "fail_closed_budget_enforcement": True,
@@ -45,7 +44,7 @@ READY_CONFIG: Final[dict[str, Any]] = {
 
 
 def planned(config: dict[str, Any]) -> GatewayConfig:
-    return read_gateway_config(Path("config.yaml"), config, DEFAULT_ALERTS)
+    return read_gateway_config(Path("config.yaml"), config)
 
 
 def team(
@@ -246,7 +245,6 @@ def test_a_vanilla_config_gets_every_mechanical_fix():
         RemoveSetting,
         SetSetting,
         SetSetting,
-        SetSetting,
     ]
     by_key = {change.key: change for change in changes}
     assert by_key["callbacks"] == AppendSetting(
@@ -256,7 +254,7 @@ def test_a_vanilla_config_gets_every_mechanical_fix():
     assert "every budget on the gateway" in (
         by_key["fail_closed_budget_enforcement"].note or ""
     )
-    assert by_key["alert_types"].value == ["llm_exceptions", "outage_alerts"]
+    assert "alert_types" not in by_key
     assert by_key["budget_exceeded_status_code"].value == 429
     assert by_key["coordination_redis"].value == {
         "host": "os.environ/REDIS_HOST",
@@ -265,24 +263,23 @@ def test_a_vanilla_config_gets_every_mechanical_fix():
     }
 
 
-def test_existing_alert_types_lose_only_budget_alerts():
+@pytest.mark.parametrize(
+    "alerting",
+    [
+        pytest.param({"alerting": ["slack"]}, id="default-types"),
+        pytest.param(
+            {"alerting": ["slack"], "alert_types": ["outage_alerts", "budget_alerts"]},
+            id="budget-alerts",
+        ),
+    ],
+)
+def test_init_leaves_alerting_as_written(alerting):
     config = {
         **READY_CONFIG,
-        "general_settings": {
-            **READY_CONFIG["general_settings"],
-            "alerting": ["slack"],
-            "alert_types": ["outage_alerts", "budget_alerts"],
-        },
+        "general_settings": {**READY_CONFIG["general_settings"], **alerting},
     }
 
-    assert config_plan(planned(config)) == (
-        SetSetting(
-            "general_settings",
-            "alert_types",
-            ["outage_alerts"],
-            "drops budget_alerts and keeps LiteLLM's other alerts",
-        ),
-    )
+    assert config_plan(planned(config)) == ()
 
 
 @pytest.mark.parametrize(
@@ -383,10 +380,6 @@ def test_the_admin_keys_notice_names_the_init_key_only_when_it_has_no_team(
                 None,
             ),
             "set general_settings.coordination_redis with host, password",
-        ),
-        (
-            SetSetting("general_settings", "alert_types", ["llm_exceptions"], None),
-            "set general_settings.alert_types",
         ),
     ],
 )

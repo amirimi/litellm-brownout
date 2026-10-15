@@ -47,7 +47,6 @@ class Fallback:
     route: str
     fallback: str
     degrade_at: int
-    data_class: str
 
 
 @dataclass(frozen=True)

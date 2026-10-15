@@ -573,6 +573,29 @@ async def test_a_broken_pairing_keeps_the_primary_and_pages_the_platform(team, k
     assert permissions.checked == []
 
 
+async def test_without_a_data_class_order_an_unclassified_fallback_is_served(team):
+    sink = RecordingSink()
+    unclassified = ModelGroup(
+        name="budget-lab-degraded",
+        input_cost_per_token=0.00005,
+        output_cost_per_token=0.0005,
+        data_classes=(None,),
+    )
+    handler = build_handler(
+        team,
+        sink,
+        spend=950.0,
+        gateway=FakeGateway.from_lab_config().with_group(unclassified),
+        permissions=FixedPermissions(Permission.PERMITTED),
+        data_class_order=(),
+    )
+
+    applied = await request(handler, make_auth(team), "budget-lab-primary")
+
+    assert applied["model"] == "budget-lab-degraded"
+    assert sink.incidents == []
+
+
 async def test_claims_carry_the_team_and_the_policy_epoch(team):
     store = FakeStore()
     handler = build_handler(team, RecordingSink(), spend=950.0, store=store)
