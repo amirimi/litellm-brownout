@@ -53,7 +53,7 @@ bridge writes the request's facts into its LiteLLM metadata.
 | `transitions.py` | Window ids, claim keys and one claim-then-announce function | No |
 | `events.py` | Event types and the `brownout` log line | No |
 | `settings.py` | Environment variables | No |
-| `cli.py` | `brownout check` | Its cost map only |
+| `cli.py` | `brownout check` and `brownout init` | Through the bridge, which prices the config's deployments with LiteLLM's router |
 | `bridge.py` | Every LiteLLM touchpoint, including the three private helpers, the version check, the table of admitted call types and the request facts field | Yes |
 | `gateway.py` | The three hooks, the request pipeline per call kind and the one place a refusal becomes an `HTTPException` | Through the bridge |
 

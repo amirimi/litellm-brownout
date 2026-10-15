@@ -4,7 +4,7 @@ from typing import Final
 
 from brownout.refusals import RefusalReason, RuleId
 
-from .model import Form, Input, Open, Refused, Supported
+from .model import Documented, Form, Input, Refused, Supported
 
 CONFIG: Final = "tests/test_gateway_config.py::"
 MALFORMED: Final = f"{CONFIG}test_a_malformed_config_is_refused_by_field"
@@ -14,8 +14,9 @@ RULES: Final = "tests/test_rules.py::"
 ONBOARDING: Final = "tests/test_onboarding.py::"
 GATEWAY: Final = "tests/test_gateway.py::"
 SEAMS: Final = "tests/test_litellm_seams.py::"
+BRIDGE: Final = "tests/test_bridge.py::"
 PRICE_ORDER: Final = (
-    f"{CONFIG}test_a_deployment_takes_each_price_from_litellm_params_then_model_info"
+    f"{BRIDGE}test_a_configured_group_is_priced_the_way_litellm_bills_it"
 )
 
 
@@ -159,11 +160,7 @@ CONFIG_ROWS: Final = (
             Form(
                 "a mapping with a model_name and a litellm_params.model",
                 "deployment",
-                Supported(
-                    (
-                        f"{CONFIG}test_a_deployment_carries_its_explicit_prices_and_class",
-                    )
-                ),
+                Supported((f"{CONFIG}test_a_readable_deployment_is_kept_as_written",)),
             ),
             Form(
                 "not a mapping, no model_name string, no litellm_params.model, or a "
@@ -184,7 +181,7 @@ CONFIG_ROWS: Final = (
         shape="config litellm_params and model_info input_cost_per_token and "
         "output_cost_per_token",
         source="brownout",
-        parser="gateway_config._written_price",
+        parser="gateway_config._require_readable_price",
         reads=(),
         cites=(
             "litellm/router.py:322@1.101.6",
@@ -259,60 +256,119 @@ CONFIG_ROWS: Final = (
         ),
     ),
     Input(
-        shape="LiteLLM cost map lookup",
+        shape="the router check prices the config's deployments with",
         source="brownout",
-        parser="cli._cost_map_entry",
-        reads=("litellm:model_cost",),
-        cites=(),
+        parser="bridge._router_for",
+        reads=("litellm:Router",),
+        cites=("litellm/router.py:10343@1.101.6",),
         forms=(
             Form(
-                "the deployment's model, or its name after the provider prefix, is a key",
-                "the entry",
-                Supported(
-                    (f"{CLI}test_the_cost_map_prices_a_model_by_its_full_or_bare_name",)
-                ),
-            ),
-            Form(
-                "neither is a key",
-                "no entry, so the deployment is unpriced",
-                Supported(
-                    (f"{CLI}test_the_cost_map_prices_a_model_by_its_full_or_bare_name",)
-                ),
-            ),
-            Form(
-                "the cost map LiteLLM fetched at import differs from the one it bundles",
-                "check may price a model the gateway does not",
-                Open("cost-map-source"),
-            ),
-            Form(
-                "model_info.base_model names another model",
-                "check prices the deployment's own model, and LiteLLM bills the base "
-                "model's entry",
-                Open("cost-map-source"),
-            ),
-        ),
-    ),
-    Input(
-        shape="LiteLLM cost map prices",
-        source="brownout",
-        parser="cli._deployment_prices",
-        reads=("key:input_cost_per_token", "key:output_cost_per_token"),
-        cites=(),
-        forms=(
-            Form(
-                "numbers in the entry",
-                "price",
+                "a model the cost map knows, stated prices, or a priced model in "
+                "model_info.base_model",
+                "the price the gateway bills",
                 Supported(
                     (
-                        f"{CLI}test_a_deployment_without_explicit_prices_is_priced_from_the_cost_map",
+                        f"{BRIDGE}test_a_configured_group_is_priced_the_way_litellm_bills_it",
+                        f"{BRIDGE}test_a_configured_group_reads_its_data_class_and_the_cost_map",
+                        f"{CLI}test_an_azure_deployment_priced_through_model_info_base_model_is_priced",
+                        f"{SEAMS}test_seam_the_router_prices_base_model_only_from_model_info",
+                        f"{SEAMS}test_seam_building_a_router_opens_no_connection",
                     )
                 ),
             ),
             Form(
-                "missing from the entry",
-                "unpriced",
+                "base_model written in litellm_params, or no price at all",
+                "refused, naming both fixes",
+                Refused(
+                    stage="check",
+                    rule=RuleId.ROUTE_PRICED,
+                    tests=(
+                        f"{CLI}test_a_base_model_in_litellm_params_leaves_the_group_unpriced",
+                        f"{RULES}test_an_unpriced_group_names_both_fixes",
+                    ),
+                ),
+            ),
+            Form(
+                "the cost map check's LiteLLM loaded differs from the gateway's copy",
+                "check may price a model differently from the gateway",
+                Documented(
+                    unseen_because="each process loads its own copy when LiteLLM starts",
+                    docs="README.md",
+                    phrase="`check --gateway` reads the running gateway's prices instead",
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="a model_list the router cannot load",
+        source="brownout",
+        parser="bridge._configured_router",
+        reads=("litellm:BadRequestError",),
+        cites=(),
+        forms=(
+            Form(
+                "a model with no provider LiteLLM knows",
+                "refused as an unusable config",
+                Refused(
+                    stage="check",
+                    rule=None,
+                    tests=(
+                        f"{BRIDGE}test_a_model_list_the_router_cannot_load_names_its_entry_and_no_value",
+                    ),
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="the entry the router cannot load",
+        source="brownout",
+        parser="bridge._unloadable",
+        reads=("key:litellm_params", "key:model", "litellm:BadRequestError"),
+        cites=(),
+        forms=(
+            Form(
+                "the first entry that fails on its own",
+                "named by position and model, with no other value",
                 Supported(
-                    (f"{CLI}test_the_cost_map_prices_a_model_by_its_full_or_bare_name",)
+                    (
+                        f"{BRIDGE}test_a_model_list_the_router_cannot_load_names_its_entry_and_no_value",
+                    )
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="a deployment's supported_environments",
+        source="brownout",
+        parser="bridge._without_environment",
+        reads=("key:model_info",),
+        cites=(),
+        forms=(
+            Form(
+                "any value, including an environment check does not run in",
+                "ignored, so every deployment is priced",
+                Supported(
+                    (
+                        f"{BRIDGE}test_a_deployment_limited_to_other_environments_is_still_priced",
+                    )
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="deployments the router loaded",
+        source="brownout",
+        parser="bridge.configured_groups",
+        reads=("key:model_name",),
+        cites=(),
+        forms=(
+            Form(
+                "every loaded deployment",
+                "grouped by model_name and priced through candidate_group",
+                Supported(
+                    (
+                        f"{BRIDGE}test_a_configured_group_reads_its_data_class_and_the_cost_map",
+                    )
                 ),
             ),
         ),

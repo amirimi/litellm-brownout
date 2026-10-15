@@ -149,6 +149,46 @@ def test_the_lab_passes_with_its_prices_moved_into_model_info(tmp_path):
     assert check(config_path, LAB_MANIFEST, {}) == []
 
 
+AZURE_PARAMS: Final = {
+    "model": "azure/my-custom-deployment",
+    "api_key": "sk-azure",
+    "api_base": "https://lab.openai.azure.com",
+    "api_version": "2024-06-01",
+}
+
+
+def test_an_azure_deployment_priced_through_model_info_base_model_is_priced():
+    gateway = gateway_file_of(
+        {
+            "model_list": [
+                {
+                    "model_name": "chat",
+                    "litellm_params": dict(AZURE_PARAMS),
+                    "model_info": {"base_model": "azure/gpt-4o"},
+                }
+            ]
+        }
+    )
+
+    assert gateway.groups["chat"].input_cost_per_token is not None
+    assert gateway.groups["chat"].output_cost_per_token is not None
+
+
+def test_a_base_model_in_litellm_params_leaves_the_group_unpriced():
+    gateway = gateway_file_of(
+        {
+            "model_list": [
+                {
+                    "model_name": "chat",
+                    "litellm_params": {**AZURE_PARAMS, "base_model": "azure/gpt-4o"},
+                }
+            ]
+        }
+    )
+
+    assert gateway.groups["chat"].input_cost_per_token is None
+
+
 def test_a_group_is_unpriced_when_any_deployment_is():
     gateway = gateway_file_of(
         {

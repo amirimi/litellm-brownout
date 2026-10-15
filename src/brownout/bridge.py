@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import copy
 import logging
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import datetime
 from enum import StrEnum
 from importlib.metadata import version as installed_version
+from pathlib import Path
 from typing import Any, Final, Literal, assert_never
 
 from fastapi import HTTPException, status
+from litellm import Router
+from litellm.exceptions import BadRequestError
 from litellm.litellm_core_utils.core_helpers import (
     get_metadata_variable_name_from_kwargs,
 )
@@ -21,6 +26,7 @@ from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 
 from .gateway_config import declared_data_class, price, settings_from_general
+from .inputs import DocumentError
 from .manifest import WILDCARD, TeamPolicy
 from .policy import (
     Decision,
@@ -48,6 +54,8 @@ SUPPORTED_FLOOR: Final = (1, 101, 6)
 TESTED_CEILING: Final = (1, 104)
 
 SPEND_LOGS_METADATA_KEY: Final = "spend_logs_metadata"
+ENVIRONMENT_KEY: Final = "supported_environments"
+LITELLM_LOGGERS: Final = ("LiteLLM", "LiteLLM Router")
 FIELD_KEY: Final = "brownout"
 OUTCOME_REFUSED: Final = "refused"
 OUTCOME_DEGRADED: Final = "degraded"
@@ -325,6 +333,67 @@ class LiteLLMGatewayState:
 
     def settings(self) -> GatewaySettings:
         return settings_from_general(self._general_settings())
+
+
+def configured_groups(
+    source: Path, model_list: Sequence[Mapping[str, Any]]
+) -> dict[str, ModelGroup]:
+    router: Final = _configured_router(source, model_list)
+    state: Final = LiteLLMGatewayState(lambda: router, dict)
+    by_group: dict[str, list[Mapping[str, Any]]] = {}
+    for deployment in router.model_list:
+        by_group.setdefault(str(deployment["model_name"]), []).append(deployment)
+    return {
+        name: state.candidate_group(name, deployments)
+        for name, deployments in by_group.items()
+    }
+
+
+def _configured_router(source: Path, model_list: Sequence[Mapping[str, Any]]) -> Router:
+    try:
+        return _router_for(model_list)
+    except (BadRequestError, ValueError) as error:
+        raise DocumentError(_unloadable(source, model_list)) from error
+
+
+def _router_for(model_list: Sequence[Mapping[str, Any]]) -> Router:
+    with _litellm_errors_only():
+        return Router(model_list=[_without_environment(entry) for entry in model_list])
+
+
+@contextmanager
+def _litellm_errors_only() -> Iterator[None]:
+    loggers: Final = [logging.getLogger(name) for name in LITELLM_LOGGERS]
+    levels: Final = [each.level for each in loggers]
+    for each in loggers:
+        each.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        for each, level in zip(loggers, levels, strict=True):
+            each.setLevel(level)
+
+
+def _without_environment(entry: Mapping[str, Any]) -> dict[str, Any]:
+    copied: Final = copy.deepcopy(dict(entry))
+    model_info: Final = copied.get("model_info")
+    if isinstance(model_info, dict):
+        model_info.pop(ENVIRONMENT_KEY, None)
+    return copied
+
+
+def _unloadable(source: Path, model_list: Sequence[Mapping[str, Any]]) -> str:
+    for index, entry in enumerate(model_list, start=1):
+        model = (entry.get("litellm_params") or {}).get("model")
+        try:
+            _router_for([entry])
+        except (BadRequestError, ValueError):
+            return (
+                f"{source} model_list entry {index} names model {model!r}, which "
+                "LiteLLM's router cannot load. Name a provider, such as openai/ or "
+                "azure/, or set litellm_params.custom_llm_provider"
+            )
+    return f"{source} model_list cannot be loaded by LiteLLM's router"
 
 
 class RedisClaimStore:
