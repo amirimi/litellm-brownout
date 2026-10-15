@@ -6,7 +6,6 @@ from typing import Any, Final
 import pytest
 
 from brownout.gateway_config import (
-    Deployment,
     declared_data_class,
     price,
     read_gateway_config,
@@ -35,7 +34,7 @@ def deployment(**fields: Any) -> dict[str, Any]:
 def test_a_config_without_sections_reads_as_litellm_defaults():
     config = read({})
 
-    assert config.deployments == ()
+    assert config.model_list == ()
     assert not config.settings.fail_closed_budget_enforcement
     assert not config.settings.disable_budget_reservation
     assert not config.coordination_redis
@@ -49,13 +48,13 @@ def test_null_sections_read_as_empty():
         {"general_settings": None, "litellm_settings": None, "model_list": None}
     )
 
-    assert (config.deployments, config.callbacks) == ((), ())
+    assert (config.model_list, config.callbacks) == ((), ())
 
 
 def test_the_lab_config_reads_its_deployments():
     config = read_gateway_config(SOURCE, lab_gateway_config())
 
-    assert "budget-lab-primary" in {entry.model_name for entry in config.deployments}
+    assert "budget-lab-primary" in {entry["model_name"] for entry in config.model_list}
 
 
 @pytest.mark.parametrize(
@@ -270,7 +269,7 @@ def test_a_data_class_is_a_string_or_undeclared(info, expected):
     assert declared_data_class(info) == expected
 
 
-def test_a_deployment_carries_its_explicit_prices_and_class():
+def test_a_readable_deployment_is_kept_as_written():
     config = read(
         {
             "model_list": [
@@ -286,50 +285,16 @@ def test_a_deployment_carries_its_explicit_prices_and_class():
         }
     )
 
-    assert config.deployments == (
-        Deployment("chat", "openai/x", 0.0001, 0.001, "internal"),
+    assert config.model_list == (
+        deployment(
+            litellm_params={
+                "model": "openai/x",
+                "input_cost_per_token": "1e-4",
+                "output_cost_per_token": 0.001,
+            },
+            model_info={"data_class": "internal"},
+        ),
     )
-
-
-@pytest.mark.parametrize(
-    ("params", "info", "prices"),
-    [
-        pytest.param(
-            {},
-            {"input_cost_per_token": "3e-6", "output_cost_per_token": 4e-6},
-            (3e-6, 4e-6),
-            id="model-info-only",
-        ),
-        pytest.param(
-            {"input_cost_per_token": 1e-6},
-            {"output_cost_per_token": 8e-6},
-            (1e-6, 8e-6),
-            id="split-across-both",
-        ),
-        pytest.param(
-            {"input_cost_per_token": 1e-6},
-            {"input_cost_per_token": 9e-6, "output_cost_per_token": 8e-6},
-            (1e-6, 8e-6),
-            id="litellm-params-first",
-        ),
-        pytest.param({}, {}, (None, None), id="neither"),
-    ],
-)
-def test_a_deployment_takes_each_price_from_litellm_params_then_model_info(
-    params, info, prices
-):
-    config = read(
-        {
-            "model_list": [
-                deployment(
-                    litellm_params={"model": "openai/x", **params}, model_info=info
-                )
-            ]
-        }
-    )
-
-    priced = config.deployments[0]
-    assert (priced.input_cost_per_token, priced.output_cost_per_token) == prices
 
 
 @pytest.mark.parametrize(

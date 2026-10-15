@@ -73,6 +73,18 @@ def test_an_unpriced_fallback_is_a_violation():
     ]
 
 
+def test_an_unpriced_group_names_both_fixes():
+    lookup = {
+        item.name: item
+        for item in (group("primary"), group("cheaper", output_cost=None))
+    }
+
+    violations = route_rules(manifest(), PAIR, lookup.get)
+
+    assert "input_cost_per_token" in violations[0].message
+    assert "model_info.base_model" in violations[0].message
+
+
 def test_deployments_that_disagree_on_a_data_class_are_a_violation():
     split = group("cheaper", data_classes=("customer_pii", "internal"))
 

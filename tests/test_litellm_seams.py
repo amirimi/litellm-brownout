@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
+import socket
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, get_args
@@ -512,3 +513,71 @@ def test_seam_an_mcp_tool_call_runs_the_pre_call_hook_with_its_call_type():
     ).read_text(encoding="utf-8")
 
     assert "call_type=CallTypes.call_mcp_tool.value" in source
+
+
+AZURE_DEPLOYMENT: Final = {
+    "model": "azure/my-custom-deployment",
+    "api_key": "sk-seam",
+    "api_base": "https://seam.openai.azure.com",
+    "api_version": "2024-06-01",
+}
+
+
+def test_seam_building_a_router_opens_no_connection(monkeypatch):
+    attempts: list[object] = []
+
+    def refuse(sock: socket.socket, address: object) -> None:
+        attempts.append(address)
+        raise OSError("a router build tried to connect")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+    litellm.Router(
+        model_list=[
+            {"model_name": "openai", "litellm_params": {"model": "openai/gpt-4o"}},
+            {"model_name": "azure", "litellm_params": dict(AZURE_DEPLOYMENT)},
+            {
+                "model_name": "bedrock",
+                "litellm_params": {
+                    "model": "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+                    "aws_region_name": "us-east-1",
+                },
+            },
+        ]
+    )
+
+    assert attempts == []
+
+
+@pytest.mark.parametrize(
+    ("deployment", "priced"),
+    [
+        pytest.param(
+            {
+                "model_name": "chat",
+                "litellm_params": dict(AZURE_DEPLOYMENT),
+                "model_info": {"base_model": "azure/gpt-4o"},
+            },
+            True,
+            id="model-info-base-model",
+        ),
+        pytest.param(
+            {
+                "model_name": "chat",
+                "litellm_params": {**AZURE_DEPLOYMENT, "base_model": "azure/gpt-4o"},
+            },
+            False,
+            id="litellm-params-base-model",
+        ),
+    ],
+)
+def test_seam_the_router_prices_base_model_only_from_model_info(
+    monkeypatch, deployment, priced
+):
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    router = litellm.Router(model_list=[deployment])
+
+    billed_input = _billed(router, "chat")[0] or 0
+
+    assert (billed_input > 0) is priced

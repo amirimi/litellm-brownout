@@ -165,7 +165,10 @@ def _served_and_priced(name: str, lookup: GroupLookup) -> list[Violation]:
             Violation(
                 RuleId.ROUTE_PRICED,
                 name,
-                "has no input and output price, so LiteLLM cannot reserve against it",
+                "has a deployment without an input and output price, so LiteLLM "
+                "cannot reserve against it. State input_cost_per_token and "
+                "output_cost_per_token on it, or name a priced model in "
+                "model_info.base_model",
             )
         ]
     return []

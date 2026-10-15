@@ -138,6 +138,14 @@ model_list:
 | `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. LiteLLM takes each price from `litellm_params` first and `model_info` second, and prices a deployment without either from its cost map. A model group counts as priced only when every deployment has both prices and one of them is above zero. Rules `route-priced` and `model-priced` refuse any other group |
 | `model_info.data_class` | Read only when the manifest declares `data_class_order`, for a route that declares a fallback and for the fallback. Every deployment of the group then declares the same class from that list. Rules `data-class-declared` and `fallback-data-class` |
 
+`brownout check` prices each deployment through LiteLLM's router, the function the gateway bills
+with, so a `model_info.base_model` naming a priced model prices a deployment with a custom name. A
+`base_model` written in `litellm_params` prices nothing at check or at request time, because the
+router reads it only from `model_info`. LiteLLM loads its cost map when it starts, fetched or
+bundled, so `check` and the gateway can price a model from different copies. `check --gateway`
+reads the running gateway's own prices for the groups it serves. `check` ignores
+`supported_environments`, so it prices every deployment whatever environment it runs in.
+
 `general_settings.disable_budget_reservation` must not be `true`, because that would remove the hold
 from every budget on the gateway, which rule `reservation-on` refuses. LiteLLM's own alerting may stay
 on, budget alerts included. Its budget alerter fires at a fixed 85% and 95%, next to the tiers the

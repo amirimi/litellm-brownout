@@ -20,11 +20,6 @@ WALKED_RELEASES: Final = (
 )
 
 OPEN_FINDINGS: Final[Mapping[str, str]] = {
-    "cost-map-source": (
-        "check prices a model from whichever cost map LiteLLM loaded, fetched or "
-        "bundled, and ignores model_info.base_model, so it can differ from the "
-        "gateway's"
-    ),
     "budgets-before-tiers": (
         "organization, tag, end-user, global proxy, budget_limits, access group, late "
         "member, default key and opted-in user budgets can refuse before the tiers, and "

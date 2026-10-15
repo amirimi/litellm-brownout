@@ -6,21 +6,20 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 import httpx
-import litellm
 from litellm.proxy._types import hash_token
 
 from . import settings
-from .bridge import running_litellm
+from .bridge import configured_groups, running_litellm
 from .gateway_api import (
     GatewayReadError,
     GatewaySnapshot,
     read_gateway,
     read_model_groups,
 )
-from .gateway_config import Deployment, GatewayConfig, price, read_gateway_config
+from .gateway_config import GatewayConfig, read_gateway_config
 from .inputs import (
     DocumentError,
     load_yaml,
@@ -56,7 +55,7 @@ from .onboarding_files import (
     unified_diff,
 )
 from .refusals import Violation
-from .rules import GatewayFile, ModelGroup, file_rules, group_from_deployments
+from .rules import GatewayFile, ModelGroup, file_rules
 
 GATEWAY_TIMEOUT_SECONDS: Final = 30.0
 NEW_FILE_MODE: Final = 0o666
@@ -412,50 +411,11 @@ def with_live_groups(
 
 
 def gateway_file(config: GatewayConfig) -> GatewayFile:
-    deployments_by_group: dict[str, list[Deployment]] = {}
-    for deployment in config.deployments:
-        deployments_by_group.setdefault(deployment.model_name, []).append(deployment)
     return GatewayFile(
-        groups={
-            name: _model_group(name, deployments)
-            for name, deployments in deployments_by_group.items()
-        },
+        groups=configured_groups(config.source, config.model_list),
         settings=config.settings,
         redis_configured=config.coordination_redis,
     )
-
-
-def _model_group(name: str, deployments: list[Deployment]) -> ModelGroup:
-    return group_from_deployments(
-        name,
-        [_deployment_prices(deployment) for deployment in deployments],
-        tuple(deployment.data_class for deployment in deployments),
-    )
-
-
-def _deployment_prices(deployment: Deployment) -> tuple[float | None, float | None]:
-    mapped: Final = _cost_map_entry(deployment.model)
-    return (
-        _explicit_or_mapped(
-            deployment.input_cost_per_token, mapped.get("input_cost_per_token")
-        ),
-        _explicit_or_mapped(
-            deployment.output_cost_per_token, mapped.get("output_cost_per_token")
-        ),
-    )
-
-
-def _explicit_or_mapped(explicit: float | None, mapped: Any) -> float | None:
-    if explicit is not None:
-        return explicit
-    return price(mapped)
-
-
-def _cost_map_entry(model: str) -> Mapping[str, Any]:
-    exact = litellm.model_cost.get(model)
-    if exact is not None:
-        return exact
-    return litellm.model_cost.get(model.split("/", 1)[-1]) or {}
 
 
 if __name__ == "__main__":

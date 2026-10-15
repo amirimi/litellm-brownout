@@ -12,6 +12,7 @@ from .rules import GatewaySettings
 GENERAL_SETTINGS: Final = "general_settings"
 LITELLM_SETTINGS: Final = "litellm_settings"
 REDIS_CACHE_TYPE: Final = "redis"
+PRICE_KEYS: Final = ("input_cost_per_token", "output_cost_per_token")
 REDIS_TARGETS: Final = ("host", "url", "startup_nodes", "sentinel_nodes")
 REDIS_CONNECTION_FIELDS: Final = (
     "host",
@@ -29,17 +30,9 @@ REDIS_CONNECTION_FIELDS: Final = (
 
 
 @dataclass(frozen=True)
-class Deployment:
-    model_name: str
-    model: str
-    input_cost_per_token: float | None
-    output_cost_per_token: float | None
-    data_class: str | None
-
-
-@dataclass(frozen=True)
 class GatewayConfig:
-    deployments: tuple[Deployment, ...]
+    source: Path
+    model_list: tuple[Mapping[str, Any], ...]
     settings: GatewaySettings
     coordination_redis: bool
     cache_redis: Mapping[str, Any] | None
@@ -51,7 +44,8 @@ def read_gateway_config(source: Path, config: Mapping[str, Any]) -> GatewayConfi
     general: Final = _section(source, config, GENERAL_SETTINGS)
     litellm_settings: Final = _section(source, config, LITELLM_SETTINGS)
     return GatewayConfig(
-        deployments=_deployments(source, config.get("model_list")),
+        source=source,
+        model_list=_model_list(source, config.get("model_list")),
         settings=settings_from_general(general),
         coordination_redis=bool(
             _optional_mapping(
@@ -107,7 +101,7 @@ def _optional_mapping(source: Path, name: str, value: Any) -> Mapping[str, Any]:
     return value
 
 
-def _deployments(source: Path, model_list: Any) -> tuple[Deployment, ...]:
+def _model_list(source: Path, model_list: Any) -> tuple[Mapping[str, Any], ...]:
     if model_list is None:
         return ()
     if not isinstance(model_list, list):
@@ -118,7 +112,7 @@ def _deployments(source: Path, model_list: Any) -> tuple[Deployment, ...]:
     )
 
 
-def _deployment(source: Path, where: str, entry: Any) -> Deployment:
+def _deployment(source: Path, where: str, entry: Any) -> Mapping[str, Any]:
     if not isinstance(entry, Mapping):
         raise DocumentError(f"{source} {where} must be a mapping")
     model_name: Final = entry.get("model_name")
@@ -133,43 +127,18 @@ def _deployment(source: Path, where: str, entry: Any) -> Deployment:
     model: Final = params.get("model")
     if not isinstance(model, str) or not model:
         raise DocumentError(f"{source} {where} needs a litellm_params.model string")
-    return Deployment(
-        model_name=model_name,
-        model=model,
-        input_cost_per_token=_written_price(
-            source, where, params, model_info, "input_cost_per_token"
-        ),
-        output_cost_per_token=_written_price(
-            source, where, params, model_info, "output_cost_per_token"
-        ),
-        data_class=declared_data_class(model_info),
-    )
+    for block, fields in (("litellm_params", params), ("model_info", model_info)):
+        for key in PRICE_KEYS:
+            _require_readable_price(source, where, block, fields, key)
+    return dict(entry)
 
 
-def _written_price(
-    source: Path,
-    where: str,
-    params: Mapping[str, Any],
-    model_info: Mapping[str, Any],
-    key: str,
-) -> float | None:
-    from_params: Final = _explicit_price(source, where, "litellm_params", params, key)
-    from_info: Final = _explicit_price(source, where, "model_info", model_info, key)
-    if from_params is not None:
-        return from_params
-    return from_info
-
-
-def _explicit_price(
+def _require_readable_price(
     source: Path, where: str, block: str, fields: Mapping[str, Any], key: str
-) -> float | None:
+) -> None:
     value: Final = fields.get(key)
-    if value is None:
-        return None
-    read: Final = price(value)
-    if read is None:
+    if value is not None and price(value) is None:
         raise DocumentError(f"{source} {where} {block}.{key} must be a finite number")
-    return read
 
 
 def _callbacks(source: Path, value: Any) -> tuple[str, ...]:

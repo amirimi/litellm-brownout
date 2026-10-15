@@ -310,6 +310,8 @@ such as a refused downgrade and a broken manifest. `docker compose down` stops t
   with a 503 `model_not_a_group`, and the manifest refuses a wildcard route.
 - `check` and `init` read the config file you pass them. A gateway that loads its config from a
   bucket needs that file downloaded first.
+- `check` prices models with the cost map its own LiteLLM loaded, which can differ from the
+  gateway's copy. `check --gateway` reads the running gateway's prices instead.
 - Brownout downgrades text generation only. Embeddings, Codex's `/v1/responses/compact`, images,
   audio, rerank, moderation, OCR and video keep the model they named at any spend, and their spend
   counts toward the team's budget.

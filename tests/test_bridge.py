@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Final
 
 import litellm
 import pytest
 
 from brownout import bridge
+from brownout.inputs import DocumentError
 from brownout.policy import (
     Admit,
     Decision,
@@ -590,3 +592,102 @@ def test_the_gateway_state_without_a_router_serves_nothing():
 
     assert state.model_group("anything") is None
     assert state.is_concrete("anything") is False
+
+
+SOURCE: Final = Path("config.yaml")
+
+
+def entry(name: str, model: str, **fields: Any) -> dict[str, Any]:
+    params = {"model": model, "api_key": "sk-config-secret", **fields.pop("params", {})}
+    return {"model_name": name, "litellm_params": params, **fields}
+
+
+@pytest.mark.parametrize(
+    ("params", "info", "prices"),
+    [
+        pytest.param(
+            {},
+            {"input_cost_per_token": 3e-6, "output_cost_per_token": 4e-6},
+            (3e-6, 4e-6),
+            id="model-info-only",
+        ),
+        pytest.param(
+            {"input_cost_per_token": 1e-6},
+            {"output_cost_per_token": 8e-6},
+            (1e-6, 8e-6),
+            id="split-across-both",
+        ),
+        pytest.param(
+            {"input_cost_per_token": 1e-6},
+            {"input_cost_per_token": 9e-6, "output_cost_per_token": 8e-6},
+            (1e-6, 8e-6),
+            id="litellm-params-first",
+        ),
+        pytest.param({}, {}, (None, None), id="neither"),
+    ],
+)
+def test_a_configured_group_is_priced_the_way_litellm_bills_it(
+    request, params, info, prices
+):
+    model = f"openai/never-mapped-{request.node.callspec.id}"
+    groups = bridge.configured_groups(
+        SOURCE, [entry("chat", model, params=params, model_info=info)]
+    )
+
+    assert (
+        groups["chat"].input_cost_per_token,
+        groups["chat"].output_cost_per_token,
+    ) == (prices)
+
+
+def test_a_configured_group_reads_its_data_class_and_the_cost_map():
+    groups = bridge.configured_groups(
+        SOURCE,
+        [entry("mapped", "openai/gpt-4o", model_info={"data_class": "internal"})],
+    )
+
+    assert is_priced(groups["mapped"])
+    assert groups["mapped"].data_classes == ("internal",)
+
+
+def test_a_model_list_the_router_cannot_load_names_its_entry_and_no_value():
+    model_list = [entry("chat", "openai/gpt-4o"), entry("odd", "nonsense-model")]
+
+    with pytest.raises(DocumentError) as raised:
+        bridge.configured_groups(SOURCE, model_list)
+
+    message = str(raised.value)
+    assert "model_list entry 2" in message
+    assert "'nonsense-model'" in message
+    assert "sk-config-secret" not in message
+
+
+def test_a_deployment_limited_to_other_environments_is_still_priced(monkeypatch):
+    monkeypatch.delenv("LITELLM_ENVIRONMENT", raising=False)
+    groups = bridge.configured_groups(
+        SOURCE,
+        [
+            entry(
+                "chat",
+                "openai/gpt-4o",
+                model_info={"supported_environments": ["production"]},
+            )
+        ],
+    )
+
+    assert is_priced(groups["chat"])
+
+
+def test_pricing_the_config_prints_no_litellm_warning(capfd):
+    bridge.configured_groups(
+        SOURCE,
+        [
+            entry(
+                "chat",
+                "openai/custom-priced-quietly",
+                params={"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6},
+            )
+        ],
+    )
+
+    assert "register_model" not in capfd.readouterr().err
