@@ -25,10 +25,6 @@ OPEN_FINDINGS: Final[Mapping[str, str]] = {
         "bundled, and ignores model_info.base_model, so it can differ from the "
         "gateway's"
     ),
-    "non-chat-pass-through": (
-        "the plugin sees every call type and governs only chat completions, so other "
-        "calls from governed teams pass at full price"
-    ),
     "budgets-before-tiers": (
         "organization, tag, end-user, global proxy, budget_limits, access group, late "
         "member, default key and opted-in user budgets can refuse before the tiers, and "

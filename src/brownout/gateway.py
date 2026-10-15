@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final, assert_never
 
 from litellm.caching.dual_cache import DualCache
@@ -9,6 +9,7 @@ from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy._types import UserAPIKeyAuth
 
 from . import bridge, settings, transitions
+from .bridge import CallKind
 from .events import EventLog
 from .manifest import Manifest, RoutePolicy, TeamPolicy
 from .policy import (
@@ -42,7 +43,21 @@ CEILING_TOLERANCE_USD: Final = 1e-9
 
 
 @dataclass(frozen=True)
-class Checked:
+class Refused:
+    refusal: Refusal
+    window: str
+    ttl_seconds: int
+
+
+@dataclass(frozen=True)
+class Admitted:
+    team: TeamPolicy
+    kind: CallKind
+
+
+@dataclass(frozen=True)
+class ModelCall:
+    kind: CallKind
     team: TeamPolicy
     route: RoutePolicy
     spend_usd: float
@@ -50,10 +65,11 @@ class Checked:
 
 
 @dataclass(frozen=True)
-class Refused:
-    refusal: Refusal
-    window: str
-    ttl_seconds: int
+class NoModelCall:
+    pass
+
+
+Checked = ModelCall | NoModelCall | Refused
 
 
 class BrownoutHandler(CustomLogger):
@@ -109,17 +125,18 @@ class BrownoutHandler(CustomLogger):
         call_type: str,
     ) -> dict:
         bridge.clear_field(data)
-        if call_type not in bridge.CHAT_COMPLETION_CALL_TYPES:
-            return data
         caller: Final = bridge.parse_caller(user_api_key_dict)
-        checked: Final = await self._check(caller, data)
+        checked: Final = await self._check(caller, data, call_type)
         match checked:
             case Refused(refusal=refusal, window=window, ttl_seconds=ttl_seconds):
                 await self._report(refusal, window, ttl_seconds)
                 bridge.write_field(data, bridge.refused_field(data, refusal))
                 raise bridge.http_error(refusal)
-            case Checked(team=team, route=route, spend_usd=spend_usd, window=window):
-                return await self._govern(caller, data, team, route, spend_usd, window)
+            case ModelCall():
+                return await self._govern(caller, data, checked)
+            case NoModelCall():
+                bridge.write_field(data, bridge.admitted_field())
+                return data
             case _:
                 assert_never(checked)
 
@@ -143,7 +160,7 @@ class BrownoutHandler(CustomLogger):
     ) -> list:
         routed: Final = request_kwargs or {}
         team: Final = self._manifest.team_policy(bridge.request_team(routed))
-        if team is None or messages is None:
+        if team is None or not healthy_deployments:
             return healthy_deployments
         refusal: Final = self._verify(model, team, routed, healthy_deployments)
         if refusal is None:
@@ -162,25 +179,28 @@ class BrownoutHandler(CustomLogger):
         routed: dict,
         candidates: list[dict],
     ) -> Refusal | None:
-        decided: Final = bridge.decided_route(bridge.read_field(routed))
-        if decided is None or any(
-            candidate.get("model_name") != decided for candidate in candidates
-        ):
+        field: Final = bridge.read_field(routed)
+        if field is None:
             return _not_a_group(model, team)
+        decided: Final = bridge.decided_route(field)
+        if decided is None:
+            return None
+        if any(candidate.get("model_name") != decided for candidate in candidates):
+            return _not_a_group(model, team)
+        kind: Final = bridge.field_kind(field)
+        if kind is not None and not _priced_per_token(kind):
+            return None
         if is_priced(self._gateway.candidate_group(decided, candidates)):
             return None
         return _unpriced(decided, team)
 
-    async def _govern(
-        self,
-        caller: Caller,
-        data: dict,
-        team: TeamPolicy,
-        route: RoutePolicy,
-        spend_usd: float,
-        window: str,
-    ) -> dict:
-        decision: Final = decide(Facts(team=team, route=route, spend_usd=spend_usd))
+    async def _govern(self, caller: Caller, data: dict, checked: ModelCall) -> dict:
+        team: Final = checked.team
+        route: Final = checked.route
+        window: Final = checked.window
+        decision: Final = decide(
+            Facts(team=team, route=route, spend_usd=checked.spend_usd)
+        )
         broken_pairing: Final = self._broken_pairing(decision, route)
         pairing: Pairing | None = None
         permission: Permission | None = None
@@ -219,10 +239,30 @@ class BrownoutHandler(CustomLogger):
             transitions.window_ttl(team.budget_duration),
             published,
         )
-        bridge.write_field(applied, bridge.governed_field(team, decision, outcome))
+        bridge.write_field(
+            applied, bridge.governed_field(checked.kind, team, decision, outcome)
+        )
         return applied
 
-    async def _check(self, caller: Caller, data: dict) -> Checked | Refused:
+    async def _check(self, caller: Caller, data: dict, call_type: str) -> Checked:
+        admitted: Final = self._admit(caller, data, call_type)
+        if isinstance(admitted, Refused):
+            return admitted
+        team: Final = admitted.team
+        match admitted.kind:
+            case CallKind.NO_MODEL:
+                return NoModelCall()
+            case (
+                CallKind.TEXT
+                | CallKind.EMBEDDING
+                | CallKind.COMPACTION
+                | CallKind.OTHER_MODEL
+            ):
+                return await self._model_call(caller, data, admitted.kind, team)
+            case _:
+                assert_never(admitted.kind)
+
+    def _admit(self, caller: Caller, data: dict, call_type: str) -> Admitted | Refused:
         refused_keys: Final = bridge.caller_routing_keys(data)
         if refused_keys:
             return self._refused(
@@ -235,20 +275,39 @@ class BrownoutHandler(CustomLogger):
                 _ungoverned(caller.team_id), UNGOVERNED_WINDOW_DURATION
             )
 
-        model: Final = bridge.requested_model(data)
-        route: Final = team.route_policy(model)
-        groups: Final = _memoised(self._gateway.model_group)
+        kind: Final = bridge.call_kind(call_type)
+        if kind is None:
+            return self._refused(
+                _not_governed_call(call_type, team), team.budget_duration
+            )
+
         checks: Final = (
-            self._concrete(model, team),
             self._key_without_budget(caller, team),
-            self._priced(model, team, groups),
             _ceiling_matches(caller, team),
             self._settings_rules(team),
         )
         for refusal in checks:
             if refusal is not None:
                 return self._refused(refusal, team.budget_duration)
+        return Admitted(team=team, kind=kind)
 
+    def _model_refusal(
+        self, model: str, team: TeamPolicy, kind: CallKind
+    ) -> Refusal | None:
+        concrete: Final = self._concrete(model, team)
+        if concrete is not None:
+            return concrete
+        if not _priced_per_token(kind):
+            return None
+        return self._priced(model, team, self._gateway.model_group)
+
+    async def _model_call(
+        self, caller: Caller, data: dict, kind: CallKind, team: TeamPolicy
+    ) -> ModelCall | Refused:
+        model: Final = bridge.requested_model(data)
+        refusal: Final = self._model_refusal(model, team, kind)
+        if refusal is not None:
+            return self._refused(refusal, team.budget_duration)
         try:
             counter = await self._spend_counter.read(
                 team_id=team.team_id,
@@ -259,9 +318,10 @@ class BrownoutHandler(CustomLogger):
             logger.exception("Team spend counter unreadable for team=%s", team.team_id)
             return self._refused(_unreadable(team, model), team.budget_duration)
 
-        return Checked(
+        return ModelCall(
+            kind=kind,
             team=team,
-            route=route,
+            route=_route(team, model, kind),
             spend_usd=max(0.0, counter - caller.own_hold_usd),
             window=transitions.window_id(self._schedule, team.budget_duration),
         )
@@ -339,6 +399,32 @@ class BrownoutHandler(CustomLogger):
                 )
             ],
         )
+
+
+def _priced_per_token(kind: CallKind) -> bool:
+    match kind:
+        case CallKind.TEXT | CallKind.EMBEDDING | CallKind.COMPACTION:
+            return True
+        case CallKind.OTHER_MODEL | CallKind.NO_MODEL:
+            return False
+        case _:
+            assert_never(kind)
+
+
+def _route(team: TeamPolicy, model: str, kind: CallKind) -> RoutePolicy:
+    declared: Final = team.route_policy(model)
+    match kind:
+        case CallKind.TEXT:
+            return declared
+        case (
+            CallKind.EMBEDDING
+            | CallKind.COMPACTION
+            | CallKind.OTHER_MODEL
+            | CallKind.NO_MODEL
+        ):
+            return replace(declared, fallback=None, degrade_at=None)
+        case _:
+            assert_never(kind)
 
 
 def _pairing_incident(
@@ -452,6 +538,20 @@ def _ceiling_matches(caller: Caller, team: TeamPolicy) -> Refusal | None:
             "team_max_budget_usd": ceiling,
         },
         incident_subject=f"{team.team_id}:{ceiling}",
+    )
+
+
+def _not_governed_call(call_type: str, team: TeamPolicy) -> Refusal:
+    return Refusal(
+        rule=RuleId.CALL_TYPE_GOVERNED,
+        reason=RefusalReason.CALL_TYPE_NOT_GOVERNED,
+        message=(
+            f"Brownout admits only the LiteLLM call types it has reviewed, and "
+            f"{call_type!r} is not one of them. Use a unified route, such as "
+            "/v1/chat/completions, /v1/messages, /v1/responses or /v1/embeddings."
+        ),
+        detail={"team_id": team.team_id, "call_type": call_type},
+        incident_subject=f"{team.team_id}:{call_type}",
     )
 
 

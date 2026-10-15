@@ -34,6 +34,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      lab-tools:
+        condition: service_healthy
+
+  lab-tools:
+    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.104.2}
+    restart: unless-stopped
+    entrypoint: ["python", "/app/lab/lab_tools.py"]
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ./tests/lab_tools.py:/app/lab/lab_tools.py:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/requests', timeout=3).status == 200 else 1)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
   db:
     image: postgres:16

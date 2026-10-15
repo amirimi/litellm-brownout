@@ -34,3 +34,16 @@ teams:
         degrade_at: 75
       budget-lab-strict: {}
       budget-lab-failing: {}
+
+  kinds-lab:
+    policy_epoch: "kinds-lab-v1"
+    envelope_usd: 5.0
+    budget_duration: "7d"
+    routes:
+      budget-lab-primary:
+        fallback: budget-lab-degraded
+        degrade_at: 10
+      tools-primary:
+        fallback: tools-fallback
+        degrade_at: 10
+      lab-embedding: {}

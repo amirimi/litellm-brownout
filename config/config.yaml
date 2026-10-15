@@ -10,6 +10,11 @@ router_settings:
   model_group_alias:
     budget-lab-alias: budget-lab-primary
 
+mcp_servers:
+  lab_tools:
+    url: http://lab-tools:8080/mcp
+    transport: http
+
 litellm_settings:
   callbacks: ["brownout.gateway.handler"]
   budget_exceeded_status_code: 429
@@ -137,3 +142,47 @@ model_list:
     model_info:
       data_class: internal
       max_output_tokens: 200
+
+  - model_name: tools-primary
+    litellm_params:
+      model: openai/tools-primary
+      api_base: http://lab-tools:8080/v1
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.0001
+      output_cost_per_token: 0.001
+    model_info:
+      data_class: internal
+      max_output_tokens: 200
+
+  - model_name: tools-fallback
+    litellm_params:
+      model: openai/tools-fallback
+      api_base: http://lab-tools:8080/v1
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.00005
+      output_cost_per_token: 0.0005
+    model_info:
+      data_class: internal
+      max_output_tokens: 200
+
+  - model_name: lab-embedding
+    litellm_params:
+      model: openai/lab-embedding
+      api_base: http://lab-tools:8080/v1
+      api_key: os.environ/OPENAI_API_KEY
+      input_cost_per_token: 0.00001
+      output_cost_per_token: 0.0
+    model_info:
+      data_class: internal
+      max_output_tokens: 200
+      mode: embedding
+
+  - model_name: lab-embedding-unpriced
+    litellm_params:
+      model: openai/lab-embedding-unpriced
+      api_base: http://lab-tools:8080/v1
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      data_class: internal
+      max_output_tokens: 200
+      mode: embedding

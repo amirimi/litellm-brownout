@@ -85,7 +85,7 @@ a number.
 
 | Exit code | Meaning |
 |---|---|
-| `0` | Ready. The only finding is the notice that the admin keys cannot make chat calls |
+| `0` | Ready. The only finding is the notice that the admin keys cannot make model calls |
 | `1` | Findings remain |
 | `2` | The gateway or an input could not be read, an input is invalid, or an output path is taken |
 
@@ -146,7 +146,7 @@ for outages, latency and deployments. Its budget alerts must stay off, because L
 or includes `budget_alerts`, so list the alert types the gateway wants without `budget_alerts`. An
 `alert_types` list saved from the admin UI lives in the database, where the check cannot see it.
 
-Router fallbacks may stay in the config, and they never apply to governed chat completions. On every
+Router fallbacks may stay in the config, and they never apply to governed model calls. On every
 governed request the plugin sets `fallbacks`, `context_window_fallbacks` and
 `content_policy_fallbacks` to empty lists. LiteLLM's router prefers a request's own list to its
 configured one, and it merges key and team `router_settings` only for keys the request does not

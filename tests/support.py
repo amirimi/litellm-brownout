@@ -44,6 +44,7 @@ FIELD_KEYS: Final = frozenset(
         "degradation_reason",
         "utilisation_percent",
         "refusal",
+        "kind",
     }
 )
 
@@ -339,7 +340,9 @@ async def request(
 
 
 def disclosed(data: dict) -> dict[str, Any]:
-    return data["metadata"]["spend_logs_metadata"]["brownout"]
+    field = bridge.read_field(data)
+    assert field is not None
+    return field
 
 
 async def headers_for(handler: BrownoutHandler, applied: dict) -> dict[str, str]:
@@ -348,3 +351,14 @@ async def headers_for(handler: BrownoutHandler, applied: dict) -> dict[str, str]
     )
     assert result is not None
     return result
+
+
+async def call(
+    handler: BrownoutHandler,
+    auth: UserAPIKeyAuth,
+    call_type: str,
+    data: dict[str, Any],
+) -> dict:
+    return await handler.async_pre_call_hook(
+        user_api_key_dict=auth, cache=None, data=data, call_type=call_type
+    )

@@ -5,18 +5,25 @@ import importlib.util
 import inspect
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Final, get_args
 
 import litellm
 import pytest
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.litellm_core_utils import litellm_logging
+from litellm.litellm_core_utils.core_helpers import (
+    get_metadata_variable_name_from_kwargs,
+)
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.auth import auth_checks
+from litellm.proxy.common_request_processing import ProxyRouteType
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.spend_tracking import budget_reservation
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 from litellm.types.integrations.slack_alerting import DEFAULT_ALERT_TYPES
+from litellm.types.utils import CallTypes
+
+from brownout import bridge
 
 LITELLM_ROOT: Final = Path(importlib.util.find_spec("litellm").origin).parent
 
@@ -482,3 +489,31 @@ def test_seam_the_router_lists_configured_model_names_only(billing_router):
 
     assert "seam-explicit" in names
     assert "seam-alias" not in names
+
+
+def test_seam_every_admitted_call_type_is_one_litellm_names():
+    named = {call_type.value for call_type in CallTypes} | set(get_args(ProxyRouteType))
+
+    assert set(bridge.CALL_KINDS) - named == set()
+
+
+@pytest.mark.parametrize(
+    ("data", "container"),
+    [
+        ({"metadata": {}}, "metadata"),
+        ({}, "metadata"),
+        ({"metadata": {}, "litellm_metadata": {}}, "litellm_metadata"),
+    ],
+)
+def test_seam_litellm_keeps_its_metadata_in_litellm_metadata_when_present(
+    data, container
+):
+    assert get_metadata_variable_name_from_kwargs(data) == container
+
+
+def test_seam_an_mcp_tool_call_runs_the_pre_call_hook_with_its_call_type():
+    source = (
+        LITELLM_ROOT / "proxy/_experimental/mcp_server/mcp_server_manager.py"
+    ).read_text(encoding="utf-8")
+
+    assert "call_type=CallTypes.call_mcp_tool.value" in source

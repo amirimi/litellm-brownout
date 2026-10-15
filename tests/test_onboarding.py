@@ -337,16 +337,16 @@ def test_only_the_admin_keys_notice_leaves_init_ready():
             True,
             "admin keys",
             (
-                "the master key and the key init runs with have no team, so chat "
-                "calls made with them will be refused. Send chat traffic with team keys"
+                "the master key and the key init runs with have no team, so model "
+                "calls made with them will be refused. Send model traffic with team keys"
             ),
         ),
         (
             False,
             "master key",
             (
-                "the master key has no team, so chat calls made with it will be "
-                "refused. Send chat traffic with team keys"
+                "the master key has no team, so model calls made with it will be "
+                "refused. Send model traffic with team keys"
             ),
         ),
     ],

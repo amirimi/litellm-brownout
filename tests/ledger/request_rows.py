@@ -4,7 +4,7 @@ from typing import Final
 
 from brownout.refusals import RefusalReason, RuleId
 
-from .model import Form, Input, Open, Refused, Supported
+from .model import Documented, Form, Input, Refused, Supported
 
 GATEWAY: Final = "tests/test_gateway.py::"
 BRIDGE: Final = "tests/test_bridge.py::"
@@ -13,6 +13,7 @@ PERMISSIONS: Final = "tests/test_permissions.py::"
 EVENTS: Final = "tests/test_events.py::"
 SEAMS: Final = "tests/test_litellm_seams.py::"
 SMOKE: Final = "tests/test_smoke_e2e.py::"
+KINDS: Final = "tests/test_call_kinds_e2e.py::"
 
 
 def _request(rule: RuleId, reason: RefusalReason, *tests: str) -> Refused:
@@ -28,18 +29,116 @@ REQUEST_ROWS: Final = (
         cites=(),
         forms=(
             Form(
-                "completion or acompletion",
-                "governed",
+                "text generation: chat, text completion, /v1/messages, /v1/responses "
+                "and generate_content",
+                "governed and downgraded past its tier",
                 Supported(
                     (
-                        f"{GATEWAY}test_a_governed_request_discloses_only_facts_about_itself",
+                        f"{GATEWAY}test_every_text_call_is_downgraded_past_its_tier",
+                        f"{BRIDGE}test_text_generation_is_chat_text_messages_responses_and_generate_content",
+                        f"{KINDS}test_every_text_endpoint_is_downgraded_past_the_tier",
                     )
                 ),
             ),
             Form(
-                "any other call type, such as embeddings, /v1/messages or /v1/responses",
-                "passed through at full price",
-                Open("non-chat-pass-through"),
+                "embeddings",
+                "team, key, concrete group and per-token price checked, tiers "
+                "announced, never downgraded",
+                Supported(
+                    (
+                        f"{GATEWAY}test_a_model_call_is_served_by_the_model_it_named_at_any_spend",
+                        f"{BRIDGE}test_embeddings_are_the_other_model_call_priced_per_token",
+                        f"{KINDS}test_embeddings_are_served_by_the_model_named_past_the_tier",
+                    )
+                ),
+            ),
+            Form(
+                "another model call: images, speech, transcription, moderation, "
+                "rerank, OCR or video generation",
+                "team, key and concrete group checked, tiers announced, never "
+                "downgraded, billed in LiteLLM's own units",
+                Supported(
+                    (
+                        f"{GATEWAY}test_a_model_call_is_served_by_the_model_it_named_at_any_spend",
+                        f"{GATEWAY}test_another_model_call_is_not_judged_on_a_per_token_price",
+                        f"{BRIDGE}test_other_model_calls_are_the_endpoints_litellm_prices_in_their_own_units",
+                    )
+                ),
+            ),
+            Form(
+                "compaction through /v1/responses/compact",
+                "team, key, concrete group and per-token price checked, tiers "
+                "announced, never downgraded",
+                Supported(
+                    (
+                        f"{GATEWAY}test_a_model_call_is_served_by_the_model_it_named_at_any_spend",
+                        f"{BRIDGE}test_compaction_is_its_own_kind",
+                        f"{KINDS}test_compaction_is_served_by_the_model_named_past_the_tier",
+                    )
+                ),
+            ),
+            Form(
+                "a call without a model: an MCP tool call, files, vector stores, "
+                "containers, stored responses or video records",
+                "team and key checked",
+                Supported(
+                    (
+                        f"{GATEWAY}test_a_call_without_a_model_is_admitted_on_its_team_and_key",
+                        f"{BRIDGE}test_calls_without_a_model_are_tools_files_stores_containers_and_records",
+                        f"{KINDS}test_a_stored_response_is_read_back",
+                        f"{SEAMS}test_seam_an_mcp_tool_call_runs_the_pre_call_hook_with_its_call_type",
+                        f"{KINDS}test_a_governed_team_calls_an_mcp_tool",
+                    )
+                ),
+            ),
+            Form(
+                "any other call type, such as provider pass-through, realtime, batches, "
+                "fine-tuning, search tools or one a later release adds",
+                "refused",
+                _request(
+                    RuleId.CALL_TYPE_GOVERNED,
+                    RefusalReason.CALL_TYPE_NOT_GOVERNED,
+                    f"{GATEWAY}test_a_call_type_outside_the_allow_list_is_refused",
+                    f"{BRIDGE}test_a_call_type_outside_the_allow_list_has_no_kind",
+                    f"{SEAMS}test_seam_every_admitted_call_type_is_one_litellm_names",
+                ),
+            ),
+            Form(
+                "an image, audio, rerank, OCR or video deployment LiteLLM cannot price",
+                "served and recorded at $0",
+                Documented(
+                    unseen_because=(
+                        "LiteLLM prices these per image, second, character, query or "
+                        "page, in units that change between releases"
+                    ),
+                    docs="README.md",
+                    phrase="a deployment LiteLLM cannot price records $0",
+                ),
+            ),
+            Form(
+                "the assistants, threads and runs endpoints",
+                "never seen by the plugin",
+                Documented(
+                    unseen_because="LiteLLM runs no plugin hook on them",
+                    docs="README.md",
+                    phrase=(
+                        "LiteLLM runs no plugin hook on its assistants, threads and "
+                        "runs endpoints"
+                    ),
+                ),
+            ),
+            Form(
+                "a text call whose fallback's server lacks the API LiteLLM translates "
+                "it to",
+                "the provider's error",
+                Documented(
+                    unseen_because=(
+                        "nothing in the config or the request says which APIs a server "
+                        "implements"
+                    ),
+                    docs="README.md",
+                    phrase="without that API fails those calls with the provider's error",
+                ),
             ),
         ),
     ),
@@ -160,7 +259,7 @@ REQUEST_ROWS: Final = (
                 Supported(
                     (
                         f"{BRIDGE}test_a_forged_field_is_cleared_from_both_containers_without_mutation",
-                        f"{GATEWAY}test_a_forged_field_on_a_non_chat_call_is_removed",
+                        f"{GATEWAY}test_a_forged_field_on_a_model_call_is_replaced",
                     )
                 ),
             ),
@@ -179,9 +278,22 @@ REQUEST_ROWS: Final = (
         shape="request metadata brownout writes into",
         source="brownout",
         parser="bridge.write_field",
-        reads=("key:metadata", "key:spend_logs_metadata"),
+        reads=(
+            "litellm:get_metadata_variable_name_from_kwargs",
+            "key:spend_logs_metadata",
+        ),
         cites=(),
         forms=(
+            Form(
+                "litellm_metadata present, as on /v1/messages and /v1/responses",
+                "written into litellm_metadata, where LiteLLM keeps its own metadata",
+                Supported(
+                    (
+                        f"{BRIDGE}test_the_field_is_written_where_litellm_keeps_its_metadata",
+                        f"{SEAMS}test_seam_litellm_keeps_its_metadata_in_litellm_metadata_when_present",
+                    )
+                ),
+            ),
             Form(
                 "absent or not a mapping",
                 "a fresh field",
@@ -207,9 +319,24 @@ REQUEST_ROWS: Final = (
         shape="brownout's field in the response hook",
         source="brownout",
         parser="bridge.read_field",
-        reads=("key:metadata", "key:spend_logs_metadata", "key:brownout"),
+        reads=(
+            "key:metadata",
+            "key:litellm_metadata",
+            "key:spend_logs_metadata",
+            "key:brownout",
+        ),
         cites=(),
         forms=(
+            Form(
+                "the field in either container, as LiteLLM moves its metadata between them",
+                "the field",
+                Supported(
+                    (
+                        f"{BRIDGE}test_the_field_is_read_from_either_container",
+                        f"{GATEWAY}test_the_filter_reads_the_field_from_litellm_metadata",
+                    )
+                ),
+            ),
             Form(
                 "the field the pre-call hook wrote",
                 "headers",
@@ -580,8 +707,34 @@ REQUEST_ROWS: Final = (
             Form(
                 "no team, or a team outside the manifest",
                 "untouched",
+                Supported((f"{GATEWAY}test_the_filter_leaves_other_teams_untouched",)),
+            ),
+        ),
+    ),
+    Input(
+        shape="the kind brownout wrote into its field",
+        source="brownout",
+        parser="bridge.field_kind",
+        reads=("key:kind",),
+        cites=(),
+        forms=(
+            Form(
+                "text, embedding or compaction",
+                "candidates checked for a per-token price",
                 Supported(
-                    (f"{GATEWAY}test_the_filter_leaves_other_requests_untouched",)
+                    (
+                        f"{GATEWAY}test_the_filter_refuses_an_unpriced_embedding_candidate",
+                        f"{GATEWAY}test_the_filter_refuses_an_unpriced_compaction_candidate",
+                    )
+                ),
+            ),
+            Form(
+                "another model call",
+                "candidates checked for their group only",
+                Supported(
+                    (
+                        f"{GATEWAY}test_the_filter_admits_another_model_call_without_a_per_token_price",
+                    )
                 ),
             ),
         ),
@@ -601,12 +754,26 @@ REQUEST_ROWS: Final = (
                 ),
             ),
             Form(
-                "missing on a governed chat request",
+                "the model a model call named",
+                "the group every candidate must belong to",
+                Supported(
+                    (
+                        f"{GATEWAY}test_the_filter_verifies_a_model_call_against_the_group_it_named",
+                    )
+                ),
+            ),
+            Form(
+                "no route, as on a call without a model",
+                "passed unchanged",
+                Supported((f"{GATEWAY}test_the_filter_passes_a_call_without_a_model",)),
+            ),
+            Form(
+                "no field on a governed request",
                 "refused",
                 _request(
                     RuleId.MODEL_IS_A_GROUP,
                     RefusalReason.MODEL_NOT_A_GROUP,
-                    f"{GATEWAY}test_the_filter_refuses_a_governed_chat_request_brownout_never_saw",
+                    f"{GATEWAY}test_the_filter_refuses_a_governed_request_brownout_never_saw",
                 ),
             ),
         ),
@@ -618,13 +785,21 @@ REQUEST_ROWS: Final = (
         reads=(
             "parameter:model",
             "parameter:healthy_deployments",
-            "parameter:messages",
             "parameter:request_kwargs",
         ),
         cites=("litellm/router.py:12414@1.101.6",),
         forms=(
             Form(
-                "a chat request after the router resolved its name",
+                "no healthy deployment, as when every one is cooling down",
+                "left to LiteLLM, which reports that no deployment is available",
+                Supported(
+                    (
+                        f"{GATEWAY}test_the_filter_leaves_an_empty_candidate_list_to_litellm",
+                    )
+                ),
+            ),
+            Form(
+                "a governed request after the router resolved its name",
                 "verified",
                 Supported(
                     (
@@ -632,13 +807,6 @@ REQUEST_ROWS: Final = (
                         f"{SEAMS}test_seam_the_deployment_filter_hook_keeps_its_parameters",
                         f"{SEAMS}test_seam_the_router_filters_deployments_after_resolving_the_name",
                     )
-                ),
-            ),
-            Form(
-                "a call without messages",
-                "untouched",
-                Supported(
-                    (f"{GATEWAY}test_the_filter_leaves_other_requests_untouched",)
                 ),
             ),
         ),
