@@ -26,6 +26,10 @@ refused.
 | `no_model` | MCP tool calls, files, vector stores, containers, reading, deleting and cancelling stored responses, and video status, content and listing | Team and key | Not applicable |
 | Refused | Provider pass-through, realtime, batches, fine-tuning, search tools, video remixes and edits, and every call type a later release adds | 503 `call_type_not_governed` | |
 
+LiteLLM labels its file listing with the call type for listing fine-tuning jobs, so `no_model`
+admits `alist_fine_tuning_jobs` and listing fine-tuning jobs comes with it. That listing reads job
+records and calls no model. Creating, retrieving and cancelling fine-tuning jobs stay refused.
+
 A swapped embedding model returns vectors from another space and corrupts the caller's index.
 Codex sends a long session to `/v1/responses/compact` and gets back an encrypted summary that the
 model it named reads next. Only text generation is therefore ever downgraded. LiteLLM prices the `other_model` endpoints per image,

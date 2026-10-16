@@ -46,8 +46,7 @@ Brownout governs every model call on the gateway, so the whole gateway has to me
 - No key carries a budget of its own.
 - Calls use the call types brownout has reviewed. Provider pass-through routes, realtime, batches,
   fine-tuning and search tools get a 503 naming the call type.
-- `fail_closed_budget_enforcement` is on, `coordination_redis` is configured and LiteLLM's budget
-  alerts are off.
+- `fail_closed_budget_enforcement` is on and `coordination_redis` is configured.
 - LiteLLM runs a release from 1.101.6 to 1.104, pinned by image tag.
 
 Brownout needs a Redis that LiteLLM can reach. LiteLLM keeps each team's spend counter there, and
@@ -100,6 +99,18 @@ team, keys with a budget of their own, and teams or models without a budget or a
 prints the command or the config lines that resolve it, with a placeholder for any value only you can
 choose. Resolve them and rerun only the `init` line, which reuses `$BROWNOUT_INIT_KEY`, until it
 exits `0`. Only then add `--write`, which refuses to overwrite an existing file.
+
+Every OpenRouter model shows up without a price, because LiteLLM removed OpenRouter's prices from
+its cost map on 2026-10-09. Without a configured price, LiteLLM records $0 for OpenRouter embeddings
+and for non-streamed `/v1/responses` calls, so that spend never counts toward a budget. This command
+reads OpenRouter's public price list and prints the two lines `init` asks for. Replace
+`anthropic/claude-haiku-4.5` with the part of your model name after `openrouter/`.
+
+```bash
+{ curl -s https://openrouter.ai/api/v1/models; curl -s https://openrouter.ai/api/v1/embeddings/models; } \
+  | jq -sr --arg m anthropic/claude-haiku-4.5 '[.[].data[] | select(.id == $m)][0]
+      | "input_cost_per_token: \(.pricing.prompt)\noutput_cost_per_token: \(.pricing.completion)"'
+```
 
 `--write` creates two files and leaves your config as it was.
 

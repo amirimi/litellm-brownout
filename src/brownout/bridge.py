@@ -125,6 +125,7 @@ CALL_KINDS: Final[Mapping[str, CallKind]] = {
     "acancel_responses": CallKind.NO_MODEL,
     "alist_input_items": CallKind.NO_MODEL,
     "acreate_file": CallKind.NO_MODEL,
+    "alist_fine_tuning_jobs": CallKind.NO_MODEL,
     "afile_content": CallKind.NO_MODEL,
     "afile_retrieve": CallKind.NO_MODEL,
     "afile_delete": CallKind.NO_MODEL,
