@@ -13,6 +13,7 @@ from .rules import GatewaySettings, ModelGroup
 @dataclass(frozen=True)
 class Caller:
     team_id: str | None
+    agent_id: str | None
     key_models: tuple[str, ...]
     team_models: tuple[str, ...]
     key_budgets: tuple[str, ...]

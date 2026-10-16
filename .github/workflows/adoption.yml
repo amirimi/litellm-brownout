@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: ["v1.101.6", "v1.104.2"]
+        release: ["v1.101.6", "v1.105.1"]
         scenario:
           - a-config-models
           - a2-no-model-store
@@ -59,6 +59,10 @@ jobs:
             release: "v1.102.4"
           - scenario: b-ui-models
             release: "v1.103.4"
+          - scenario: a-config-models
+            release: "v1.104.3"
+          - scenario: b-ui-models
+            release: "v1.104.3"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0

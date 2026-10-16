@@ -452,6 +452,36 @@ REQUEST_ROWS: Final = (
         ),
     ),
     Input(
+        shape="authenticated caller's agent",
+        source="brownout",
+        parser="bridge.parse_caller",
+        reads=("member:agent_id",),
+        cites=(
+            "litellm/proxy/auth/auth_checks.py:4480@1.104.3",
+            "litellm/proxy/auth/auth_checks.py:4517@1.104.3",
+            "litellm/proxy/auth/auth_checks.py:1062@1.105.1",
+        ),
+        forms=(
+            Form(
+                "a key without an agent_id",
+                "a downgrade is checked against the key's and team's model lists",
+                Supported((f"{PERMISSIONS}test_an_allowlisted_target_is_served",)),
+            ),
+            Form(
+                "an agent key, whose access groups, invoking caller or managed grants "
+                "LiteLLM checks at authentication",
+                "never downgraded, so the primary is served and the owner is told",
+                Supported(
+                    (
+                        f"{BRIDGE}test_a_caller_carries_the_agent_its_key_belongs_to",
+                        f"{PERMISSIONS}test_an_agent_key_keeps_its_primary_and_the_owner_is_told",
+                        f"{PERMISSIONS}test_an_agent_key_is_answered_without_asking_litellm",
+                    )
+                ),
+            ),
+        ),
+    ),
+    Input(
         shape="key budgets on the caller",
         source="brownout",
         parser="bridge._key_budgets",

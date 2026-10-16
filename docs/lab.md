@@ -100,4 +100,4 @@ x-brownout-degradation-reason: degrade_tier_reached
 | LiteLLM's boundary ahead of the tier | Drain with `ask 200` | The 429 arrives near 80%, because the larger worst case no longer fits, and a degrade tier at 90 never fires |
 | A broken manifest | Set `budget_duration: "2d"` and restart | The container restarts in a loop, and `docker compose logs litellm` shows `ManifestError` naming `duration-tumbles` |
 | A route tier | Add `warn_tiers: [50]` under `budget-lab-strict`, restart, then send requests to `budget-lab-strict` past 50% | A `brownout_tier_crossed` announcement with `scope: route` and an `x-brownout-route-tier: 50` header |
-| The 422 default | Remove `budget_exceeded_status_code: 429` from `config/config.yaml` and run `docker compose restart litellm` | LiteLLM 1.104 refuses the exhausted budget with a 422 instead of a 429 |
+| The 422 default | Remove `budget_exceeded_status_code: 429` from `config/config.yaml` and run `docker compose restart litellm` | LiteLLM refuses the exhausted budget with a 422, its default from 1.104, instead of a 429 |

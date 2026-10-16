@@ -137,12 +137,12 @@ COMMAND_ROWS: Final = (
                 ),
             ),
             Form(
-                "1.101.6 to 1.104",
+                "1.101.6 to 1.105",
                 "runs",
                 Supported((f"{BRIDGE}test_a_tested_release_runs_quietly",)),
             ),
             Form(
-                "past 1.104",
+                "past 1.105",
                 "runs, with an untested-release warning",
                 Supported(
                     (f"{BRIDGE}test_a_release_past_the_ceiling_runs_with_a_warning",)

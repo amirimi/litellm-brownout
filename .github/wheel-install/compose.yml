@@ -5,6 +5,6 @@ services:
       context: .
       dockerfile: .github/wheel-install/Dockerfile
       args:
-        LITELLM_TAG: ${LITELLM_TAG:-v1.104.2}
+        LITELLM_TAG: ${LITELLM_TAG:-v1.105.1}
     volumes: !override
       - ./config:/app/config:ro

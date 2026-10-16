@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from brownout import bridge
+from brownout.policy import Permission
 
 from .support import RecordingSink, build_handler, disclosed, make_auth, request
 
@@ -87,3 +88,28 @@ async def test_the_unavailable_check_incident_is_raised_once_per_window(team):
         await request(handler, make_auth(team), "budget-lab-primary")
 
     assert len(sink.incidents) == 1
+
+
+async def test_an_agent_key_keeps_its_primary_and_the_owner_is_told(team):
+    sink = RecordingSink()
+    handler = build_handler(team, sink, spend=team.envelope_usd * 0.95)
+    auth = make_auth(team)
+    auth.agent_id = "lab-agent"
+
+    applied = await request(handler, auth, "budget-lab-primary")
+
+    assert applied["model"] == "budget-lab-primary"
+    assert disclosed(applied)["degradation_reason"] == "fallback_rejected"
+    assert [event.rejection for event in sink.fallback_rejections] == ["agent_key"]
+    assert sink.incidents == []
+
+
+def test_an_agent_key_is_answered_without_asking_litellm(team):
+    auth = make_auth(team)
+    auth.agent_id = "lab-agent"
+
+    answer = bridge.LiteLLMPermissions(broken_router).check(
+        bridge.parse_caller(auth), "budget-lab-degraded"
+    )
+
+    assert answer is Permission.AGENT_KEY

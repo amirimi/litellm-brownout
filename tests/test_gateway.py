@@ -1156,7 +1156,14 @@ async def test_a_call_without_a_model_is_admitted_on_its_team_and_key(team, call
 
 @pytest.mark.parametrize(
     "call_type",
-    ["pass_through_endpoint", "_arealtime", "acreate_batch", "asearch", "adecisions"],
+    [
+        "pass_through_endpoint",
+        "_arealtime",
+        "acreate_batch",
+        "asearch",
+        "adecisions",
+        "asystemone",
+    ],
 )
 async def test_a_call_type_outside_the_allow_list_is_refused(team, call_type):
     sink = RecordingSink()

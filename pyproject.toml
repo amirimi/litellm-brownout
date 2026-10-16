@@ -25,7 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.28",
-    "litellm[proxy]>=1.101.6,<1.105",
+    "litellm[proxy]>=1.101.6,<1.106",
     "pyyaml>=6.0",
     "ruamel.yaml>=0.18",
 ]

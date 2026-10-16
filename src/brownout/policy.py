@@ -11,6 +11,7 @@ class Permission(StrEnum):
     PERMITTED = "permitted"
     DENIED = "denied"
     UNAVAILABLE = "unavailable"
+    AGENT_KEY = "agent_key"
 
 
 class Pairing(StrEnum):
@@ -22,6 +23,7 @@ class Rejection(StrEnum):
     OUTSIDE_CALLER_ALLOWLIST = "outside_caller_allowlist"
     ENTITLEMENT_CHECK_UNAVAILABLE = "entitlement_check_unavailable"
     FALLBACK_RULE_VIOLATED = "fallback_rule_violated"
+    AGENT_KEY = "agent_key"
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,8 @@ def _permitted(
             return _rejected(decision, wants, Rejection.OUTSIDE_CALLER_ALLOWLIST)
         case Permission.UNAVAILABLE:
             return _rejected(decision, wants, Rejection.ENTITLEMENT_CHECK_UNAVAILABLE)
+        case Permission.AGENT_KEY:
+            return _rejected(decision, wants, Rejection.AGENT_KEY)
         case _:
             assert_never(permission)
 
