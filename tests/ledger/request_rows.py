@@ -111,7 +111,7 @@ REQUEST_ROWS: Final = (
                         "LiteLLM prices these per image, second, character, query or "
                         "page, in units that change between releases"
                     ),
-                    docs="README.md",
+                    docs="docs/limits.md",
                     phrase="a deployment LiteLLM cannot price records $0",
                 ),
             ),
@@ -120,7 +120,7 @@ REQUEST_ROWS: Final = (
                 "never seen by the plugin",
                 Documented(
                     unseen_because="LiteLLM runs no plugin hook on them",
-                    docs="README.md",
+                    docs="docs/limits.md",
                     phrase=(
                         "LiteLLM runs no plugin hook on its assistants, threads and "
                         "runs endpoints"
@@ -136,7 +136,7 @@ REQUEST_ROWS: Final = (
                         "nothing in the config or the request says which APIs a server "
                         "implements"
                     ),
-                    docs="README.md",
+                    docs="docs/limits.md",
                     phrase="without that API fails those calls with the provider's error",
                 ),
             ),

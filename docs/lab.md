@@ -13,19 +13,25 @@ lab sends nothing off the machine.
 
 ## 1. Start the stack and create a fresh team
 
-Copy `.env.example` to `.env` once, then run these commands. Its passwords and master key are
-placeholders. The stack publishes the gateway on port 4000 and Redis on port 16379, both bound to
-`127.0.0.1`, so the lab is reachable only from the machine it runs on and leaves the default Redis
-port free. Change the credentials and the bindings before exposing it anywhere else.
+The lab needs Docker Compose, Python 3.12 or newer, [uv](https://docs.astral.sh/uv/), `curl` and
+`jq`, and its first start downloads about 2 GB. The first two lines clone the repo and copy
+`.env.example` to `.env`, whose passwords and master key are placeholders.
+
+The stack publishes the gateway on port 4000 and Redis on port 16379, both bound to `127.0.0.1`, so
+the lab is reachable only from the machine it runs on and leaves the default Redis port free. Change
+the credentials and the bindings before exposing it anywhere else.
 
 ```bash
+git clone https://github.com/amk9978/litellm-brownout.git && cd litellm-brownout
+cp .env.example .env
 docker compose up -d --wait
 set -a; source .env; set +a
 KEY=$(uv run python tests/setup_lab.py | tail -1)
 ```
 
-`tests/setup_lab.py` resets the lab team and its claims in about 11 seconds. Rerun this step before
-every experiment, because the lab team and its claims carry over.
+`tests/setup_lab.py` deletes and recreates the `budget-lab` team and resets its claims in about 11
+seconds, so run it only against the lab. Rerun the last three lines before every experiment,
+because the lab team and its claims carry over. `docker compose down` stops the lab.
 
 ## 2. Send one request
 

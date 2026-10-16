@@ -66,6 +66,14 @@ imports it, so a `.env` there that holds the master key reaches `init`'s process
 own key in `/key/list` and raises no team finding for it. A budget on that key is still a finding,
 and the admin-keys notice names the key only when it has no team.
 
+The README's prepare block makes that key from the master key. Its first line reads the master key
+without a prompt and keeps it off the screen, out of shell history and unexported, so `uvx` and the
+packages it installs never receive it from the shell. Run the block from a shell that exports no
+other secret, such as a provider key. If `curl` fails, `BROWNOUT_INIT_KEY` stays unset and `init`
+refuses to start. A second run of the block fails at `curl`, because the `brownout-init` user
+already exists. Deleting that user deletes its key, and the same delete recovers a key lost with a
+closed shell before the block runs again.
+
 `init` refuses to write over an existing file or over one of its inputs. A config with a duplicate key stops
 it, because LiteLLM's loader silently keeps the last value. Settings saved through LiteLLM's admin UI
 live in its database, so the changes `init` lists cover only the file.
@@ -91,6 +99,32 @@ a number.
 
 An exit of `0` and a passing `brownout check` on the written files together mean that enabling the
 callback refuses nothing `init` did not list.
+
+### What `--write` creates
+
+`--write` leaves the gateway's config as it was and creates two files.
+
+- `brownout.yaml` is the manifest. It has one entry per LiteLLM team with a budget, copies that
+  budget and window, warns at 75% and 90%, and declares no fallback yet. Pass `--manifest` with an
+  existing manifest to extend it.
+- `brownout.config.yaml` is the gateway config with comments kept. It adds the callback, turns on
+  `fail_closed_budget_enforcement`, sets `budget_exceeded_status_code: 429` and derives
+  `coordination_redis` from a Redis cache if there is one. Alerting stays as it was, so LiteLLM's
+  own budget alerts keep firing at 85% and 95% next to brownout's tiers.
+
+### OpenRouter prices
+
+Every OpenRouter model shows up without a price, because LiteLLM removed OpenRouter's prices from
+its cost map on 2026-10-09. Without a configured price, LiteLLM records $0 for OpenRouter embeddings
+and for non-streamed `/v1/responses` calls, so that spend never counts toward a budget. This command
+reads OpenRouter's public price list and prints the two lines `init` asks for. Replace
+`anthropic/claude-haiku-4.5` with the part of your model name after `openrouter/`.
+
+```bash
+{ curl -s https://openrouter.ai/api/v1/models; curl -s https://openrouter.ai/api/v1/embeddings/models; } \
+  | jq -sr --arg m anthropic/claude-haiku-4.5 '[.[].data[] | select(.id == $m)][0]
+      | "input_cost_per_token: \(.pricing.prompt)\noutput_cost_per_token: \(.pricing.completion)"'
+```
 
 ## Gateway config
 
@@ -301,3 +335,24 @@ event carry the outcome, and a `brownout_fallback_rejected` event names the rout
 the rejection on its own claim per route and rejection per window. A check that raises anything
 other than LiteLLM's `ProxyException` is a platform fault, so the plugin serves the primary and
 raises an `entitlement_check_unavailable` incident alongside the rejection event.
+
+## Data classes
+
+Brownout can also refuse a fallback cleared for less sensitive data than its route, such as a public
+provider standing in for a private deployment. The check runs once the manifest lists data classes,
+least restricted first.
+
+```yaml
+data_class_order: [internal, customer_pii]
+```
+
+Every deployment of a route with a fallback, and of that fallback, then needs a
+`model_info.data_class` from the list, and the fallback's class must be at least as restricted as
+the route's. `check` names each deployment that lacks one. A model added in the admin UI takes its
+class through LiteLLM's model update.
+
+```bash
+curl -sSf -X PATCH "http://localhost:4000/model/<MODEL ID>/update" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"model_info": {"data_class": "internal"}}'
+```

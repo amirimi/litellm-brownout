@@ -92,33 +92,4 @@ read from the LiteLLM 1.101.0 source that the links cite.
 
 ## Known limitations
 
-Two pieces of work remain.
-
-- A request LiteLLM refuses at its budget ceiling carries no `x-brownout-*` header. LiteLLM refuses
-  it during authentication, before the plugin's pre-call hook writes the request's facts, so the
-  signal for that request lives in the body of LiteLLM's budget refusal. A response middleware seam
-  would close this.
-- The end-to-end test is serial, so concurrent admission near a threshold is argued in the unit
-  suite and has yet to be driven through a live gateway.
-
-A deployment inherits these limits as the plugin stands. The [assumptions table](enforcement.md#assumptions)
-lists the ones a rule enforces.
-
-| Limit | What it means for a deployment |
-|---|---|
-| Request compatibility between a route and its fallback goes unchecked | Context capacity, tools, structured output and modalities can differ. With `drop_params: true`, as in the lab config, a parameter the fallback does not support may be dropped silently. Check each fallback against the workload before it carries real traffic |
-| The counter resets after the window does | LiteLLM's reset job zeroes the counter every 597 to 605 seconds by default, and later if the job is delayed. Until it runs, the previous window's spend can degrade requests and consume the new window's claims. A team that ends a window above a tier therefore gets false announcements at the next boundary, and none when it really crosses that tier later in the window. Closing this needs the team's persisted `budget_reset_at` |
-| Router fallbacks never apply to governed model calls | The plugin empties every fallback list and sets `disable_fallbacks` on each call that names a model, so a gateway, key or team that relies on cross-group fallbacks for outage resilience loses them. Failover between deployments of one route by `order` and cooldown still works |
-| A fallback that errors fails the request | The caller receives the provider's error, and nothing retries the primary. When a large team crosses `degrade_at`, all its traffic for that route moves to the fallback at once, so the provider quota behind the fallback has to absorb the jump |
-| Losing Redis keys repeats announcements | A flush, or an eviction policy such as `volatile-lru` that evicts keys with a TTL first, removes the plugin's claims, and every transition in the window is announced again |
-| A LiteLLM release that renames a private helper stops startup | The bridge imports three private helpers when LiteLLM loads the callback, so a rename fails the import and the gateway does not start. Pin the image tag and upgrade only to a release the `litellm matrix` workflow has passed |
-| Routing can alternate near a threshold under concurrency | Each decision reads a counter that includes the worst-case holds of in-flight requests, which settle lower. Near `degrade_at`, primary and degraded responses can interleave until settled spend passes the threshold |
-| Reset times that daylight saving skips or repeats are unsupported | A `budget_reset_time` that does not occur exactly once on a reset date, such as 02:30 or 01:30 in a US zone, makes LiteLLM's own schedule move early or backward on the transition day |
-| Only the budget amount is re-checked per request | The authenticated object carries `team_max_budget` and no duration or reset instant ([`proxy/_types.py:2879`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/_types.py#L2879)), so a drifted window is caught where the team is rendered |
-| Other owners' LiteLLM budgets are not modelled | A user, organisation, end-user or tag budget, or a stacked team `budget_limits` window, can refuse a request before any tier fires. The authenticated object exposes the user, organisation and end-user budgets per request, and they stay unchecked because refusing them would break gateways that use them for other governance. Team `budget_limits` and tag budgets are not exposed per request |
-| Entitlement reads the direct key and team model lists | A target reachable only through an access group, a team alias, or project or member scope reads as unselectable, so the primary is served. Those scopes need LiteLLM's full resolved-model path |
-| Data classes are compared as an ordering | The whole rule for two classes. Provider, region, retention, purpose and audit requirement can each be more restrictive without the combination being permitted, and a production deployment needs a matrix over those dimensions |
-| Money is a `float` | It matches the counter LiteLLM increments with `INCRBYFLOAT`. Nothing here is the system of record for spend |
-| The reservation is sized on the requested route, never the served one | Reservation runs at authentication and the rewrite runs after it, so a degraded request still needs the primary's worst case to fit the headroom. Admission therefore stops at the envelope minus the requested route's worst case, and a degrade threshold above that ratio never fires. Keep `max_tokens` small relative to the envelope, as the lab does |
-| A request LiteLLM cannot estimate places no hold | `reserve_budget_for_request` returns before reserving when the worst-case estimate is `None` ([`budget_reservation.py:236-237`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L236-L237)). Rule `model-priced` refuses a chat request for a model LiteLLM cannot price. Non-chat call types pass through the plugin untouched, so an embeddings, audio or image route the estimate cannot price is admitted on LiteLLM's read alone |
-| The request rules cost well under a millisecond | The pre-call hook reads each deployment's billed price through `Router.get_deployment_model_info` and checks the name against `Router.model_list`, at about 0.01 ms on the lab config, and the fallback group too when a downgrade is wanted |
+Every known limit and its cause, and the work that remains, are in [Limits](limits.md).

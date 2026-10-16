@@ -293,7 +293,7 @@ CONFIG_ROWS: Final = (
                 "check may price a model differently from the gateway",
                 Documented(
                     unseen_because="each process loads its own copy when LiteLLM starts",
-                    docs="README.md",
+                    docs="docs/limits.md",
                     phrase="`check --gateway` reads the running gateway's prices instead",
                 ),
             ),
