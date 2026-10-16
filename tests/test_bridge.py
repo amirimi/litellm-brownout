@@ -286,6 +286,7 @@ def test_calls_without_a_model_are_tools_files_stores_containers_and_records():
         "asend_message",
         "avideo_remix",
         "adecisions",
+        "asystemone",
         "completion",
         "a-call-type-litellm-adds-later",
     ],
@@ -466,7 +467,7 @@ def test_a_release_below_the_floor_refuses_to_start(release):
         bridge.require_supported_litellm(release)
 
 
-@pytest.mark.parametrize("release", ["1.101.6", "1.102.4", "1.103.4", "1.104.2"])
+@pytest.mark.parametrize("release", ["1.101.6", "1.102.4", "1.103.4", "1.104.3"])
 def test_a_tested_release_runs_quietly(release, caplog):
     bridge.require_supported_litellm(release)
 

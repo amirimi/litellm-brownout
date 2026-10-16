@@ -35,7 +35,7 @@ LITELLM_ROWS: Final = (
         cites=(
             "litellm/proxy/common_request_processing.py:1899@1.101.6",
             "litellm/proxy/litellm_pre_call_utils.py:2558@1.101.6",
-            "litellm/proxy/common_request_processing.py:2058@1.104.2",
+            "litellm/proxy/common_request_processing.py:2060@1.104.3",
         ),
         forms=(
             Form(
@@ -71,7 +71,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/proxy/common_request_processing.py:2124@1.104.2",),
+        cites=("litellm/proxy/common_request_processing.py:2126@1.104.3",),
         forms=(
             Form(
                 "an alias",
@@ -114,7 +114,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/router.py:11702@1.104.2",),
+        cites=("litellm/router.py:11711@1.104.3",),
         forms=(
             Form(
                 "a request for a routing group's name",
@@ -291,7 +291,7 @@ LITELLM_ROWS: Final = (
         reads=(),
         cites=(
             "litellm/proxy/auth/auth_checks.py:834@1.101.6",
-            "litellm/proxy/auth/auth_checks.py:932@1.104.2",
+            "litellm/proxy/auth/auth_checks.py:932@1.104.3",
         ),
         forms=(
             Form(

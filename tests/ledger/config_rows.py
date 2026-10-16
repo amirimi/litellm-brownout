@@ -55,7 +55,7 @@ CONFIG_ROWS: Final = (
         reads=("key:include",),
         cites=(
             "litellm/proxy/proxy_server.py:4645@1.101.6",
-            "litellm/proxy/common_utils/config_includes.py:117@1.104.2",
+            "litellm/proxy/common_utils/config_includes.py:117@1.104.3",
         ),
         forms=(
             Form(

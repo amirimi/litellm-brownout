@@ -116,7 +116,7 @@ bootstraps it first.
 
 <!-- adoption: install -->
 ```dockerfile
-FROM docker.litellm.ai/berriai/litellm:v1.104.2
+FROM docker.litellm.ai/berriai/litellm:v1.104.3
 RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
 ```
 

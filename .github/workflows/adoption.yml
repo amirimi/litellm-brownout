@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: ["v1.101.6", "v1.104.2"]
+        release: ["v1.101.6", "v1.104.3"]
         scenario:
           - a-config-models
           - a2-no-model-store

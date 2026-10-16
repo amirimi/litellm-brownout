@@ -11,7 +11,7 @@ validates the manifest when it loads and runs the request rules on every governe
 ```yaml
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:v1.104.2
+    image: docker.litellm.ai/berriai/litellm:v1.104.3
     environment:
       PYTHONPATH: /app/plugins
       BROWNOUT_MANIFEST: /app/config/manifest.yaml
