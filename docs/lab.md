@@ -22,7 +22,7 @@ the lab is reachable only from the machine it runs on and leaves the default Red
 the credentials and the bindings before exposing it anywhere else.
 
 ```bash
-git clone https://github.com/amk9978/litellm-brownout.git && cd litellm-brownout
+git clone https://github.com/amirimi/litellm-brownout.git && cd litellm-brownout
 cp .env.example .env
 docker compose up -d --wait
 set -a; source .env; set +a

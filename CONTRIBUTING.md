@@ -138,7 +138,7 @@ The `release` workflow builds the sdist and the wheel on a `v*` tag, stops when 
 only job in the repository with `id-token: write`, and no PyPI token is stored anywhere.
 
 1. Once, before the first release, the owner sets up four things.
-   - On pypi.org, a pending trusted publisher for `amk9978/litellm-brownout`, workflow
+   - On pypi.org, a pending trusted publisher for `amirimi/litellm-brownout`, workflow
      `release.yml`, environment `pypi`.
    - In the repository settings, a `pypi` environment that requires the owner's review, so no
      workflow publishes without an approval.

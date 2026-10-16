@@ -9,13 +9,13 @@ passes it.
 
 <p align="center">
   <a href="https://pypi.org/project/litellm-brownout/"><img src="https://img.shields.io/pypi/v/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="PyPI version" /></a>
-  <a href="https://github.com/amk9978/litellm-brownout/blob/main/LICENSE"><img src="https://img.shields.io/github/license/amk9978/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="License" /></a>
+  <a href="https://github.com/amirimi/litellm-brownout/blob/main/LICENSE"><img src="https://img.shields.io/github/license/amirimi/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="License" /></a>
 </p>
 
 </div>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/amk9978/litellm-brownout/main/.github/assets/litellm-brownout.gif" alt="Team-a's weekly budget fills toward $500. The gateway log announces the 75% and 90% tiers, then chat-qa switches to its fallback with x-brownout headers while code-review keeps its primary.">
+  <img src="https://raw.githubusercontent.com/amirimi/litellm-brownout/main/.github/assets/litellm-brownout.gif" alt="Team-a's weekly budget fills toward $500. The gateway log announces the 75% and 90% tiers, then chat-qa switches to its fallback with x-brownout headers while code-review keeps its primary.">
 </p>
 
 Take a team with $500 a week. Its Q&A route falls back to a smaller model at 90%, and its code review
@@ -225,15 +225,15 @@ agents reviewing brownout.
 [MIT][license]
 
 [litellm-budget-fallbacks]: https://docs.litellm.ai/docs/proxy/budget_fallbacks
-[openrouter-prices]: https://github.com/amk9978/litellm-brownout/blob/main/docs/configuration.md#openrouter-prices
-[agents]: https://github.com/amk9978/litellm-brownout/blob/main/docs/claude-code-and-codex.md
-[data-classes]: https://github.com/amk9978/litellm-brownout/blob/main/docs/configuration.md#data-classes
-[lab]: https://github.com/amk9978/litellm-brownout/blob/main/docs/lab.md
-[limits]: https://github.com/amk9978/litellm-brownout/blob/main/docs/limits.md
-[issues]: https://github.com/amk9978/litellm-brownout/issues
-[configuration]: https://github.com/amk9978/litellm-brownout/blob/main/docs/configuration.md
-[enforcement]: https://github.com/amk9978/litellm-brownout/blob/main/docs/enforcement.md
-[design]: https://github.com/amk9978/litellm-brownout/blob/main/docs/design.md
-[security]: https://github.com/amk9978/litellm-brownout/blob/main/SECURITY.md
-[contributing]: https://github.com/amk9978/litellm-brownout/blob/main/CONTRIBUTING.md
-[license]: https://github.com/amk9978/litellm-brownout/blob/main/LICENSE
+[openrouter-prices]: https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md#openrouter-prices
+[agents]: https://github.com/amirimi/litellm-brownout/blob/main/docs/claude-code-and-codex.md
+[data-classes]: https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md#data-classes
+[lab]: https://github.com/amirimi/litellm-brownout/blob/main/docs/lab.md
+[limits]: https://github.com/amirimi/litellm-brownout/blob/main/docs/limits.md
+[issues]: https://github.com/amirimi/litellm-brownout/issues
+[configuration]: https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md
+[enforcement]: https://github.com/amirimi/litellm-brownout/blob/main/docs/enforcement.md
+[design]: https://github.com/amirimi/litellm-brownout/blob/main/docs/design.md
+[security]: https://github.com/amirimi/litellm-brownout/blob/main/SECURITY.md
+[contributing]: https://github.com/amirimi/litellm-brownout/blob/main/CONTRIBUTING.md
+[license]: https://github.com/amirimi/litellm-brownout/blob/main/LICENSE
