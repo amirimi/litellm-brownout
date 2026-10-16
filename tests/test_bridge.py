@@ -241,6 +241,7 @@ def test_calls_without_a_model_are_tools_files_stores_containers_and_records():
         "acancel_responses",
         "alist_input_items",
         "acreate_file",
+        "alist_fine_tuning_jobs",
         "afile_content",
         "afile_retrieve",
         "afile_delete",

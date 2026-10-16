@@ -103,6 +103,11 @@ async def read_response(response_id: str) -> Response:
     return JSONResponse(found)
 
 
+@app.get("/v1/files")
+async def list_files() -> dict[str, Any]:
+    return {"object": "list", "data": [], "has_more": False}
+
+
 @app.get("/requests")
 async def requests(prompt: str = "") -> list[str]:
     return [entry["model"] for entry in seen if prompt and prompt in entry["prompt"]]

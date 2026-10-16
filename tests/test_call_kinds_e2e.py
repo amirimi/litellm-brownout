@@ -296,6 +296,19 @@ def test_a_stored_response_is_read_back(past_tier: str) -> None:
 
 
 @requires_stack
+def test_a_governed_team_lists_its_files(kinds_key: str) -> None:
+    listed = httpx.get(
+        f"{GATEWAY}/v1/files",
+        params={"target_model_names": TOOLS_PRIMARY},
+        headers={"Authorization": f"Bearer {kinds_key}"},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["object"] == "list"
+
+
+@requires_stack
 def test_a_call_type_outside_the_allow_list_is_refused(kinds_key: str) -> None:
     answer = _post(
         kinds_key,
