@@ -51,7 +51,7 @@ from .rules import (
 logger: Final = logging.getLogger("brownout")
 
 SUPPORTED_FLOOR: Final = (1, 101, 6)
-TESTED_CEILING: Final = (1, 104)
+TESTED_CEILING: Final = (1, 105)
 
 SPEND_LOGS_METADATA_KEY: Final = "spend_logs_metadata"
 ENVIRONMENT_KEY: Final = "supported_environments"
@@ -229,6 +229,8 @@ class LiteLLMPermissions:
         self._router: Final = router
 
     def check(self, caller: Caller, model: str) -> Permission:
+        if caller.agent_id is not None:
+            return Permission.AGENT_KEY
         answers: Final = (
             self._scope(caller, model, caller.key_models, "key"),
             self._scope(caller, model, caller.team_models, "team"),
@@ -446,6 +448,7 @@ def parse_caller(auth: UserAPIKeyAuth) -> Caller:
         team_max_budget = float(auth.team_max_budget)
     return Caller(
         team_id=auth.team_id,
+        agent_id=auth.agent_id,
         key_models=tuple(_resolve_key_models_for_auth_check(auth)),
         team_models=tuple(auth.team_models or []),
         key_budgets=_key_budgets(auth),

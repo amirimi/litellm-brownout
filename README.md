@@ -58,7 +58,7 @@ checks each one and prints the fix.
 - **Fail-closed budgets and Redis:** `fail_closed_budget_enforcement` is on and `coordination_redis`
   is configured. LiteLLM keeps each team's spend counter in that Redis, and brownout records its
   announcements there.
-- **LiteLLM 1.101.6 to 1.104, pinned by image tag:** brownout imports three private LiteLLM helpers,
+- **LiteLLM 1.101.6 to 1.105, pinned by image tag:** brownout imports three private LiteLLM helpers,
   so upgrade only to a release the weekly `litellm matrix` workflow has passed.
 
 If your gateway has no Redis, add one before running `init` and give the gateway the same
@@ -116,7 +116,7 @@ bootstraps it first.
 
 <!-- adoption: install -->
 ```dockerfile
-FROM docker.litellm.ai/berriai/litellm:v1.104.3
+FROM docker.litellm.ai/berriai/litellm:v1.105.1
 RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
 ```
 

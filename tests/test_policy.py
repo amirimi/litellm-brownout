@@ -111,6 +111,15 @@ def test_an_admitted_route_is_served_as_requested(team, degrading_route):
                 Rejection.ENTITLEMENT_CHECK_UNAVAILABLE,
             ),
         ),
+        (
+            Permission.AGENT_KEY,
+            Rejected(
+                "budget-lab-primary",
+                "budget-lab-degraded",
+                90,
+                Rejection.AGENT_KEY,
+            ),
+        ),
     ],
 )
 def test_a_wanted_downgrade_resolves_on_the_permission_answer(

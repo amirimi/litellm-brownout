@@ -11,7 +11,7 @@ validates the manifest when it loads and runs the request rules on every governe
 ```yaml
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:v1.104.3
+    image: docker.litellm.ai/berriai/litellm:v1.105.1
     environment:
       PYTHONPATH: /app/plugins
       BROWNOUT_MANIFEST: /app/config/manifest.yaml
@@ -25,7 +25,7 @@ The plugin imports `pyyaml`, `fastapi` and `litellm`, all present in the image. 
 its LiteLLM imports are private helpers (`_can_object_call_model`,
 `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), and all of
 them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.101.6,
-and it logs a warning on a release newer than the tested 1.104. CI runs both this mount and the
+and it logs a warning on a release newer than the tested 1.105. CI runs both this mount and the
 README's wheel install.
 
 | Variable | Default | Purpose |

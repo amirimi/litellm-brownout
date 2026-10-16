@@ -36,6 +36,8 @@ LITELLM_ROWS: Final = (
             "litellm/proxy/common_request_processing.py:1899@1.101.6",
             "litellm/proxy/litellm_pre_call_utils.py:2558@1.101.6",
             "litellm/proxy/common_request_processing.py:2060@1.104.3",
+            "litellm/proxy/common_request_processing.py:2076@1.105.1",
+            "litellm/proxy/common_utils/http_parsing_utils.py:61@1.105.1",
         ),
         forms=(
             Form(
@@ -44,7 +46,8 @@ LITELLM_ROWS: Final = (
                 "brownout sees the model LiteLLM rewrote the request to",
                 Supported(
                     (
-                        f"{SEAMS}test_seam_server_and_key_model_rewrites_apply_before_the_pre_call_hook",
+                        f"{SEAMS}test_seam_the_server_default_model_applies_before_the_pre_call_hook",
+                        f"{SEAMS}test_seam_server_and_key_aliases_apply_before_the_pre_call_hook",
                         f"{SEAMS}test_seam_team_and_key_aliases_apply_before_the_pre_call_hook",
                     )
                 ),

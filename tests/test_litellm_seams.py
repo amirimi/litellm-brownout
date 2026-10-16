@@ -26,6 +26,8 @@ from litellm.types.utils import CallTypes
 from brownout import bridge
 
 LITELLM_ROOT: Final = Path(importlib.util.find_spec("litellm").origin).parent
+SERVER_DEFAULT_INLINE: Final = 'general_settings.get("completion_model", None)'
+SERVER_DEFAULT_RESOLVER: Final = 'self.data["model"] = resolve_inference_model('
 
 
 def _function_in_source(
@@ -310,20 +312,44 @@ def _pre_call_source() -> str:
     )
 
 
+def _before_the_pre_call_hook() -> str:
+    source = _pre_call_source()
+    return source[: source.index("self.data = await proxy_logging_obj.pre_call_hook(")]
+
+
+def _resolver_puts_the_server_default_first() -> bool:
+    resolver = _function_in_source(
+        "proxy/common_utils/http_parsing_utils.py", "resolve_inference_model"
+    )
+    completion = [
+        ast.unparse(statement)
+        for node in ast.walk(resolver)
+        if isinstance(node, ast.match_case)
+        and ast.unparse(node.pattern) == "'completion'"
+        for statement in node.body
+    ]
+    return completion == [
+        "return settings.get('completion_model') or cli_model or endpoint_model or body_model"
+    ]
+
+
+def test_seam_the_server_default_model_applies_before_the_pre_call_hook():
+    before = _before_the_pre_call_hook()
+
+    assert SERVER_DEFAULT_INLINE in before or (
+        SERVER_DEFAULT_RESOLVER in before and _resolver_puts_the_server_default_first()
+    )
+
+
 @pytest.mark.parametrize(
     "rewrite",
     [
-        'general_settings.get("completion_model", None)',
         'litellm.model_alias_map[self.data["model"]]',
         'user_api_key_dict.aliases[self.data["model"]]',
     ],
 )
-def test_seam_server_and_key_model_rewrites_apply_before_the_pre_call_hook(rewrite):
-    source = _pre_call_source()
-
-    assert source.index(rewrite) < source.index(
-        "self.data = await proxy_logging_obj.pre_call_hook("
-    )
+def test_seam_server_and_key_aliases_apply_before_the_pre_call_hook(rewrite):
+    assert rewrite in _before_the_pre_call_hook()
 
 
 def test_seam_key_and_team_router_aliases_apply_before_the_pre_call_hook():

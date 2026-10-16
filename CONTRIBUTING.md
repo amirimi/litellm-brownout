@@ -80,7 +80,7 @@ wheel for the PyPI package, and the LiteLLM image tag. Every step's command and 
 The README marks the blocks the runner runs with `<!-- adoption: name -->` comments, so a marker
 moves with its block. A scenario directory holds `scenario.yaml`, the gateway's `config.yaml`, and
 optionally a `compose.yml` overlay and any file the config includes. The `adoption` workflow runs
-every scenario on 1.101.6 and 1.104.3 weekly and on pull requests that touch `init`, `check`, the
+every scenario on 1.101.6 and 1.105.1 weekly and on pull requests that touch `init`, `check`, the
 README or the docs. It also runs `a-config-models` and `b-ui-models` on every supported release line,
 because those two run the README's commands against LiteLLM's API.
 
@@ -119,9 +119,9 @@ follow the release under test. To run one release line by hand, install it into 
 environment and point the lab at the matching image.
 
 ```bash
-uv pip install --no-config "litellm[proxy]==1.104.3"
+uv pip install --no-config "litellm[proxy]==1.105.1"
 uv run --no-sync pytest -m "not e2e"
-LITELLM_TAG=v1.104.3 docker compose up -d --wait
+LITELLM_TAG=v1.105.1 docker compose up -d --wait
 LAB_REQUIRE_STACK=1 uv run --no-sync pytest -m e2e
 ```
 

@@ -69,7 +69,7 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | A fallback serves every endpoint its route's callers use | LiteLLM sends `/v1/messages` to an OpenAI-style deployment as a Responses API call, so a fallback on a server without that API fails with the provider's error | Documented, not checked |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade. A request without `max_tokens` reserves the model's whole output | Documented, not checked |
-| LiteLLM is 1.101.6 or newer | The gateway refuses to start. It warns past the tested 1.104 | `supported-litellm` |
+| LiteLLM is 1.101.6 or newer | The gateway refuses to start. It warns past the tested 1.105 | `supported-litellm` |
 
 ## The spend figure a tier compares
 
@@ -271,8 +271,9 @@ A tier event's `scope` is `team` for a team tier and `route` for a route tier, a
 serves its fallback in a window, on its own claim, so a tier that another route crossed first
 cannot hide it.
 
-A rejection is `outside_caller_allowlist`, `entitlement_check_unavailable` or
-`fallback_rule_violated`. Incident reasons are
+A rejection is `outside_caller_allowlist`, `entitlement_check_unavailable`,
+`fallback_rule_violated` or `agent_key`. Brownout never downgrades a request from an agent key, and the
+announcement for that request carries `agent_key`. Incident reasons are
 `team_not_in_manifest`, `key_has_own_budget`, `model_not_a_group`, `unpriced_model`, `budget_ceiling_drift`,
 `gateway_rule_violated`, `spend_counter_unreadable`, `call_type_not_governed` and
 `entitlement_check_unavailable`, and each

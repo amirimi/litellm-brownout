@@ -1472,7 +1472,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
-    { name = "litellm", extras = ["proxy"], specifier = ">=1.101.6,<1.105" },
+    { name = "litellm", extras = ["proxy"], specifier = ">=1.101.6,<1.106" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
 ]

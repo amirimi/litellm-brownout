@@ -134,6 +134,14 @@ def test_a_caller_carries_its_key_budget_and_resolved_models(team):
     assert caller.key_budgets == ("max_budget",)
     assert caller.key_models == ("budget-lab-primary",)
     assert caller.own_hold_usd == 0.0
+    assert caller.agent_id is None
+
+
+def test_a_caller_carries_the_agent_its_key_belongs_to(team):
+    auth = make_auth(team)
+    auth.agent_id = "lab-agent"
+
+    assert bridge.parse_caller(auth).agent_id == "lab-agent"
 
 
 SERVED_RESPONSE: Final = object()
@@ -467,7 +475,9 @@ def test_a_release_below_the_floor_refuses_to_start(release):
         bridge.require_supported_litellm(release)
 
 
-@pytest.mark.parametrize("release", ["1.101.6", "1.102.4", "1.103.4", "1.104.3"])
+@pytest.mark.parametrize(
+    "release", ["1.101.6", "1.102.4", "1.103.4", "1.104.3", "1.105.1"]
+)
 def test_a_tested_release_runs_quietly(release, caplog):
     bridge.require_supported_litellm(release)
 
@@ -475,7 +485,7 @@ def test_a_tested_release_runs_quietly(release, caplog):
 
 
 def test_a_release_past_the_ceiling_runs_with_a_warning(caplog):
-    bridge.require_supported_litellm("1.105.0rc1")
+    bridge.require_supported_litellm("1.106.0rc1")
 
     assert "newer than the newest release brownout was tested on" in caplog.text
 
