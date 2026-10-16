@@ -278,7 +278,7 @@ LITELLM_ROWS: Final = (
                 "check and init read the file they are given",
                 Documented(
                     unseen_because="nothing in the config names where the gateway loaded it from",
-                    docs="README.md",
+                    docs="docs/limits.md",
                     phrase="`check` and `init` read the config file you pass them",
                 ),
             ),
