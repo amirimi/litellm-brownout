@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/amk9978/litellm-brownout"
-Changelog = "https://github.com/amk9978/litellm-brownout/blob/main/CHANGELOG.md"
-Issues = "https://github.com/amk9978/litellm-brownout/issues"
+Repository = "https://github.com/amirimi/litellm-brownout"
+Changelog = "https://github.com/amirimi/litellm-brownout/blob/main/CHANGELOG.md"
+Issues = "https://github.com/amirimi/litellm-brownout/issues"
 
 [project.scripts]
 brownout = "brownout.cli:main"

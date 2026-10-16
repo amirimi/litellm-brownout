@@ -28,7 +28,7 @@ Every file on PyPI carries an attestation that ties it to the workflow run in th
 built it.
 
 ```bash
-uvx pypi-attestations verify pypi --repository https://github.com/amk9978/litellm-brownout \
+uvx pypi-attestations verify pypi --repository https://github.com/amirimi/litellm-brownout \
   pypi:litellm_brownout-0.1.0-py3-none-any.whl
 ```
 
