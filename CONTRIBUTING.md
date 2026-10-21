@@ -15,7 +15,7 @@ uv sync
 uv run pytest -m "not e2e"
 ```
 
-The unit and seam suites hold 588 tests and need no Redis or gateway. A few seams skip on each
+The unit and seam suites hold 743 tests and need no Redis or gateway. A few seams skip on each
 release, because the LiteLLM behaviours they pin begin or end at a release. `decide` and `resolve` are
 pure functions tested with plain values. Every outside dependency of the pipeline sits behind a
 protocol in `src/brownout/ports.py`, so the gateway tests inject fakes, and the permission and
@@ -27,7 +27,7 @@ plugin depends on, such as the signature of a private helper, the shape of a res
 guardrails merging before the pre-call hook. A LiteLLM release that changes one of them fails with
 that behaviour's name.
 
-The end-to-end sequence holds 15 tests and runs on mock routes. Six more tests in
+The end-to-end sequence holds 15 tests and runs on mock routes. Seven more tests in
 `tests/test_printed_commands_e2e.py` run the commands `init` prints against the gateway and read back
 the change. It spends no provider money and
 still exercises real reservations, a real Redis counter and the native ceiling. It reads the
@@ -40,6 +40,9 @@ docker compose up -d --wait
 set -a && source .env && set +a
 uv run pytest -m e2e
 ```
+
+The lab mounts `src/brownout` into the stock LiteLLM image with `PYTHONPATH=/app/plugins`, so a code
+change needs only `docker compose restart litellm`.
 
 `tests/test_call_kinds_e2e.py` drives a second lab team, `kinds-lab`, through each call kind. It
 sends every text endpoint past the downgrade tier, then embeddings, a direct MCP tool call, an MCP

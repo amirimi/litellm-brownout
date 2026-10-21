@@ -1,40 +1,24 @@
 # Configuration
 
-A governed gateway needs four pieces in place before its first request. The `brownout` package is
-mounted into the stock LiteLLM image, the gateway config names the handler, the manifest describes
-each team, and each team exists in LiteLLM with a `max_budget` equal to its manifest envelope.
-`brownout check` runs the file rules over the gateway config and the manifest in CI. The handler
-validates the manifest when it loads and runs the request rules on every governed request.
+A governed gateway needs the package in its image, the handler in its config, a manifest entry for
+each team, and each team's LiteLLM `max_budget` equal to its manifest envelope. `brownout check`
+runs the file rules in CI, and the handler runs the request rules on every governed request.
 
-## Mount the package
+## Install
 
-```yaml
-services:
-  litellm:
-    image: docker.litellm.ai/berriai/litellm:v1.106.1
-    environment:
-      PYTHONPATH: /app/plugins
-      BROWNOUT_MANIFEST: /app/config/manifest.yaml
-    volumes:
-      - ./src/brownout:/app/plugins/brownout:ro
-      - ./config:/app/config:ro
-    command: ["--config", "/app/config/config.yaml", "--port", "4000"]
+```dockerfile
+FROM docker.litellm.ai/berriai/litellm:v1.106.1
+RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
 ```
-
-The plugin imports `pyyaml`, `fastapi` and `litellm`, all present in the image. Three of
-its LiteLLM imports are private helpers (`_can_object_call_model`,
-`_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), and all of
-them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.101.6,
-and it logs a warning on a release newer than the tested 1.106. CI runs both this mount and the
-README's wheel install.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BROWNOUT_MANIFEST` | `config/manifest.yaml` | Team budgets, tiers and route policies |
+| `BROWNOUT_MANIFEST` | `config/manifest.yaml` | The manifest's path in the container |
 
-The plugin has no delivery settings. Request facts reach whatever logging integrations the gateway
-already runs, and announcements go to the gateway log, as
-[the enforcement reference](enforcement.md#request-facts-and-announcements) describes.
+The handler refuses to start below LiteLLM 1.101.6 and warns on a release newer than the tested
+1.106. Request facts reach the logging integrations the gateway already runs, and announcements go
+to the gateway log, as [the enforcement reference](enforcement.md#request-facts-and-announcements)
+describes.
 
 ## Prepare with `brownout init`
 
@@ -56,40 +40,12 @@ brownout init --gateway http://localhost:4000 --gateway-config config.yaml --wri
 | `--config-out` | `brownout.config.yaml` | Where the prepared gateway config is written, comments and key order kept |
 | `--write` | off | Write both files. Without it `init` prints the changes and the findings and writes nothing |
 
-`read -rs` keeps the key off the screen and out of shell history, and it shows no prompt. `init`
-reads its key only from `BROWNOUT_INIT_KEY`, which keeps the key off `init`'s command line and out
-of the process list. A key for a `proxy_admin_viewer` user is enough. On 1.95.1 and 1.104.2 such a key reads all three
-endpoints, sees provider keys in `/model/info` as null, and gets a 403 from any write. The commands
-`init` prints use `$LITELLM_MASTER_KEY`, so the master key stays in the operator's shell and out of
-`init`'s process. LiteLLM loads the nearest `.env` above its own install directory when `init`
-imports it, so a `.env` there that holds the master key reaches `init`'s process too. `init` finds its
-own key in `/key/list` and raises no team finding for it. A budget on that key is still a finding,
-and the admin-keys notice names the key only when it has no team.
+A `proxy_admin_viewer` key is enough, and `init` reads it only from `BROWNOUT_INIT_KEY`. The
+commands `init` prints use `$LITELLM_MASTER_KEY`, so the master key stays in your shell. `init`
+never prints a value from the gateway config and never writes over an existing file.
 
-The README's prepare block makes that key from the master key. Its first line reads the master key
-without a prompt and keeps it off the screen, out of shell history and unexported, so `uvx` and the
-packages it installs never receive it from the shell. Run the block from a shell that exports no
-other secret, such as a provider key. If `curl` fails, `BROWNOUT_INIT_KEY` stays unset and `init`
-refuses to start. A second run of the block fails at `curl`, because the `brownout-init` user
-already exists. Deleting that user deletes its key, and the same delete recovers a key lost with a
-closed shell before the block runs again.
-
-`init` refuses to write over an existing file or over one of its inputs. A config with a duplicate key stops
-it, because LiteLLM's loader silently keeps the last value. Settings saved through LiteLLM's admin UI
-live in its database, so the changes `init` lists cover only the file.
-
-`init` never prints a value it read from the gateway config, because a config can hold secrets
-inline. It lists each config change by its setting name, shows only the values it sets itself, and
-reports an unreadable config by line and column. The prepared config gets the same file permissions
-as the original. The manifest, which holds no secrets, prints as a diff.
-
-Each finding prints as `rule-id<TAB>subject<TAB>detail`, followed by the command or the YAML lines
-that resolve it. A value only the operator can choose, such as a team's budget, is left as a
-placeholder in angle brackets, and LiteLLM refuses the command until it is filled in. A team id's
-placeholder sits inside its JSON quotes, as in `"team_id": "<YOUR TEAM ID>"`, because LiteLLM
-refuses a team that does not exist. A duration's placeholder sits inside its quotes too, because
-LiteLLM refuses a duration it cannot parse. A budget's placeholder stands bare, because a budget is
-a number.
+Each finding prints as `rule-id<TAB>subject<TAB>detail`, followed by the command or YAML lines that
+fix it. A value only you can choose, such as a team's budget, is a placeholder in angle brackets.
 
 | Exit code | Meaning |
 |---|---|
@@ -105,20 +61,17 @@ callback refuses nothing `init` did not list.
 `--write` leaves the gateway's config as it was and creates two files.
 
 - `brownout.yaml` is the manifest. It has one entry per LiteLLM team with a budget, copies that
-  budget and window, warns at 75% and 90%, and declares no fallback yet. Pass `--manifest` with an
-  existing manifest to extend it.
+  budget and window, warns at 75% and 90%, and declares no fallback yet. Pass `--manifest` to extend
+  an existing one.
 - `brownout.config.yaml` is the gateway config with comments kept. It adds the callback, turns on
   `fail_closed_budget_enforcement`, sets `budget_exceeded_status_code: 429` and derives
-  `coordination_redis` from a Redis cache if there is one. Alerting stays as it was, so LiteLLM's
-  own budget alerts keep firing at 85% and 95% next to brownout's tiers.
+  `coordination_redis` from a Redis cache if there is one.
 
 ### OpenRouter prices
 
-Every OpenRouter model shows up without a price, because LiteLLM removed OpenRouter's prices from
-its cost map on 2026-10-09. Without a configured price, LiteLLM records $0 for OpenRouter embeddings
-and for non-streamed `/v1/responses` calls, so that spend never counts toward a budget. This command
-reads OpenRouter's public price list and prints the two lines `init` asks for. Replace
-`anthropic/claude-haiku-4.5` with the part of your model name after `openrouter/`.
+LiteLLM's cost map has no OpenRouter prices since 2026-10-09, so every OpenRouter model needs one in
+the config. This command prints the two lines `init` asks for. Replace `anthropic/claude-haiku-4.5`
+with the part of your model name after `openrouter/`.
 
 ```bash
 { curl -s https://openrouter.ai/api/v1/models; curl -s https://openrouter.ai/api/v1/embeddings/models; } \
@@ -161,44 +114,27 @@ model_list:
       data_class: customer_pii
 ```
 
-`provider-x` stands for a provider prefix LiteLLM recognises. Each key does one job.
+`provider-x` stands for a provider prefix LiteLLM recognises.
 
-| Setting | Why it is there |
+| Setting | What it does for brownout |
 |---|---|
-| `fail_closed_budget_enforcement: true` | Decides the envelope boundary for the whole gateway, read from `general_settings` alone ([`proxy/proxy_server.py:2429`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/proxy_server.py#L2429)). On, a worst case that does not fit the remaining headroom is refused whole at authentication ([`proxy/spend_tracking/budget_reservation.py:141`](https://github.com/BerriAI/litellm/blob/v1.101.0/litellm/proxy/spend_tracking/budget_reservation.py#L141)), and so is a reservation that cannot be written or a spend figure that cannot be verified. Off, LiteLLM shrinks the hold to the headroom and serves the request. Rule `fail-closed-on` requires it |
-| `coordination_redis` | The spend counter LiteLLM increments per team. The plugin's claims reuse the same Redis, so one crossing is one announcement across every replica. Rule `redis-configured` requires it in `brownout check`. A Redis `cache_params` block does not satisfy the rule, because only `coordination_redis` is verified to carry the counter on every supported release. `init` writes `coordination_redis` from a Redis it finds in `cache_params`. A coordination Redis saved from the admin UI lives in the database, where the check cannot see it |
-| `callbacks` | The dotted path to the handler `src/brownout/gateway.py` builds at import |
-| `budget_exceeded_status_code: 429` | Keeps LiteLLM's budget refusal a 429 from 1.104, whose default is a 422 (`litellm/__init__.py:404` in 1.104.2). Releases before 1.104 ignore it and refuse with a 429 anyway. Run on the 1.104.2 lab image |
-| `input_cost_per_token`, `output_cost_per_token` | What LiteLLM reserves against. LiteLLM takes each price from `litellm_params` first and `model_info` second, and prices a deployment without either from its cost map. A model group counts as priced only when every deployment has both prices and one of them is above zero. Rules `route-priced` and `model-priced` refuse any other group |
-| `model_info.data_class` | Read only when the manifest declares `data_class_order`, for a route that declares a fallback and for the fallback. Every deployment of the group then declares the same class from that list. Rules `data-class-declared` and `fallback-data-class` |
+| `fail_closed_budget_enforcement: true` | LiteLLM refuses a request whose worst case does not fit the remaining budget, so spend stops at the envelope. Rule `fail-closed-on` |
+| `coordination_redis` | Holds the team spend counter and brownout's announcement claims, so one crossing is one announcement across replicas. A Redis `cache_params` block alone fails rule `redis-configured`, and `init` writes `coordination_redis` from it |
+| `callbacks` | Loads the handler |
+| `budget_exceeded_status_code: 429` | Keeps LiteLLM's budget refusal a 429 instead of the 422 that 1.104 made the default |
+| `input_cost_per_token`, `output_cost_per_token` | The prices LiteLLM reserves and bills against, in `litellm_params` or `model_info`. Rules `route-priced` and `model-priced` refuse a group with an unpriced deployment |
+| `model_info.data_class` | Read only when the manifest declares `data_class_order`. Rules `data-class-declared` and `fallback-data-class` |
 
-`brownout check` prices each deployment through LiteLLM's router, the function the gateway bills
-with, so a `model_info.base_model` naming a priced model prices a deployment with a custom name. A
-`base_model` written in `litellm_params` prices nothing at check or at request time, because the
-router reads it only from `model_info`. LiteLLM loads its cost map when it starts, fetched or
-bundled, so `check` and the gateway can price a model from different copies. `check --gateway`
-reads the running gateway's own prices for the groups it serves. `check` ignores
-`supported_environments`, so it prices every deployment whatever environment it runs in.
-
-`general_settings.disable_budget_reservation` must not be `true`, because that would remove the hold
-from every budget on the gateway, which rule `reservation-on` refuses. LiteLLM's own alerting may stay
-on, budget alerts included. Its budget alerter fires at a fixed 85% and 95%, next to the tiers the
-manifest declares, and brownout leaves it as configured.
-
-Router fallbacks may stay in the config, and they never apply to governed model calls. On every
-governed request the plugin sets `fallbacks`, `context_window_fallbacks` and
-`content_policy_fallbacks` to empty lists. LiteLLM's router prefers a request's own list to its
-configured one, and it merges key and team `router_settings` only for keys the request does not
-already hold, so gateway, `default_fallbacks`, key, team and caller fallbacks all stay inert.
-Failover between deployments of one model group, by `order` and cooldown, still works.
+`check` prices each deployment the way the gateway bills it, so a `model_info.base_model` naming a
+priced model prices a deployment with a custom name. `disable_budget_reservation` must stay off,
+which rule `reservation-on` checks. Router fallbacks may stay in the config, and brownout disables
+them on governed calls.
 
 ## Create the team
 
-Every team in the manifest needs a LiteLLM team whose `max_budget` equals `envelope_usd` and whose
-`budget_duration` equals the manifest's, with a model list that includes every declared fallback.
-Keys carry no budget of their own, because a key budget would be a second ceiling the manifest
-knows nothing about. `brownout init` prints the request that creates or corrects each team it finds
-missing or drifted. A new team and its key take these two requests.
+Every manifest team needs a LiteLLM team with the same `max_budget` and `budget_duration`, and a
+model list that includes each fallback. Its keys carry no budget. `init` prints the request that
+creates or corrects each team, and a new team and its key take these two.
 
 ```bash
 curl -s localhost:4000/team/new \
@@ -209,10 +145,6 @@ curl -s localhost:4000/key/generate \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
   -d '{"team_id": "team-a", "key_alias": "team-a-app", "max_budget": null, "models": []}'
 ```
-
-The plugin checks the amount and the key budget on every request, and refuses with a 503 and a
-platform incident when either breaks its assumption. The duration is invisible at request time, so
-`brownout init` reports a drifted `budget_duration` as `duration-matches` before deploy.
 
 ## Team manifest
 
@@ -237,36 +169,24 @@ teams:
 | Key | Type | Rule |
 |---|---|---|
 | `data_class_order` | list of distinct strings, least restricted first | Optional. Declaring it turns on the data-class rules for every fallback pairing |
-| `teams.<team_id>` | mapping | Keyed by the LiteLLM `team_id`. A key whose team is absent here is refused with a 503 and a platform incident |
-| `envelope_usd` | positive finite number | The owner-approved budget. Must equal the LiteLLM team's `max_budget` |
-| `budget_duration` | `1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`, `24h`, `1d`, `7d`, `1w`, `30d`, `1mo`, `hourly`, `daily`, `weekly` or `monthly` | The windows that tumble with LiteLLM's resets. Any other value fails rule `duration-tumbles` |
-| `warn_tiers` | list of integers in 1..99, optional | Team tiers. Each raises one event with scope `team` per window. 100 belongs to LiteLLM's ceiling |
-| `routes.<model_group>` | mapping, may be empty | Keyed by LiteLLM model group name. A route absent from the manifest still spends against the envelope and still earns team tier events. It never degrades. A wildcard group such as `openai/*` cannot be a route or a fallback, because requests name concrete models and never match it |
-| `routes.<model_group>.fallback` | model group name | The degradation target. It differs from its route (rule `fallback-distinct`) and is served and priced. With `data_class_order` declared, it is also at least as restricted in data class. Its price relative to the route is the owner's call |
-| `routes.<model_group>.degrade_at` | integer in 1..99 | Requires `fallback`. A degrade threshold only, and never a tier |
-| `routes.<model_group>.warn_tiers` | list of integers in 1..99, optional | Route tiers. Each raises one event with scope `route` per window, on a request to that route |
+| `teams.<team_id>` | mapping | The LiteLLM `team_id` |
+| `envelope_usd` | positive number | Equals the LiteLLM team's `max_budget` |
+| `budget_duration` | `1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`, `24h`, `1d`, `7d`, `1w`, `30d`, `1mo`, `hourly`, `daily`, `weekly` or `monthly` | Equals the LiteLLM team's. Other values fail rule `duration-tumbles` |
+| `warn_tiers` | list of integers in 1..99, optional | Team tiers, each announced once per window |
+| `routes.<model_group>` | mapping, may be empty | A LiteLLM model group. A model group without an entry still counts toward the team's tiers and never degrades. A wildcard group such as `openai/*` cannot be a route or a fallback |
+| `routes.<model_group>.fallback` | model group name | The group that serves past `degrade_at`. Rules `fallback-distinct`, `route-served` and `route-priced` |
+| `routes.<model_group>.degrade_at` | integer in 1..99 | Requires `fallback` |
+| `routes.<model_group>.warn_tiers` | list of integers in 1..99, optional | Route tiers, each announced once per window on a request to the route |
 
-Brownout derives each team's policy epoch from its `envelope_usd`, `budget_duration`, `warn_tiers`
-and routes, as the first 12 hex characters of a SHA-256 over their parsed values. Every claim key and
-team event carries it. A change to any of those values gives that team a new epoch when the gateway
-restarts, so each tier and downgrade already announced in the current window can be announced once
-more. Key order, layout, comments and writing `500` for `500.0` leave the epoch unchanged, and other
-teams keep theirs. A manifest from an earlier release that still carries `version` or `policy_epoch`
-fails rule `manifest-schema`, which names the key to delete.
-
-An unknown key at any level fails rule `manifest-schema` and names the key, so a typo such as
-`degrade_At` stops the manifest from loading. A team id or a route name must be a string. YAML reads
-an unquoted number, or `yes`, `no`, `on` and `off`, as another type, so quote such a name, or rule
-`manifest-schema` refuses it.
+Changing a team's envelope, window, tiers or routes re-arms its announcements for the current window
+when the gateway restarts. An unknown key at any level fails rule `manifest-schema` and names the
+key.
 
 ## The rules
 
-Each rule has an id. `brownout check` runs the file rules, `brownout init` also runs the init rules
-against LiteLLM's live teams, and the handler runs the manifest rules when it loads. The request rules run on every governed request against LiteLLM's live Router and
-settings, and a violation refuses the request. The downgrade rules run against the live Router only
-when a request wants a downgrade, and a violation withholds the downgrade and serves the primary.
-Each rule reads only what its request touches, which is the route, its fallback and the gateway
-settings.
+`brownout check` runs the file rules, `init` adds the init rules against LiteLLM's live teams, and
+the handler runs the manifest rules when it loads. A request rule refuses the request it fails. A
+downgrade rule runs only when a request wants a downgrade, and a failure serves the primary.
 
 | Id | Checks | Runs in |
 |---|---|---|
@@ -284,6 +204,7 @@ settings.
 | `team-in-manifest` | The key's team is in the manifest | Request |
 | `key-has-no-budget` | The key carries no `max_budget`, `model_max_budget` or `budget_limits` of its own | Request |
 | `model-is-a-group` | The requested model is a model group the gateway configures | Request |
+| `call-type-governed` | The call type is one brownout has reviewed | Request |
 | `model-priced` | Every deployment of the requested model has a price LiteLLM bills | Request, routing |
 | `ceiling-matches-envelope` | The team's `max_budget` equals `envelope_usd` | Request |
 | `spend-readable` | The team's spend counter can be read | Request |
@@ -294,49 +215,22 @@ settings.
 | `supported-litellm` | LiteLLM is 1.101.6 or newer | Load |
 
 ```bash
-uv run brownout check --gateway-config config/config.yaml --manifest config/manifest.yaml
+brownout check --gateway-config brownout.config.yaml --manifest brownout.yaml
 ```
 
-The command prints one line per violation, as rule id, subject and message, and exits `1` when any
-rule fails. An input that is missing, unreadable, not UTF-8, not valid YAML or not a YAML mapping
-exits `2`. So does a config LiteLLM could not load as written, such as a `model_list` that is not a
-list or a deployment without a `model_name`, and the message names the field. The message names the
-file and gives at most a line and column or a byte offset, because the offending line can hold a
-secret. It reads `config.yaml` as YAML and follows its `include:` files the way LiteLLM does. It
-takes each deployment's prices from `litellm_params` first, then `model_info`, then LiteLLM's cost
-map, which is the order LiteLLM bills them in. None of this needs a running gateway. An included
-file that includes more files, or a file listed twice, exits `2`, because LiteLLM resolves both
-differently across releases. A price written as a string, such as `1e-4`, counts when it reads
-as a finite number, as it does for LiteLLM. Any other written price exits `2`, in either block,
-including an `os.environ/` reference, because the check cannot know what it resolves to.
-
-Models added in LiteLLM's admin UI live in its database, where a file cannot show them. With
-`--gateway URL`, `check` also reads `/model/info` with the key in `BROWNOUT_INIT_KEY` and adds every
-model group the files do not define. A group defined in a file keeps the file's prices and classes.
-`init` always reads them this way.
+`check` prints one line per violation and exits `1` when any rule fails, or `2` when an input cannot
+be read. It follows the config's `include:` files the way LiteLLM does. With `--gateway URL`, it
+also reads the models kept in LiteLLM's database through `/model/info`, with the key in
+`BROWNOUT_INIT_KEY`.
 
 ## Fallback checks
 
-A declared fallback is checked in two places, and the permission check runs last.
-
-The rules cover what the gateway config and the manifest decide. The fallback is served, priced and
-distinct from its route, and with `data_class_order` declared it is at least as restricted in data
-class. `brownout check` catches a bad pairing before deploy. On a running gateway, an admin can delete
-a model or change its data class without any notice to the plugin, so the plugin checks the pairing
-again whenever a downgrade is wanted. A broken pairing withholds the downgrade. The primary serves the request it was asked for,
-the response discloses `fallback_rejected`, and a `gateway_rule_violated` incident names the rule
-once per window. A request below `degrade_at` never touches the pairing, so a broken fallback costs
-the team its downgrade and nothing else.
-
-The permission check asks LiteLLM's own `_can_object_call_model` whether both the key and the team
-may call the fallback. It runs only when the decision wants a downgrade, so a request below
-`degrade_at` never touches it. A refusal serves the primary. The response header and the tier
-event carry the outcome, and a `brownout_fallback_rejected` event names the route, the target and
-the rejection on its own claim per route and rejection per window. A check that raises anything
-other than LiteLLM's `ProxyException` is a platform fault, so the plugin serves the primary and
-raises an `entitlement_check_unavailable` incident alongside the rejection event. The check reads
-no project, team member or customer model list, and [limits](limits.md) gives the rule for a gateway
-that uses them.
+`check` catches a bad fallback before deploy. The handler checks the fallback again whenever a
+downgrade is wanted, because a model can be deleted, unpriced or reclassified after deploy, and it
+asks LiteLLM whether the caller's key and team may call it. A fallback that fails either check
+leaves the primary serving. The response discloses `fallback_rejected`, and
+`brownout_fallback_rejected` names the rejection once per window. A permission check that cannot
+run also raises an `entitlement_check_unavailable` incident.
 
 ## Data classes
 

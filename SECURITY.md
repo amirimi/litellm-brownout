@@ -9,7 +9,7 @@ Only the latest release receives fixes.
 
 ## What brownout reads and writes
 
-The plugin runs inside the LiteLLM proxy. On each chat request its code takes the caller's team id,
+The plugin runs inside the LiteLLM proxy. On each model call its code takes the caller's team id,
 model lists, budget flags and spend from LiteLLM's auth object, and the requested model's prices and
 data classes from LiteLLM's router. It never reads the key, the prompt or a provider key. It writes
 a `brownout` field into the request's `spend_logs_metadata`, `x-brownout-*` response headers, one
@@ -20,7 +20,8 @@ these outputs.
 
 `brownout init` runs on the operator's machine. It reads `/team/list`, `/key/list` and `/model/info`
 with a key that only needs read access, writes two new files, and prints no value from the gateway
-config. `brownout check` reads the config and the manifest and prints rule ids and route names.
+config. Run it from a shell that exports no other secret, because `uvx` runs the packages it
+installs with that shell's environment. `brownout check` reads the config and the manifest and prints rule ids and route names.
 
 ## Checking a release
 
