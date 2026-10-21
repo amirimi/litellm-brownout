@@ -296,18 +296,19 @@ def _taken_outputs(options: InitOptions) -> list[Path]:
     inputs: Final = {options.gateway_config.resolve()}
     if options.manifest is not None:
         inputs.add(options.manifest.resolve())
-    taken: Final = [
-        path
-        for path in (options.manifest_out,)
-        if path.exists() or path.resolve() in inputs
-    ]
-    config_elsewhere: Final = (
-        options.config_out.resolve() != options.gateway_config.resolve()
-    )
-    if options.platform == "compose" and config_elsewhere:
-        if options.config_out.exists() or options.config_out.resolve() in inputs:
-            taken.append(options.config_out)
+    taken: Final = [path for path in (options.manifest_out,) if _occupied(path, inputs)]
+    separate: Final = options.platform == "compose" and _separate_config(options)
+    if separate and _occupied(options.config_out, inputs):
+        taken.append(options.config_out)
     return taken
+
+
+def _occupied(path: Path, inputs: set[Path]) -> bool:
+    return path.exists() or path.resolve() in inputs
+
+
+def _separate_config(options: InitOptions) -> bool:
+    return options.config_out.resolve() != options.gateway_config.resolve()
 
 
 def _plugin_dir_beside_config(options: InitOptions) -> bool:
@@ -519,10 +520,7 @@ def _write(options: InitOptions, prepared: Prepared, placement: Placement) -> No
 def _write_for_compose(
     options: InitOptions, prepared: Prepared, placement: Placement
 ) -> None:
-    config_elsewhere: Final = (
-        options.config_out.resolve() != options.gateway_config.resolve()
-    )
-    if prepared.changes or config_elsewhere:
+    if prepared.changes or _separate_config(options):
         source_mode = options.gateway_config.stat().st_mode & PERMISSION_BITS
         _replace_file(options.config_out, prepared.config_out_text, source_mode)
         print(f"wrote {options.config_out}")
