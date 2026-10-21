@@ -5,7 +5,7 @@ from typing import Final, Literal
 
 from brownout.refusals import RefusalReason, RuleId
 
-Source = Literal["brownout", "litellm", "release", "printed"]
+Source = Literal["brownout", "litellm", "release", "printed", "compose"]
 Stage = Literal["check", "init", "start", "request"]
 
 FIRST_MINOR: Final = 101

@@ -12,6 +12,7 @@ BRIDGE: Final = "tests/test_bridge.py::"
 SEAMS: Final = "tests/test_litellm_seams.py::"
 ONBOARDING: Final = "tests/test_onboarding.py::"
 PLUGIN: Final = "tests/test_plugin_folder.py::"
+COMPOSE: Final = "tests/test_compose_override.py::"
 
 
 COMMAND_ROWS: Final = (
@@ -30,6 +31,11 @@ COMMAND_ROWS: Final = (
             "flag:--write",
             "flag:plugin",
             "flag:--dir",
+            "flag:--plugin-dir",
+            "flag:--platform",
+            "flag:--service",
+            "flag:--compose-file",
+            "flag:--redis-host",
         ),
         cites=(),
         forms=(
@@ -62,6 +68,50 @@ COMMAND_ROWS: Final = (
                         f"{CLI}test_init_never_overwrites_an_existing_output",
                         f"{CLI}test_an_output_that_is_an_input_is_refused",
                     ),
+                ),
+            ),
+            Form(
+                "init --write with --plugin-dir",
+                "the plugin folder beside the manifest",
+                Supported(
+                    (f"{CLI}test_init_writes_the_plugin_folder_beside_the_manifest",)
+                ),
+            ),
+            Form(
+                "init --write with --plugin-dir naming the config's directory",
+                "refused",
+                Refused(
+                    stage="init",
+                    rule=None,
+                    tests=(
+                        f"{CLI}test_init_refuses_a_plugin_folder_in_the_configs_directory",
+                    ),
+                ),
+            ),
+            Form(
+                "init --write --platform helm",
+                "the manifest, with proxy_config settings and chart values printed",
+                Supported(
+                    (
+                        f"{CLI}test_for_helm_init_leaves_the_config_and_prints_the_chart_values",
+                    )
+                ),
+            ),
+            Form(
+                "init --write with --service or --compose-file",
+                "the Compose override for that service and file",
+                Supported(
+                    (
+                        f"{COMPOSE}test_a_named_service_is_used_even_when_it_builds_its_own_image",
+                        f"{COMPOSE}test_a_base_file_compose_does_not_load_by_default_gets_the_flags_to_add",
+                    )
+                ),
+            ),
+            Form(
+                "init --write with --redis-host",
+                "general_settings.coordination_redis for that host",
+                Supported(
+                    (f"{CLI}test_a_named_redis_host_becomes_the_coordination_redis",)
                 ),
             ),
             Form(

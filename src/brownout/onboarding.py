@@ -20,6 +20,8 @@ CEILING_TOLERANCE_USD: Final = 1e-9
 BUDGET_PLACEHOLDER: Final = "<YOUR BUDGET>"
 DURATION_PLACEHOLDER: Final = "<YOUR DURATION, SUCH AS 7d>"
 TEAM_PLACEHOLDER: Final = "<YOUR TEAM ID>"
+REDIS_PORT: Final = 6379
+REDIS_PASSWORD_REFERENCE: Final = "os.environ/REDIS_PASSWORD"
 
 Section = Literal["general_settings", "litellm_settings"]
 
@@ -202,7 +204,9 @@ def reconcile_findings(
     return findings
 
 
-def config_plan(config: GatewayConfig) -> tuple[ConfigChange, ...]:
+def config_plan(
+    config: GatewayConfig, redis_host: str | None
+) -> tuple[ConfigChange, ...]:
     changes: list[ConfigChange] = []
     if HANDLER_PATH not in config.callbacks:
         changes.append(AppendSetting("litellm_settings", "callbacks", HANDLER_PATH))
@@ -226,7 +230,7 @@ def config_plan(config: GatewayConfig) -> tuple[ConfigChange, ...]:
                 "recommended. Keeps LiteLLM's budget refusal a 429 from 1.104",
             )
         )
-    changes.extend(_coordination_redis(config))
+    changes.extend(_coordination_redis(config, redis_host))
     return tuple(changes)
 
 
@@ -486,8 +490,25 @@ def _unlisted_fallbacks(
     ]
 
 
-def _coordination_redis(config: GatewayConfig) -> list[ConfigChange]:
-    if config.coordination_redis or config.cache_redis is None:
+def _coordination_redis(
+    config: GatewayConfig, redis_host: str | None
+) -> list[ConfigChange]:
+    if config.coordination_redis:
+        return []
+    if config.cache_redis is None and redis_host is not None:
+        return [
+            SetSetting(
+                "general_settings",
+                "coordination_redis",
+                {
+                    "host": redis_host,
+                    "port": REDIS_PORT,
+                    "password": REDIS_PASSWORD_REFERENCE,
+                },
+                "points at the Redis host named with --redis-host",
+            )
+        ]
+    if config.cache_redis is None:
         return []
     return [
         SetSetting(

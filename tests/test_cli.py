@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Final
 
@@ -7,6 +8,7 @@ import httpx
 import pytest
 import yaml
 
+from brownout import plugin_folder
 from brownout.cli import InitOptions, check, init, main
 from brownout.gateway_api import read_model_groups
 from brownout.inputs import DocumentError
@@ -270,17 +272,49 @@ def fake_gateway(
     )
 
 
+def lab_config_copy(directory: Path) -> Path:
+    copy = directory / "config.yaml"
+    copy.write_text(LAB_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+    return copy
+
+
 def options(tmp_path: Path, **overrides: Any) -> InitOptions:
     values: dict[str, Any] = {
         "gateway": "http://gateway.test",
-        "gateway_config": LAB_CONFIG,
         "manifest": None,
         "manifest_out": tmp_path / "brownout.yaml",
-        "config_out": tmp_path / "brownout.config.yaml",
+        "plugin_dir": tmp_path / "plugins",
+        "platform": "compose",
+        "service": None,
+        "compose_dir": tmp_path,
+        "compose_file": None,
+        "redis_host": None,
         "write": True,
     }
     values.update(overrides)
+    if "gateway_config" not in values:
+        values["gateway_config"] = lab_config_copy(tmp_path)
+    if "config_out" not in values:
+        values["config_out"] = values["gateway_config"]
     return InitOptions(**values)
+
+
+def compose_json(services: dict[str, str | None]) -> str:
+    return json.dumps(
+        {
+            "services": {
+                name: {"image": image, "environment": {}, "volumes": []}
+                for name, image in services.items()
+            }
+        }
+    )
+
+
+def fake_compose(services: dict[str, str | None]):
+    def run(arguments, directory):
+        return 0, compose_json(services)
+
+    return run
 
 
 def test_init_writes_a_manifest_and_config_that_pass_the_check(tmp_path, capsys):
@@ -327,7 +361,10 @@ def test_a_dry_run_writes_nothing_and_still_reports(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert exit_code == 1
-    assert not chosen.manifest_out.exists() and not chosen.config_out.exists()
+    assert not chosen.manifest_out.exists()
+    assert chosen.config_out.read_text(encoding="utf-8") == LAB_CONFIG.read_text(
+        encoding="utf-8"
+    )
     assert "+++ " in output
     assert "team-in-manifest\tloose\t" in output
     assert "<YOUR BUDGET>" in output
@@ -335,7 +372,7 @@ def test_a_dry_run_writes_nothing_and_still_reports(tmp_path, capsys):
 
 @pytest.mark.parametrize("taken", ["manifest_out", "config_out"])
 def test_init_never_overwrites_an_existing_output(tmp_path, taken):
-    chosen = options(tmp_path)
+    chosen = options(tmp_path, config_out=tmp_path / "other.config.yaml")
     outputs = {"manifest_out": chosen.manifest_out, "config_out": chosen.config_out}
     outputs[taken].write_text("keep me\n", encoding="utf-8")
 
@@ -344,17 +381,166 @@ def test_init_never_overwrites_an_existing_output(tmp_path, taken):
 
 
 def test_an_output_that_is_an_input_is_refused(tmp_path):
-    config = tmp_path / "config.yaml"
-    config.write_text(LAB_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+    theirs = tmp_path / "theirs.yaml"
+    theirs.write_text(LAB_MANIFEST.read_text(encoding="utf-8"), encoding="utf-8")
 
     assert (
         init(
-            options(tmp_path, gateway_config=config, config_out=config),
+            options(tmp_path, manifest=theirs, manifest_out=theirs),
             fake_gateway(),
             INIT_TOKEN,
         )
         == 2
     )
+
+
+def test_init_edits_the_config_in_place_and_keeps_its_comments(tmp_path, capsys):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "# the team's gateway\n" + LAB_CONFIG.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    chosen = options(tmp_path, gateway_config=config)
+
+    exit_code = init(chosen, fake_gateway(), INIT_TOKEN)
+
+    written = config.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert written.startswith("# the team's gateway\n")
+    assert check_files(config, chosen.manifest_out) == 0
+    assert "brownout check passed on LiteLLM" in capsys.readouterr().out
+
+
+def test_init_writes_the_plugin_folder_beside_the_manifest(tmp_path, capsys):
+    chosen = options(tmp_path)
+
+    init(chosen, fake_gateway(), INIT_TOKEN)
+
+    assert (chosen.plugin_dir / "brownout" / "gateway.py").exists()
+    assert f"wrote {chosen.plugin_dir / 'brownout'}" in capsys.readouterr().out
+
+
+def test_init_refuses_a_plugin_folder_in_the_configs_directory(tmp_path, capsys):
+    chosen = options(tmp_path, plugin_dir=tmp_path)
+    before = chosen.gateway_config.read_text(encoding="utf-8")
+
+    exit_code = init(chosen, fake_gateway(), INIT_TOKEN)
+
+    assert exit_code == 2
+    assert chosen.gateway_config.read_text(encoding="utf-8") == before
+    assert not chosen.manifest_out.exists()
+    assert "loads brownout/gateway.py by file path" in capsys.readouterr().err
+
+
+def test_a_named_redis_host_becomes_the_coordination_redis(tmp_path):
+    config = lab_gateway_config()
+    config["general_settings"].pop("coordination_redis", None)
+    config.get("litellm_settings", {}).pop("cache_params", None)
+    chosen = options(
+        tmp_path,
+        gateway_config=write(tmp_path / "config.yaml", config),
+        redis_host="redis",
+    )
+
+    init(chosen, fake_gateway(), INIT_TOKEN)
+
+    written = yaml.safe_load(chosen.config_out.read_text(encoding="utf-8"))
+    assert written["general_settings"]["coordination_redis"] == {
+        "host": "redis",
+        "port": 6379,
+        "password": "os.environ/REDIS_PASSWORD",
+    }
+
+
+def test_init_writes_the_override_for_the_litellm_service(tmp_path, capsys):
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    chosen = options(tmp_path)
+
+    init(
+        chosen,
+        fake_gateway(),
+        INIT_TOKEN,
+        fake_compose(
+            {"proxy": "ghcr.io/berriai/litellm:main-v1.106.2", "db": "postgres:16"}
+        ),
+    )
+
+    override = yaml.safe_load((tmp_path / "compose.override.yaml").read_text("utf-8"))
+    assert list(override["services"]) == ["proxy"]
+    printed = capsys.readouterr().out
+    assert "wrote " + str(tmp_path / "compose.override.yaml") in printed
+    assert "docker compose up -d" in printed
+
+
+def test_init_writes_nothing_when_it_cannot_pick_the_service(tmp_path, capsys):
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    chosen = options(tmp_path)
+    before = chosen.gateway_config.read_text(encoding="utf-8")
+
+    exit_code = init(
+        chosen,
+        fake_gateway(),
+        INIT_TOKEN,
+        fake_compose(
+            {"a": "litellm/litellm:v1.106.2", "b": "litellm/litellm:v1.106.2"}
+        ),
+    )
+
+    assert exit_code == 2
+    assert chosen.gateway_config.read_text(encoding="utf-8") == before
+    assert not chosen.manifest_out.exists() and not chosen.plugin_dir.exists()
+    assert "several services run LiteLLM's image: a, b" in capsys.readouterr().err
+
+
+def test_an_existing_override_gets_the_lines_to_merge_and_stays_untouched(
+    tmp_path, capsys
+):
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    (tmp_path / "compose.override.yaml").write_text("services: {}\n", encoding="utf-8")
+
+    init(
+        options(tmp_path),
+        fake_gateway(),
+        INIT_TOKEN,
+        fake_compose({"proxy": "litellm/litellm:v1"}),
+    )
+
+    assert (tmp_path / "compose.override.yaml").read_text("utf-8") == "services: {}\n"
+    printed = capsys.readouterr()
+    assert "compose.override.yaml already exists" in printed.err
+    assert "/app/plugins" in printed.out
+
+
+def test_without_a_compose_file_init_prints_docker_run_flags(tmp_path, capsys):
+    chosen = options(tmp_path)
+
+    init(chosen, fake_gateway(), INIT_TOKEN)
+
+    assert (
+        f"-v {chosen.plugin_dir.resolve()}:/app/plugins:ro" in capsys.readouterr().out
+    )
+
+
+def test_for_helm_init_leaves_the_config_and_prints_the_chart_values(tmp_path, capsys):
+    config = lab_gateway_config()
+    config["litellm_settings"].pop("callbacks")
+    chosen = options(
+        tmp_path,
+        platform="helm",
+        gateway_config=write(tmp_path / "config.yaml", config),
+    )
+    before = chosen.gateway_config.read_text(encoding="utf-8")
+
+    init(chosen, fake_gateway(), INIT_TOKEN)
+
+    printed = capsys.readouterr().out
+    assert chosen.gateway_config.read_text(encoding="utf-8") == before
+    assert chosen.manifest_out.exists()
+    assert not chosen.plugin_dir.exists()
+    assert "extraInitContainers:" in printed
+    assert f"litellm-brownout=={plugin_folder.running_version()}" in printed
+    assert "- brownout.gateway.handler" in printed
+    assert "kubectl create configmap brownout-manifest" in printed
 
 
 def test_an_invalid_existing_manifest_stops_init_with_its_rule(tmp_path, capsys):
@@ -460,9 +646,8 @@ def test_an_unreadable_config_is_reported_by_position_only(
     assert SECRET not in error
 
 
-def test_the_config_copy_keeps_the_source_permissions(tmp_path):
-    config = tmp_path / "config.yaml"
-    config.write_text(LAB_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+def test_the_config_keeps_its_permissions(tmp_path):
+    config = lab_config_copy(tmp_path)
     config.chmod(0o600)
     chosen = options(tmp_path, gateway_config=config)
 
