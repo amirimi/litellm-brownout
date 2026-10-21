@@ -21,7 +21,7 @@ team's budget fills, and tells each caller which model answered.
   team. A manifest that declares `data_class_order` also requires the fallback to be cleared for the
   route's data class. A fallback that fails a check leaves the primary serving and raises an event.
   A request from an agent key keeps its primary, because LiteLLM limits an agent's models in ways
-  the key and team lists do not show.
+  the key and team lists do not show. Project, team member and customer model lists are not read.
 - **Disclosure.** `x-brownout-*` response headers name the model group that served and the reason
   for a downgrade. The same facts reach LiteLLM's spend logs and every logging integration the
   gateway runs.
@@ -37,6 +37,6 @@ team's budget fills, and tells each caller which model answered.
 
 ### Supported
 
-- LiteLLM 1.101.6 to 1.105, pinned by image tag. The plugin refuses to start below 1.101.6 and
-  warns above the tested 1.105.
+- LiteLLM 1.101.6 to 1.106, pinned by image tag. The plugin refuses to start below 1.101.6 and
+  warns above the tested 1.106.
 - Python 3.12 and newer.

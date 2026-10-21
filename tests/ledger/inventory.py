@@ -18,6 +18,7 @@ WALKED_RELEASES: Final = (
     "1.103.6",
     "1.104.4",
     "1.105.2",
+    "1.106.1",
 )
 
 OPEN_FINDINGS: Final[Mapping[str, str]] = {

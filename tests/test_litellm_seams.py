@@ -28,19 +28,36 @@ from brownout import bridge
 LITELLM_ROOT: Final = Path(importlib.util.find_spec("litellm").origin).parent
 SERVER_DEFAULT_INLINE: Final = 'general_settings.get("completion_model", None)'
 SERVER_DEFAULT_RESOLVER: Final = 'self.data["model"] = resolve_inference_model('
+GUARDRAIL_MERGE_NAMES: Final = (
+    "_check_and_merge_model_level_guardrails",
+    "check_and_merge_model_level_guardrails",
+)
+TEAM_BUDGET_CHECK_NAMES: Final = frozenset(
+    {"_team_max_budget_check", "team_max_budget_check"}
+)
+OVERRIDE_MERGE_FORMS: Final = (
+    "if key in override_settings and key not in data:",
+    "if override_settings.get(key) is not None and key not in data:",
+)
 
 
 def _function_in_source(
     relative_path: str, name: str
 ) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    return _function_under_any_name(relative_path, frozenset({name}))
+
+
+def _function_under_any_name(
+    relative_path: str, names: frozenset[str]
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
     tree = ast.parse((LITELLM_ROOT / relative_path).read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-            and node.name == name
+            and node.name in names
         ):
             return node
-    raise AssertionError(f"{relative_path} no longer defines {name}")
+    raise AssertionError(f"{relative_path} no longer defines {sorted(names)}")
 
 
 def _parameter_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
@@ -85,10 +102,11 @@ def test_seam_guardrails_merge_before_the_pre_call_hook():
     source = (LITELLM_ROOT / "proxy/common_request_processing.py").read_text(
         encoding="utf-8"
     )
-    merge = source.index("self.data = _check_and_merge_model_level_guardrails(")
     hook = source.index("self.data = await proxy_logging_obj.pre_call_hook(")
 
-    assert merge < hook
+    assert any(
+        f"self.data = {name}(" in source[:hook] for name in GUARDRAIL_MERGE_NAMES
+    )
 
 
 def test_seam_a_reservation_entry_carries_the_fields_the_hold_is_read_from():
@@ -108,7 +126,9 @@ def test_seam_a_reservation_entry_carries_the_fields_the_hold_is_read_from():
 
 
 def test_seam_the_team_counter_key_is_spend_team_id():
-    check = _function_in_source("proxy/auth/auth_checks.py", "_team_max_budget_check")
+    check = _function_under_any_name(
+        "proxy/auth/auth_checks.py", TEAM_BUDGET_CHECK_NAMES
+    )
 
     assert 'f"spend:team:{team_object.team_id}"' in ast.unparse(check).replace("'", '"')
 
@@ -141,7 +161,7 @@ def test_seam_a_request_fallback_list_replaces_the_routers_own(key):
 def test_seam_key_and_team_router_settings_skip_keys_the_request_holds():
     source = (LITELLM_ROOT / "proxy/route_llm_request.py").read_text(encoding="utf-8")
 
-    assert "if key in override_settings and key not in data:" in source
+    assert any(form in source for form in OVERRIDE_MERGE_FORMS)
 
 
 def test_seam_the_authenticated_object_carries_the_fields_the_plugin_reads():

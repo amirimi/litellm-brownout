@@ -476,7 +476,7 @@ def test_a_release_below_the_floor_refuses_to_start(release):
 
 
 @pytest.mark.parametrize(
-    "release", ["1.101.6", "1.102.4", "1.103.6", "1.104.4", "1.105.2"]
+    "release", ["1.101.6", "1.102.4", "1.103.6", "1.104.4", "1.105.2", "1.106.1"]
 )
 def test_a_tested_release_runs_quietly(release, caplog):
     bridge.require_supported_litellm(release)
@@ -485,7 +485,7 @@ def test_a_tested_release_runs_quietly(release, caplog):
 
 
 def test_a_release_past_the_ceiling_runs_with_a_warning(caplog):
-    bridge.require_supported_litellm("1.106.0rc1")
+    bridge.require_supported_litellm("1.107.0rc1")
 
     assert "newer than the newest release brownout was tested on" in caplog.text
 

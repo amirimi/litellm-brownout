@@ -58,6 +58,7 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | No user, organisation, end-user or tag budget blocks first | LiteLLM refuses before any tier fires | Documented, not checked |
 | No stacked team `budget_limits` | A daily limit inside a weekly one hits with no brownout first | Documented, not checked |
 | The team's model list includes each fallback | The primary serves and a `brownout_fallback_rejected` event fires | The permission check |
+| Every project, team member and customer model list that admits a primary also admits its fallback | A downgrade serves a fallback that the list excludes, because the plugin reads only the key's and team's lists | Documented, not checked |
 | `fail_closed_budget_enforcement` is on and reservations are on | 503 and a platform incident | `fail-closed-on`, `reservation-on` |
 | A governed request is served only by the route the plugin chose | The plugin empties every router fallback list on each governed request, so gateway, key, team and caller fallbacks never move it. Failover between deployments of one route still works | Enforced on every request |
 | `coordination_redis` is configured | `brownout check` fails | `redis-configured` |
@@ -69,7 +70,7 @@ rules in CI, and the gateway runs the request rules on every governed request.
 | A fallback serves every endpoint its route's callers use | LiteLLM sends `/v1/messages` to an OpenAI-style deployment as a Responses API call, so a fallback on a server without that API fails with the provider's error | Documented, not checked |
 | The reset time occurs exactly once on every reset date | Daylight saving can move a window early or backward | Documented, not checked |
 | `degrade_at` sits below 100% minus one worst-case request | The 429 arrives before the downgrade. A request without `max_tokens` reserves the model's whole output | Documented, not checked |
-| LiteLLM is 1.101.6 or newer | The gateway refuses to start. It warns past the tested 1.105 | `supported-litellm` |
+| LiteLLM is 1.101.6 or newer | The gateway refuses to start. It warns past the tested 1.106 | `supported-litellm` |
 
 ## The spend figure a tier compares
 

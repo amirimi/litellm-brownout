@@ -24,6 +24,14 @@ NAME_NOT_A_GROUP: Final = Refused(
     ),
 )
 BUDGETS_BEFORE_TIERS: Final = Open("budgets-before-tiers")
+UNREAD_MODEL_LIST: Final = Documented(
+    unseen_because=(
+        "the authenticated caller carries only the project, user and customer ids, "
+        "and the lists live in LiteLLM's database"
+    ),
+    docs="docs/limits.md",
+    phrase="Project, team member and customer model lists are never read",
+)
 
 
 LITELLM_ROWS: Final = (
@@ -284,6 +292,34 @@ LITELLM_ROWS: Final = (
                     docs="docs/limits.md",
                     phrase="`check` and `init` read the config file you pass them",
                 ),
+            ),
+        ),
+    ),
+    Input(
+        shape="LiteLLM model lists other than the key's and team's",
+        source="litellm",
+        parser=None,
+        reads=(),
+        cites=(
+            "litellm/proxy/auth/auth_checks.py:637@1.101.6",
+            "litellm/proxy/auth/auth_checks.py:926@1.101.6",
+            "litellm/proxy/auth/auth_checks.py:1164@1.106.1",
+        ),
+        forms=(
+            Form(
+                "a project's model list",
+                "not read, so a downgrade can serve a fallback it excludes",
+                UNREAD_MODEL_LIST,
+            ),
+            Form(
+                "a team member's model list",
+                "not read, so a downgrade can serve a fallback it excludes",
+                UNREAD_MODEL_LIST,
+            ),
+            Form(
+                "a customer's model list, from 1.106",
+                "not read, so a downgrade can serve a fallback it excludes",
+                UNREAD_MODEL_LIST,
             ),
         ),
     ),
