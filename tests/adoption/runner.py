@@ -28,7 +28,7 @@ from .yamlfile import StyledDocument, parse_snippet, read_styled
 
 README_GATEWAY: Final = "http://localhost:4000"
 README_UVX: Final = "uvx --from litellm-brownout "
-README_IMAGE: Final = "FROM docker.litellm.ai/berriai/litellm:v1.105.1"
+README_IMAGE: Final = "FROM docker.litellm.ai/berriai/litellm:v1.105.2"
 README_REQUIREMENT: Final = "litellm-brownout==0.1.0"
 INIT_COMMAND: Final = "brownout init"
 CHECK_COMMAND: Final = "brownout check"
