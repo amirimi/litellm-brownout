@@ -197,9 +197,6 @@ drain without spending anything, run the [lab][lab].
   models gets a 503.
 - **No router fallbacks:** a provider error on the chosen model reaches the caller. Failover between
   deployments of one model group still works.
-- **Only key and team model lists are checked:** brownout never reads project, team member or
-  customer model lists. If you use them, give a route a fallback only when every list that admits
-  the primary also admits the fallback.
 - **The reservation comes first:** LiteLLM reserves each request's worst case on the model the
   caller asked for. Set `max_tokens`, or a large request near the ceiling gets LiteLLM's 429 before
   the downgrade.
