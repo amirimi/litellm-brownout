@@ -343,9 +343,9 @@ class Adoption:
 
     def _confirm(self) -> None:
         call: Final = self.scenario.confirm
-        block: Final = fill(
+        block: Final = adapt(
             self._readme_block("confirm"),
-            {"<A TEAM KEY>": self.seeded.keys[call.key], "<A MODEL>": call.model},
+            [("{team key}", self.seeded.keys[call.key]), ("{model}", call.model)],
         )
         result: Final = self.shell.run(block)
         refused: Final = REFUSAL_REASON.search(result.stdout)

@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>How brownout handles a request</title>
+  <desc>A request for a route passes LiteLLM's authentication and budget reservation, then brownout's pre-call hook reads the team's spend, finds it past the route's degrade tier and serves the fallback instead. The response returns with x-brownout headers. The manifest brownout.yaml sets the policy, and Redis holds the team's spend counter.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ca3af"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="999" height="399" rx="16" fill="#ffffff" stroke="#e5e7eb"/>
+
+  <g>
+    <rect x="530" y="20" width="170" height="46" rx="6" fill="#f9fafb" stroke="#d1d5db"/>
+    <path d="M684 20 L700 36" stroke="#d1d5db" fill="none"/>
+    <text x="615" y="40" text-anchor="middle" font-size="14" font-weight="600" fill="#111827" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">brownout.yaml</text>
+    <text x="615" y="57" text-anchor="middle" font-size="11.5" fill="#6b7280">budgets, tiers, fallbacks</text>
+    <line x1="615" y1="66" x2="615" y2="93" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow-muted)"/>
+  </g>
+
+  <g>
+    <rect x="20" y="95" width="140" height="140" rx="12" fill="#f9fafb" stroke="#d1d5db"/>
+    <text x="90" y="135" text-anchor="middle" font-size="15" font-weight="600" fill="#111827">Your clients</text>
+    <text x="90" y="165" text-anchor="middle" font-size="13" fill="#4b5563">Apps and SDKs</text>
+    <text x="90" y="185" text-anchor="middle" font-size="13" fill="#4b5563">Claude Code</text>
+    <text x="90" y="205" text-anchor="middle" font-size="13" fill="#4b5563">Codex</text>
+  </g>
+
+  <line x1="160" y1="165" x2="228" y2="165" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="194" y="155" text-anchor="middle" font-size="11.5" fill="#374151">request</text>
+
+  <g>
+    <rect x="230" y="95" width="220" height="140" rx="12" fill="#f9fafb" stroke="#d1d5db"/>
+    <text x="340" y="125" text-anchor="middle" font-size="15" font-weight="600" fill="#111827">LiteLLM</text>
+    <rect x="248" y="140" width="184" height="34" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+    <text x="340" y="162" text-anchor="middle" font-size="13" fill="#374151">Authenticate the key</text>
+    <rect x="248" y="182" width="184" height="34" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+    <text x="340" y="204" text-anchor="middle" font-size="13" fill="#374151">Reserve the worst case</text>
+  </g>
+
+  <line x1="450" y1="165" x2="488" y2="165" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="490" y="95" width="250" height="140" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+    <text x="615" y="125" text-anchor="middle" font-size="15" font-weight="600" fill="#9a3412">brownout</text>
+    <text x="615" y="155" text-anchor="middle" font-size="13" fill="#374151">Team spend is 92% of $500</text>
+    <text x="615" y="176" text-anchor="middle" font-size="13" fill="#374151">The route degrades at 90%</text>
+    <rect x="515" y="188" width="200" height="32" rx="16" fill="#ea580c"/>
+    <text x="615" y="209" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">Serve the fallback</text>
+  </g>
+
+  <line x1="740" y1="165" x2="783" y2="165" stroke="#c2410c" stroke-width="2" marker-end="url(#arrow-accent)"/>
+
+  <g>
+    <rect x="785" y="95" width="195" height="140" rx="12" fill="#f9fafb" stroke="#d1d5db"/>
+    <text x="882" y="135" text-anchor="middle" font-size="15" font-weight="600" fill="#111827">Provider</text>
+    <text x="882" y="165" text-anchor="middle" font-size="13" fill="#4b5563">The fallback model</text>
+    <text x="882" y="185" text-anchor="middle" font-size="13" fill="#4b5563">answers</text>
+  </g>
+
+  <g>
+    <path d="M425 270 a40 9 0 0 0 80 0 a40 9 0 0 0 -80 0 v30 a40 9 0 0 0 80 0 v-30" fill="#f9fafb" stroke="#9ca3af"/>
+    <text x="465" y="296" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">Redis</text>
+    <text x="465" y="327" text-anchor="middle" font-size="11.5" fill="#6b7280">team spend counter</text>
+    <path d="M340 235 L340 285 L423 285" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow-muted)"/>
+    <path d="M507 285 L615 285 L615 237" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow-muted)"/>
+    <text x="381" y="278" text-anchor="middle" font-size="11" fill="#6b7280">writes</text>
+    <text x="560" y="278" text-anchor="middle" font-size="11" fill="#6b7280">reads</text>
+  </g>
+
+  <path d="M882 235 L882 362 L90 362 L90 237" fill="none" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="610" y="347" width="250" height="30" rx="15" fill="#ffffff" stroke="#ea580c"/>
+  <text x="735" y="367" text-anchor="middle" font-size="12" fill="#9a3412" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">x-brownout-route-served</text>
+  <text x="250" y="353" text-anchor="middle" font-size="12" fill="#4b5563">Response with disclosure headers</text>
+</svg>

@@ -10,10 +10,10 @@ Claude Code sends `/v1/messages`.
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:4000
-export ANTHROPIC_AUTH_TOKEN=<A TEAM KEY>
-export ANTHROPIC_MODEL=<A ROUTE>
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=<A ROUTE>
-export CLAUDE_CODE_MAX_CONTEXT_TOKENS=<THE SMALLER CONTEXT WINDOW>
+export ANTHROPIC_AUTH_TOKEN={team key}
+export ANTHROPIC_MODEL={route}
+export ANTHROPIC_DEFAULT_HAIKU_MODEL={route}
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS={smaller context window}
 claude
 ```
 
@@ -31,9 +31,9 @@ Codex sends `/v1/responses`. Put this in `~/.codex/config.toml` and set `LITELLM
 key.
 
 ```toml
-model = "<A ROUTE>"
+model = "{route}"
 model_provider = "litellm"
-model_context_window = <THE SMALLER CONTEXT WINDOW>
+model_context_window = {smaller context window}
 
 [model_providers.litellm]
 name = "LiteLLM gateway"
