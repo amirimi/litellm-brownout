@@ -54,7 +54,7 @@ bridge writes the request's facts into its LiteLLM metadata.
 | `events.py` | Event types and the `brownout` log line | No |
 | `settings.py` | Environment variables | No |
 | `cli.py` | `brownout check` and `brownout init` | Through the bridge, which prices the config's deployments with LiteLLM's router |
-| `bridge.py` | Every LiteLLM touchpoint, including the three private helpers, the version check, the table of admitted call types and the request facts field | Yes |
+| `bridge.py` | Every LiteLLM touchpoint, including the private helpers `_can_object_call_model`, `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`, the version check, the table of admitted call types and the request facts field | Yes |
 | `gateway.py` | The three hooks, the request pipeline per call kind and the one place a refusal becomes an `HTTPException` | Through the bridge |
 
 The pairing rules and the permission check run only when `decide` wants a downgrade, because they
@@ -89,6 +89,31 @@ read from the LiteLLM 1.101.0 source that the links cite.
 | Caller disclosure | No native header or logging field carries the served route or the route it degraded from |
 | Guardrail re-merge after a rewrite | The merge runs at stage 3 keyed on the requested model, so a stage 4 rewrite would drop the target's guardrails |
 | Versioned, cross-replica deduplication | Each claim carries team, policy epoch, window and transition. The epoch is derived from the team's policy, so a policy change re-arms its transitions |
+
+## Claims and the policy epoch
+
+A decision reads the team counter minus the request's own hold. The hold is a temporary
+authorisation, so a request judged with it would push itself toward its own downgrade. Holds of
+other in-flight requests stay in the figure, because each will produce a real charge.
+
+Each transition is claimed with a Redis `SET NX` and a TTL of twice the window, so it is announced
+once per window across every replica. The window is LiteLLM's next reset instant for the team's
+`budget_duration`, from `get_budget_reset_time` with the gateway's `timezone` and
+`budget_reset_time`, written in UTC.
+
+| Transition | Claim key |
+|---|---|
+| Team tier | `brownout:tier:<team>:<epoch>:<window>:team:<tier>` |
+| Route tier | `brownout:tier:<team>:<epoch>:<window>:route:<route>:<tier>` |
+| Route degraded | `brownout:degraded:<team>:<epoch>:<window>:<route>` |
+| Fallback rejected | `brownout:fallback_rejected:<team>:<epoch>:<window>:<route>:<rejection>` |
+| Incident | `brownout:incident:<reason>:<subject>:<window>` |
+
+The epoch is the first 12 hex characters of a SHA-256 over the team's parsed `envelope_usd`,
+`budget_duration`, `warn_tiers` and routes. Key order, comments and writing `500` for `500.0` leave
+it unchanged. An `unpriced_model` incident is keyed on the model group. A `model_not_a_group`
+incident is keyed on the team, because a key holder could otherwise raise unbounded incidents by
+inventing model names.
 
 ## Known limitations
 

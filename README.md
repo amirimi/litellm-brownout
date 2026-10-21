@@ -31,39 +31,32 @@ route has no fallback.
 LiteLLM already reserves each request's cost, counts team spend across replicas and refuses requests
 past the budget. Brownout adds four things.
 
-- **Warnings at any percentage:** each team and route sets its own tiers, and each tier is logged
-  once per budget window across all replicas. LiteLLM's own budget alerts fire at 85% and 95%.
+- **Warnings at any percentage:** each team and route sets its own tiers, logged once per budget
+  window across replicas. LiteLLM's own budget alerts fire at 85% and 95%.
 - **Downgrades on the team's total:** a route switches to its fallback at the percentage you set.
-  LiteLLM's [budget fallbacks][litellm-budget-fallbacks] switch only when a key runs out of a
-  per-model budget.
-- **Checked fallbacks:** brownout switches only to a fallback the gateway serves, that has a price,
-  and that the caller's key and team may call. Otherwise the primary keeps serving.
-- **Disclosure:** `x-brownout-*` response headers and LiteLLM's spend logs name the model that
-  answered and why.
+  LiteLLM's [budget fallbacks][litellm-budget-fallbacks] switch only when a key exhausts a per-model
+  budget.
+- **Checked fallbacks:** brownout switches only to a fallback the gateway serves and prices, and that
+  the caller's key and team may call.
+- **Disclosure:** `x-brownout-*` headers and the spend logs name the model that answered and why.
 
-Downgrades cover chat, text completion, `/v1/messages`, `/v1/responses` and Google's
-`generateContent`, so Claude Code and Codex sessions carry on with the fallback. Embeddings, images,
-audio and other model calls keep their model and still get the warnings and the headers.
+Downgrades cover chat, text completion, `/v1/messages`, `/v1/responses` and `generateContent`, so
+Claude Code and Codex sessions carry on with the fallback.
 
 ## Requirements
 
-Brownout governs every model call on the gateway, so the whole gateway has to meet these. `init`
-checks each one and prints the fix.
+Brownout governs every model call on the gateway. `init` checks each requirement and prints the fix.
 
-- **A team for every key:** every key that calls a model, an MCP tool, files, vector stores or
-  containers belongs to a team in the manifest, because brownout reads the team's budget.
-- **No key budgets:** a budget on a key is a second ceiling the manifest cannot see.
-- **Reviewed call types only:** provider pass-through routes, realtime, batches, fine-tuning and
-  search tools get a 503, because brownout refuses what it has not reviewed.
+- **A team for every key:** brownout reads the team's budget, so every key belongs to a manifest
+  team.
+- **No key budgets:** a key budget is a second ceiling the manifest cannot see.
+- **Unified routes only:** provider pass-through routes, realtime, batches, fine-tuning and search
+  tools get a 503.
 - **Fail-closed budgets and Redis:** `fail_closed_budget_enforcement` is on and `coordination_redis`
-  is configured. LiteLLM keeps each team's spend counter in that Redis, and brownout records its
-  announcements there.
-- **LiteLLM 1.101.6 to 1.106, pinned by image tag:** brownout imports three private LiteLLM helpers,
-  so upgrade only to a release the weekly `litellm matrix` workflow has passed.
+  is set.
+- **LiteLLM 1.101.6 to 1.106:** pin the image tag.
 
-If your gateway has no Redis, add one before running `init` and give the gateway the same
-`REDIS_PASSWORD`. With Docker Compose the service looks like this, and its host for `init` is
-`redis`. The append-only file and `noeviction` keep the counter through restarts and memory pressure.
+A gateway without Redis needs one that shares its `REDIS_PASSWORD`, such as this service.
 
 <!-- adoption: redis-service -->
 ```yaml
@@ -80,9 +73,8 @@ services:
 You run `init` against your gateway, fix what it finds, let it write two files, then add the package
 to the gateway image.
 
-**1. Run `init`.** The first line waits for you to paste the master key and shows no prompt. The
-block then creates a read-only `brownout-init` user for `init`. Run it from a shell that exports no
-other secret, such as a provider key.
+**1. Run `init`.** Paste the master key on the first line, which shows no prompt. The block creates
+a read-only `brownout-init` user for `init`.
 
 <!-- adoption: prepare -->
 ```bash
@@ -94,14 +86,12 @@ BROWNOUT_INIT_KEY=$(curl -sSf http://localhost:4000/user/new \
 uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
 ```
 
-`init` lists every request brownout would refuse, such as keys without a team or models without a
-price, and prints the command or config lines that fix each one. Fix them and rerun the last line
-until it exits `0`, then rerun it with `--write`. On OpenRouter every model needs a price, and
-[one command][openrouter-prices] prints it.
+`init` lists every request brownout would refuse with the fix for each. Rerun it until it exits `0`,
+then once more with `--write`. OpenRouter models need a price, which [one command][openrouter-prices]
+prints.
 
-**2. Check the files.** `--write` creates `brownout.yaml`, the manifest with one entry per team, and
-`brownout.config.yaml`, your config plus the callback and the settings brownout needs. Check both,
-then delete the `brownout-init` user, which deletes its key too.
+**2. Check the files.** `--write` creates `brownout.yaml`, the manifest, and `brownout.config.yaml`,
+your config with brownout's settings. Check both, then delete the `brownout-init` user.
 
 <!-- adoption: check -->
 ```bash
@@ -111,8 +101,7 @@ curl -sSf http://localhost:4000/user/delete \
   -d '{"user_ids": ["brownout-init"]}'
 ```
 
-**3. Add the package to the gateway image.** The LiteLLM image ships without `pip`, so the line
-bootstraps it first.
+**3. Add the package to the gateway image.**
 
 <!-- adoption: install -->
 ```dockerfile
@@ -121,11 +110,10 @@ RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-bro
 ```
 
 Point the gateway at `brownout.config.yaml`, set `BROWNOUT_MANIFEST` to the path of `brownout.yaml`
-in the container, and restart it. On a gateway installed with pip, run the same `pip install` in its
-environment. `--no-deps` leaves the gateway's LiteLLM as it is.
+in the container, and restart it.
 
-**4. Confirm.** Send one request with a team's key. The master key and the viewer key belong to no
-team, so brownout refuses both.
+**4. Confirm.** Send one request with a team's key. The master key belongs to no team, so brownout
+refuses it.
 
 <!-- adoption: confirm -->
 ```bash
@@ -135,10 +123,8 @@ curl -s -i http://localhost:4000/v1/chat/completions \
   | grep -io '^x-brownout-[a-z-]*: [^[:cntrl:]]*\|"reason": *"[a-z_]*"'
 ```
 
-LiteLLM's default log level hides brownout's load message, so this header is the check. The
-response carries `x-brownout-route-served` with the model that answered. A refused request prints
-its reason instead, such as `"reason":"model_not_a_group"` for a name the gateway does not
-configure.
+`x-brownout-route-served` names the model that answered. A refused request prints its reason, such
+as `"reason":"model_not_a_group"`.
 
 ## Quickstart
 
@@ -157,9 +143,8 @@ teams:
         degrade_at: 90
 ```
 
-Add `chat-qa-small` to the team's model list in LiteLLM, or the primary keeps serving. Run
-`brownout check` again and restart the gateway, which reads the manifest only at startup. For a
-model added in the admin UI, `check` reads the gateway with a viewer key.
+Add `chat-qa-small` to the team's model list in LiteLLM, run `brownout check` again and restart the
+gateway. For models added in the admin UI, `check` reads the gateway with a viewer key.
 
 <!-- adoption: fallback-ui-check -->
 ```bash
@@ -173,7 +158,7 @@ curl -sSf http://localhost:4000/user/delete \
   -d '{"user_ids": ["brownout-init"]}'
 ```
 
-Once the team passes $450, every `chat-qa` response carries these headers.
+Past $450, every `chat-qa` response carries these headers.
 
 ```
 x-brownout-route-served: chat-qa-small
@@ -182,12 +167,9 @@ x-brownout-degraded-from: chat-qa
 x-brownout-degradation-reason: degrade_tier_reached
 ```
 
-Send the fallback the route's real requests before it carries real traffic, because it gets
-everything the route sends, tools and images included.
-
-To point Claude Code or Codex at a route, follow [their setup][agents]. A manifest can also require
-each fallback to be cleared for its route's [data class][data-classes]. To watch a whole budget
-drain without spending anything, run the [lab][lab].
+The fallback receives everything the route sends, tools and images included, so try it on the
+route's real requests first. To point Claude Code or Codex at a route, follow [their
+setup][agents]. The [lab][lab] drains a budget without spending anything.
 
 ## Limits
 
@@ -201,21 +183,18 @@ drain without spending anything, run the [lab][lab].
   caller asked for. Set `max_tokens`, or a large request near the ceiling gets LiteLLM's 429 before
   the downgrade.
 - **Redis is on the request path:** while LiteLLM cannot reach Redis it refuses every budgeted
-  request, and it keeps refusing for 60 seconds after Redis returns.
+  request.
 
-The [full list][limits] gives each limit with its cause. If you run brownout on a real workload,
-[open an issue][issues] with the model pair, budget window, threshold and LiteLLM version, and say
-whether the fallback stayed useful.
+The [full list][limits] covers the rest. If you run brownout on a real workload, [open an
+issue][issues] with the model pair, budget window, threshold and LiteLLM version, and say whether
+the fallback stayed useful.
 
 ## Documentation
 
-The reference docs state every rule, assumption and failure mode exactly, for reviewers and for
-agents reviewing brownout.
-
-- [Configuration][configuration]: every setting, manifest key, rule and `init` option.
-- [Enforcement][enforcement]: what brownout assumes, how it fails, and its headers and events.
-- [Limits][limits]: every known limit and its cause.
-- [Claude Code and Codex][agents]: the settings that point both tools at a route.
+- [Configuration][configuration]: settings, manifest keys, rules and `init` options.
+- [Enforcement][enforcement]: refusals, headers and events.
+- [Limits][limits]: every known limit.
+- [Claude Code and Codex][agents]: pointing both tools at a route.
 - [Design][design]: how the modules fit together.
 - [Security][security]: what brownout reads and writes, and how to verify a release.
 - [Contributing][contributing]: the tests, the supported LiteLLM releases and releasing.
@@ -227,7 +206,6 @@ agents reviewing brownout.
 [litellm-budget-fallbacks]: https://docs.litellm.ai/docs/proxy/budget_fallbacks
 [openrouter-prices]: https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md#openrouter-prices
 [agents]: https://github.com/amirimi/litellm-brownout/blob/main/docs/claude-code-and-codex.md
-[data-classes]: https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md#data-classes
 [lab]: https://github.com/amirimi/litellm-brownout/blob/main/docs/lab.md
 [limits]: https://github.com/amirimi/litellm-brownout/blob/main/docs/limits.md
 [issues]: https://github.com/amirimi/litellm-brownout/issues
