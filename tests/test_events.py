@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Final
 
 from brownout import bridge
@@ -91,3 +92,9 @@ def test_team_events_log_at_warning_and_incidents_at_error(caplog):
 
     assert [record.levelname for record in caplog.records] == ["WARNING", "ERROR"]
     assert all(record.name == "brownout" for record in caplog.records)
+
+
+def test_an_announcement_is_its_payload_as_the_whole_message(caplog):
+    EventLog().emit(tier_event())
+
+    assert json.loads(caplog.records[0].getMessage()) == tier_event().as_payload()

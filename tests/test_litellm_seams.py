@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
+import json
+import logging
 import socket
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +12,7 @@ from typing import Final, get_args
 
 import litellm
 import pytest
+from litellm._logging import JsonFormatter
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.litellm_core_utils import litellm_logging
 from litellm.litellm_core_utils.core_helpers import (
@@ -23,7 +26,7 @@ from litellm.proxy.spend_tracking import budget_reservation
 from litellm.proxy.utils import _check_and_merge_model_level_guardrails
 from litellm.types.utils import CallTypes
 
-from brownout import bridge
+from brownout import bridge, log_output
 
 LITELLM_ROOT: Final = Path(importlib.util.find_spec("litellm").origin).parent
 SERVER_DEFAULT_INLINE: Final = 'general_settings.get("completion_model", None)'
@@ -627,3 +630,29 @@ def test_seam_the_router_prices_base_model_only_from_model_info(
     billed_input = _billed(router, "chat")[0] or 0
 
     assert (billed_input > 0) is priced
+
+
+def test_seam_the_proxy_logger_carries_a_formatted_handler():
+    handlers = logging.getLogger(log_output.LITELLM_PROXY_LOGGER).handlers
+
+    assert handlers
+    assert handlers[0].formatter is not None
+
+
+def test_seam_json_logs_lift_a_json_message_into_top_level_fields():
+    record = logging.LogRecord(
+        "brownout",
+        logging.WARNING,
+        "events.py",
+        1,
+        "%s",
+        ('{"event": "brownout_tier_crossed", "tier": 75}',),
+        None,
+    )
+
+    line = json.loads(JsonFormatter().format(record))
+
+    assert line["component"] == "brownout"
+    assert line["level"] == "WARNING"
+    assert line["event"] == "brownout_tier_crossed"
+    assert line["tier"] == 75
