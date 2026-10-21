@@ -13,6 +13,12 @@ and the gateway switches that route once the team's spend passes it.
   <a href="https://github.com/amirimi/litellm-brownout/blob/main/LICENSE"><img src="https://img.shields.io/github/license/amirimi/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="License" /></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/amirimi/litellm-brownout#get-started"><img src="https://img.shields.io/badge/Docker%20Compose-000000?style=flat&logo=docker&logoColor=white" alt="Docker Compose" /></a>
+  <a href="https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md#kubernetes-with-litellm-helm"><img src="https://img.shields.io/badge/Kubernetes%20with%20Helm-000000?style=flat&logo=kubernetes&logoColor=white" alt="Kubernetes with Helm" /></a>
+  <a href="https://github.com/amirimi/litellm-brownout#other-ways-to-run-litellm"><img src="https://img.shields.io/badge/pip%20or%20uv-000000?style=flat&logo=python&logoColor=white" alt="pip or uv" /></a>
+</p>
+
 </div>
 
 <p align="center">
@@ -144,10 +150,10 @@ The plugin needs three things in LiteLLM's container: `plugins/` mounted at `/ap
 manifest at `/app/brownout.yaml` and `PYTHONPATH=/app/plugins`.
 
 - **`docker run`:** with no compose file in the folder, `init --write` prints the flags to add.
-- **Kubernetes with LiteLLM's `litellm-helm` chart:** `init --write --platform helm` writes the
-  manifest and prints two blocks: the settings for `proxy_config`, and chart values for an init
-  container that installs the plugin from PyPI and a ConfigMap that holds the manifest. A cluster
-  without access to PyPI points pip at its own mirror with `--index-url`.
+- **Kubernetes with LiteLLM's `litellm-helm` chart:** add `--platform helm`, then follow
+  [these steps][helm].
+- **`pip` or `uv`:** install `litellm-brownout` into the proxy's environment, add `--platform pip`,
+  and start the proxy from the folder that holds `brownout.yaml`. No mount is needed.
 - **Anywhere else:** mount the same folder and file, and set the same variable.
 
 To upgrade, run `uvx --from litellm-brownout=={version} brownout plugin --dir plugins` and restart the
@@ -227,6 +233,7 @@ the fallback stayed useful.
 [limits]: https://github.com/amirimi/litellm-brownout/blob/main/docs/limits.md
 [issues]: https://github.com/amirimi/litellm-brownout/issues
 [configuration]: https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md
+[helm]: https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md#kubernetes-with-litellm-helm
 [enforcement]: https://github.com/amirimi/litellm-brownout/blob/main/docs/enforcement.md
 [design]: https://github.com/amirimi/litellm-brownout/blob/main/docs/design.md
 [security]: https://github.com/amirimi/litellm-brownout/blob/main/SECURITY.md

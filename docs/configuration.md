@@ -52,7 +52,7 @@ brownout init --gateway http://localhost:4000 --gateway-config config.yaml --wri
 | `--manifest-out` | `brownout.yaml` | Where the manifest is written |
 | `--config-out` | the `--gateway-config` path | Where the prepared gateway config is written, comments and key order kept |
 | `--plugin-dir` | `plugins` | Where the plugin folder is written |
-| `--platform` | `compose` | `helm` writes only the manifest and prints the chart's settings and values |
+| `--platform` | `compose` | `helm` writes only the manifest and prints the chart's settings and values. `pip` writes the config and manifest with nothing to mount |
 | `--service` | the one service running LiteLLM's image | The Compose service the override extends |
 | `--compose-file` | `compose.yaml` or `docker-compose.yml` in the current folder | The Compose file whose LiteLLM service the override extends |
 | `--redis-host` | none | Writes `coordination_redis` for this host when the config names no Redis |
@@ -98,6 +98,20 @@ it under `proxy_config`. It writes the manifest and prints the settings to paste
 values for `extraInitContainers`, `volumes`, `volumeMounts` and `envVars`. The init container
 installs the plugin from PyPI with `pip install --target`, so a cluster without PyPI access points
 pip at its own mirror with `--index-url`. The last printed line creates the manifest's ConfigMap.
+
+### Kubernetes with litellm-helm
+
+1. Forward the gateway and save its config: `kubectl port-forward svc/litellm 4000:4000` and
+   `helm get values litellm -o yaml | yq '.proxy_config' > config.yaml`.
+2. Run `init` with `--platform helm --redis-host {redis service} --write`.
+3. Create the ConfigMap with the command `init` prints.
+4. Paste both printed blocks into your existing values file, then run `helm upgrade`. Add the
+   printed `volumes` and `volumeMounts` to the lists you already have, because Helm replaces a list
+   from a second values file.
+5. Run `kubectl logs deploy/litellm -c litellm | grep "brownout loaded"`.
+
+A manifest edit needs the ConfigMap updated, then `kubectl rollout restart deploy/litellm`. An
+upgrade changes the version in the init container's command.
 
 ### OpenRouter prices
 

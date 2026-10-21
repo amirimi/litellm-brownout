@@ -98,6 +98,15 @@ COMMAND_ROWS: Final = (
                 ),
             ),
             Form(
+                "init --write --platform pip",
+                "the config and manifest, with no plugin folder or override",
+                Supported(
+                    (
+                        f"{CLI}test_for_pip_init_writes_the_config_and_manifest_and_nothing_to_mount",
+                    )
+                ),
+            ),
+            Form(
                 "init --write with --service or --compose-file",
                 "the Compose override for that service and file",
                 Supported(

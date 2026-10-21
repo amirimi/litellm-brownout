@@ -89,7 +89,7 @@ UNREADY: Final = 2
 DEFAULT_PLUGIN_DIR: Final = "plugins"
 SERVICE_PLACEHOLDER: Final = "<YOUR LITELLM SERVICE>"
 
-Platform = Literal["compose", "helm"]
+Platform = Literal["compose", "helm", "pip"]
 Placement = Override | OverrideRefused | ComposeUnavailable | NoComposeFile | None
 
 
@@ -152,7 +152,7 @@ def _parser() -> argparse.ArgumentParser:
         "--plugin-dir", type=Path, default=Path(DEFAULT_PLUGIN_DIR)
     )
     init_command.add_argument(
-        "--platform", choices=("compose", "helm"), default="compose"
+        "--platform", choices=("compose", "helm", "pip"), default="compose"
     )
     init_command.add_argument("--service")
     init_command.add_argument("--compose-file", type=Path)
@@ -297,7 +297,7 @@ def _taken_outputs(options: InitOptions) -> list[Path]:
     if options.manifest is not None:
         inputs.add(options.manifest.resolve())
     taken: Final = [path for path in (options.manifest_out,) if _occupied(path, inputs)]
-    separate: Final = options.platform == "compose" and _separate_config(options)
+    separate: Final = options.platform != "helm" and _separate_config(options)
     if separate and _occupied(options.config_out, inputs):
         taken.append(options.config_out)
     return taken
@@ -319,7 +319,7 @@ def _plugin_dir_beside_config(options: InitOptions) -> bool:
 
 def _placement(options: InitOptions, compose: ComposeRunner) -> Placement:
     match options.platform:
-        case "helm":
+        case "helm" | "pip":
             return None
         case "compose":
             return _compose_placement(options, compose)
@@ -500,7 +500,7 @@ def _config_target(options: InitOptions) -> str:
     match options.platform:
         case "helm":
             return "proxy_config"
-        case "compose":
+        case "compose" | "pip":
             return str(options.config_out)
         case _:
             assert_never(options.platform)
@@ -513,17 +513,34 @@ def _write(options: InitOptions, prepared: Prepared, placement: Placement) -> No
         case "helm":
             _write_manifest(options, prepared)
             _print_helm(options, prepared)
+        case "pip":
+            _write_for_pip(options, prepared)
         case _:
             assert_never(options.platform)
+
+
+def _write_for_pip(options: InitOptions, prepared: Prepared) -> None:
+    _write_config(options, prepared)
+    _write_manifest(options, prepared)
+    if prepared.manifest_out_text is not None:
+        _check_written(options, prepared)
+    print(
+        f"next: restart the proxy from {options.manifest_out.resolve().parent}, or set "
+        f"BROWNOUT_MANIFEST={options.manifest_out.resolve()}"
+    )
+
+
+def _write_config(options: InitOptions, prepared: Prepared) -> None:
+    if prepared.changes or _separate_config(options):
+        source_mode = options.gateway_config.stat().st_mode & PERMISSION_BITS
+        _replace_file(options.config_out, prepared.config_out_text, source_mode)
+        print(f"wrote {options.config_out}")
 
 
 def _write_for_compose(
     options: InitOptions, prepared: Prepared, placement: Placement
 ) -> None:
-    if prepared.changes or _separate_config(options):
-        source_mode = options.gateway_config.stat().st_mode & PERMISSION_BITS
-        _replace_file(options.config_out, prepared.config_out_text, source_mode)
-        print(f"wrote {options.config_out}")
+    _write_config(options, prepared)
     _write_manifest(options, prepared)
     version: Final = write_plugin(options.plugin_dir)
     print(

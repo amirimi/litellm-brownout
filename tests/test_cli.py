@@ -521,6 +521,23 @@ def test_an_existing_override_gets_the_lines_to_merge_and_stays_untouched(
     assert "/app/plugins" in printed.out
 
 
+def test_for_pip_init_writes_the_config_and_manifest_and_nothing_to_mount(
+    tmp_path, capsys
+):
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    chosen = options(tmp_path, platform="pip")
+
+    exit_code = init(chosen, fake_gateway(), INIT_TOKEN)
+
+    printed = capsys.readouterr().out
+    assert exit_code == 0
+    assert chosen.manifest_out.exists()
+    assert not chosen.plugin_dir.exists()
+    assert not (tmp_path / "compose.override.yaml").exists()
+    assert "brownout check passed on LiteLLM" in printed
+    assert f"BROWNOUT_MANIFEST={chosen.manifest_out.resolve()}" in printed
+
+
 def test_without_a_compose_file_init_prints_docker_run_flags(tmp_path, capsys):
     chosen = options(tmp_path)
 
