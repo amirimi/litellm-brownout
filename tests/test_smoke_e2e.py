@@ -629,7 +629,7 @@ def test_init_runs_without_the_master_key_from_the_lab_env_file(
     assert result.stdout.strip() == loaded
 
 
-def _run_init(arguments: list[str], key: str) -> InitRun:
+def _run_init(arguments: list[str], key: str, directory: Path) -> InitRun:
     environment = _init_environment(key)
     result = subprocess.run(
         [
@@ -643,7 +643,7 @@ def _run_init(arguments: list[str], key: str) -> InitRun:
         ],
         capture_output=True,
         text=True,
-        cwd=REPO_ROOT,
+        cwd=directory,
         env=environment,
         check=False,
     )
@@ -674,7 +674,7 @@ def _delete_keys(keys: list[str]) -> None:
 def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findings(
     lab_run: LabRun, init_key: str, tmp_path: Path
 ) -> None:
-    baseline = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key)
+    baseline = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key, tmp_path)
     suffix = datetime.now(UTC).strftime("%H%M%S%f")
     teamless_alias = f"e2e-teamless-{suffix}"
     capped_alias = f"e2e-capped-{suffix}"
@@ -696,6 +696,7 @@ def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findi
                 "--write",
             ],
             init_key,
+            tmp_path,
         )
 
         assert prepared.exit_code == 1
@@ -735,7 +736,7 @@ def test_init_from_nothing_prepares_a_gateway_and_its_commands_resolve_the_findi
                 command = command.replace("<YOUR TEAM ID>", filled)
             assert run_printed(command) == 200, command
 
-        resolved = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key)
+        resolved = _run_init(["--gateway-config", str(LAB_CONFIG)], init_key, tmp_path)
         assert resolved.findings == baseline.findings
         assert resolved.exit_code == baseline.exit_code
     finally:
@@ -769,6 +770,7 @@ def test_init_merges_into_an_existing_manifest_and_reports_every_mismatch(
             "--write",
         ],
         init_key,
+        tmp_path,
     )
 
     assert merged.exit_code == 1

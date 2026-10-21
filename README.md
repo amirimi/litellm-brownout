@@ -67,7 +67,8 @@ checks each one and prints the fix.
 - Clients use LiteLLM's unified routes. Provider pass-through routes, realtime, batches, fine-tuning
   and search tools are refused.
 - `fail_closed_budget_enforcement` is on, and `coordination_redis` points at a Redis.
-- LiteLLM is 1.101.6 to 1.106, pinned by image tag.
+- LiteLLM is 1.101.6 to 1.106. Pin its image by digest as well as tag, because floating tags such as
+  `main-stable` have pointed at a compromised LiteLLM release.
 
 A gateway without Redis needs one that shares its `REDIS_PASSWORD`, such as this service.
 
@@ -83,49 +84,49 @@ services:
 
 ## Get started
 
-**1. Run `init` against your gateway.** Paste the master key on the first line.
+Run these from the folder with your compose file. `init` reads the gateway with GET requests only,
+so any key that can read teams, keys and models works, the master key included.
+
+**1. Run `init` and fix what it lists.**
 
 <!-- adoption: prepare -->
 ```bash
-read -rs LITELLM_MASTER_KEY && typeset +x LITELLM_MASTER_KEY
-BROWNOUT_INIT_KEY=$(curl -sSf http://localhost:4000/user/new \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"user_id": "brownout-init", "user_role": "proxy_admin_viewer"}' | jq -er .key) \
-  && export BROWNOUT_INIT_KEY
+export BROWNOUT_INIT_KEY="{gateway key}"
 uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
 ```
 
-**2. Fix what it lists, rerun it with `--write`, then check the files.**
+Each finding prints its fix, and a fix that calls LiteLLM's API uses `$LITELLM_MASTER_KEY` from your
+shell. If `init` reports no Redis, add the service above and pass `--redis-host redis` in the next
+step.
 
-<!-- adoption: check -->
+**2. Write the files.**
+
+<!-- adoption: write -->
 ```bash
-uvx --from litellm-brownout brownout check --gateway-config brownout.config.yaml --manifest brownout.yaml
-curl -sSf http://localhost:4000/user/delete \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"user_ids": ["brownout-init"]}'
+uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml --write
 ```
 
-**3. Build the gateway image with brownout and run it on the new files.**
+**3. Restart the gateway.**
 
-<!-- adoption: install -->
-```dockerfile
-FROM docker.litellm.ai/berriai/litellm:v1.106.1
-RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
+<!-- adoption: restart -->
+```bash
+docker compose up -d
+docker compose logs litellm | grep "brownout loaded"
 ```
 
-```yaml
-services:
-  litellm:
-    build: .
-    command: ["--config", "/app/brownout.config.yaml", "--port", "4000"]
-    environment:
-      BROWNOUT_MANIFEST: /app/brownout.yaml
-    volumes:
-      - ./brownout.config.yaml:/app/brownout.config.yaml:ro
-      - ./brownout.yaml:/app/brownout.yaml:ro
-```
+What happened:
 
-**4. Send one request with a team's key.**
+- `init` added brownout's settings to `config.yaml` and wrote `brownout.yaml`, the manifest. It
+  checked both before it finished.
+- It copied the plugin into `plugins/`, at the version you ran.
+- It wrote `docker-compose.override.yml`. Compose merges it into your LiteLLM service, which gains
+  `PYTHONPATH` and read-only mounts of `plugins/` and `brownout.yaml`. Your compose file and
+  LiteLLM's image stay as they were.
+- The log line names the plugin version and the teams it governs. If your service has another name,
+  `init` found it by its LiteLLM image, and `--service` names it when there are several.
+
+To see the headers, send one request with a team's key. A refused request prints its reason
+instead, and the master key belongs to no team, so brownout refuses it.
 
 <!-- adoption: confirm -->
 ```bash
@@ -135,15 +136,22 @@ curl -s -i http://localhost:4000/v1/chat/completions \
   | grep -io '^x-brownout-[a-z-]*: [^[:cntrl:]]*\|"reason": *"[a-z_]*"'
 ```
 
-What happened:
+OpenRouter models need a price, which [one command][openrouter-prices] prints.
 
-- `init` read the gateway as a read-only `brownout-init` user and listed every request brownout
-  would refuse, with the fix for each. OpenRouter models need a price, which
-  [one command][openrouter-prices] prints.
-- `--write` created `brownout.yaml`, the manifest, and `brownout.config.yaml`, your config with
-  brownout's settings. `check` validated both, and the `brownout-init` user was deleted.
-- The response names the model that answered in `x-brownout-route-served`. A refused request prints
-  its reason instead. The master key belongs to no team, so brownout refuses it.
+### Other ways to run LiteLLM
+
+The plugin needs three things in LiteLLM's container: `plugins/` mounted at `/app/plugins`, the
+manifest at `/app/brownout.yaml` and `PYTHONPATH=/app/plugins`.
+
+- **`docker run`:** with no compose file in the folder, `init --write` prints the flags to add.
+- **Kubernetes with LiteLLM's `litellm-helm` chart:** `init --write --platform helm` writes the
+  manifest and prints two blocks: the settings for `proxy_config`, and chart values for an init
+  container that installs the plugin from PyPI and a ConfigMap that holds the manifest. A cluster
+  without access to PyPI points pip at its own mirror with `--index-url`.
+- **Anywhere else:** mount the same folder and file, and set the same variable.
+
+To upgrade, run `uvx --from litellm-brownout=={version} brownout plugin --dir plugins` and restart the
+gateway.
 
 ## Your first fallback
 
@@ -159,19 +167,12 @@ teams:
         degrade_at: 90
 ```
 
-Add `{fallback}` to the team's model list in LiteLLM, run `brownout check` again and restart the
-gateway. For models added in the admin UI, `check` reads the gateway with a viewer key.
+Add `{fallback}` to the team's model list in LiteLLM, check the manifest, then restart the gateway
+with `docker compose restart litellm`. `--gateway` lets the check see models added in the admin UI.
 
-<!-- adoption: fallback-ui-check -->
+<!-- adoption: fallback-check -->
 ```bash
-BROWNOUT_INIT_KEY=$(curl -sSf http://localhost:4000/user/new \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"user_id": "brownout-init", "user_role": "proxy_admin_viewer"}' | jq -er .key) \
-  && export BROWNOUT_INIT_KEY
-uvx --from litellm-brownout brownout check --gateway http://localhost:4000 --gateway-config brownout.config.yaml --manifest brownout.yaml
-curl -sSf http://localhost:4000/user/delete \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"user_ids": ["brownout-init"]}'
+uvx --from litellm-brownout brownout check --gateway http://localhost:4000 --gateway-config config.yaml --manifest brownout.yaml
 ```
 
 Once the team's spend passes 90%, every `{route}` response carries these headers.

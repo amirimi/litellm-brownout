@@ -18,10 +18,17 @@ deployment ids, tiers, amounts and reason codes. The plugin opens no network con
 A test plants a marker in every secret the handler can see and fails if the marker reaches any of
 these outputs.
 
-`brownout init` runs on the operator's machine. It reads `/team/list`, `/key/list` and `/model/info`
-with a key that only needs read access, writes two new files, and prints no value from the gateway
-config. Run it from a shell that exports no other secret, because `uvx` runs the packages it
-installs with that shell's environment. `brownout check` reads the config and the manifest and prints rule ids and route names.
+`brownout init` runs on the operator's machine. It sends only `GET` requests, to `/team/list`,
+`/key/list` and `/model/info`, with the key in `BROWNOUT_INIT_KEY`, so even the master key cannot
+change the gateway through it. Brownout never prompts for a key, never creates one and never reads
+`LITELLM_MASTER_KEY` itself. `init` adds brownout's settings to the gateway config, writes the
+manifest, the plugin folder and a Compose override, and prints no value from the gateway config.
+Run it from a shell that exports no other secret, because `uvx` runs the packages it installs with
+that shell's environment. `brownout check` reads the config and the manifest and prints rule ids and
+route names.
+
+The plugin runs as plain Python files in `plugins/`, mounted read-only into LiteLLM's unchanged
+image, so a reviewer can read exactly what the gateway loads.
 
 ## Checking a release
 

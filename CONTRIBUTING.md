@@ -41,8 +41,9 @@ set -a && source .env && set +a
 uv run pytest -m e2e
 ```
 
-The lab mounts `src/brownout` into the stock LiteLLM image with `PYTHONPATH=/app/plugins`, so a code
-change needs only `docker compose restart litellm`.
+The lab mounts `src/brownout` into the stock LiteLLM image with `PYTHONPATH=/app/plugins`, the same
+way the documented install mounts `plugins/`, so a code change needs only
+`docker compose restart litellm`.
 
 `tests/test_call_kinds_e2e.py` drives a second lab team, `kinds-lab`, through each call kind. It
 sends every text endpoint past the downgrade tier, then embeddings, a direct MCP tool call, an MCP
