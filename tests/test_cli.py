@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from brownout.cli import InitOptions, check, init, main
+from brownout.gateway_api import read_model_groups
 from brownout.inputs import DocumentError
 from brownout.manifest import Manifest
 
@@ -241,8 +242,11 @@ def fake_gateway(
     keys: list[dict[str, Any]] | None = None,
     models: list[dict[str, Any]] | None = None,
     status: int = 200,
+    methods: list[str] | None = None,
 ) -> httpx.Client:
     def handle(request: httpx.Request) -> httpx.Response:
+        if methods is not None:
+            methods.append(request.method)
         if status != 200:
             return httpx.Response(status, json={"error": "unavailable"})
         if request.url.path == "/team/list":
@@ -511,6 +515,33 @@ def test_a_team_key_running_init_is_left_out_of_the_admin_keys_notice(tmp_path, 
         if line.startswith("team-in-manifest\tmaster key\t")
     )
     assert "init runs with" not in notice
+
+
+def test_init_only_reads_the_gateway(tmp_path):
+    methods: list[str] = []
+
+    init(options(tmp_path), fake_gateway(methods=methods), INIT_TOKEN)
+
+    assert methods
+    assert set(methods) == {"GET"}
+
+
+def test_check_only_reads_the_gateway():
+    methods: list[str] = []
+
+    read_model_groups(fake_gateway(methods=methods))
+
+    assert set(methods) == {"GET"}
+
+
+def test_the_plugin_command_writes_the_plugin_folder(tmp_path, capsys):
+    plugins = tmp_path / "plugins"
+
+    exit_code = main(["plugin", "--dir", str(plugins)])
+
+    assert exit_code == 0
+    assert (plugins / "brownout" / "gateway.py").exists()
+    assert f"wrote {plugins / 'brownout'}" in capsys.readouterr().out
 
 
 def check_files(config: Path, manifest: Path) -> int:

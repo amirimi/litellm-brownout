@@ -11,6 +11,7 @@ SETTINGS: Final = "tests/test_settings.py::"
 BRIDGE: Final = "tests/test_bridge.py::"
 SEAMS: Final = "tests/test_litellm_seams.py::"
 ONBOARDING: Final = "tests/test_onboarding.py::"
+PLUGIN: Final = "tests/test_plugin_folder.py::"
 
 
 COMMAND_ROWS: Final = (
@@ -27,6 +28,8 @@ COMMAND_ROWS: Final = (
             "flag:--manifest-out",
             "flag:--config-out",
             "flag:--write",
+            "flag:plugin",
+            "flag:--dir",
         ),
         cites=(),
         forms=(
@@ -60,6 +63,11 @@ COMMAND_ROWS: Final = (
                         f"{CLI}test_an_output_that_is_an_input_is_refused",
                     ),
                 ),
+            ),
+            Form(
+                "plugin with a folder",
+                "the plugin folder",
+                Supported((f"{CLI}test_the_plugin_command_writes_the_plugin_folder",)),
             ),
             Form(
                 "a command without its required flags",
@@ -97,6 +105,33 @@ COMMAND_ROWS: Final = (
                         f"{CLI}test_init_without_its_key_exits_two",
                         f"{CLI}test_check_with_a_gateway_needs_the_init_key",
                     ),
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="brownout release",
+        source="release",
+        parser="plugin_folder.running_version",
+        reads=("distribution:litellm-brownout",),
+        cites=(),
+        forms=(
+            Form(
+                "installed, or copied into a plugin folder",
+                "the version in the startup line and the plugin folder",
+                Supported(
+                    (
+                        f"{PLUGIN}test_python_imports_the_plugin_and_its_version_from_the_folder",
+                    )
+                ),
+            ),
+            Form(
+                "absent, as in a source checkout mounted without metadata",
+                "unpackaged",
+                Supported(
+                    (
+                        f"{PLUGIN}test_a_copy_without_package_metadata_reports_itself_unpackaged",
+                    )
                 ),
             ),
         ),

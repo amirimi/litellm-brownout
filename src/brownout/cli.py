@@ -54,6 +54,7 @@ from .onboarding_files import (
     new_manifest_document,
     unified_diff,
 )
+from .plugin_folder import PACKAGE, dist_info_name, write_plugin
 from .refusals import Violation
 from .rules import GatewayFile, ModelGroup, file_rules
 
@@ -62,6 +63,7 @@ NEW_FILE_MODE: Final = 0o666
 PERMISSION_BITS: Final = 0o777
 FINDINGS_PER_RULE: Final = 20
 UNREADY: Final = 2
+DEFAULT_PLUGIN_DIR: Final = "plugins"
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments: Final = _parser().parse_args(argv)
     if arguments.command == "init":
         return _init_command(arguments)
+    if arguments.command == "plugin":
+        return _plugin_command(arguments.dir)
     return _check_command(arguments)
 
 
@@ -113,7 +117,21 @@ def _parser() -> argparse.ArgumentParser:
         "--config-out", type=Path, default=Path("brownout.config.yaml")
     )
     init_command.add_argument("--write", action="store_true")
+    plugin_command: Final = commands.add_parser(
+        "plugin",
+        help="Write the gateway plugin into a folder to mount into LiteLLM's container",
+    )
+    plugin_command.add_argument("--dir", type=Path, default=Path(DEFAULT_PLUGIN_DIR))
     return parser
+
+
+def _plugin_command(directory: Path) -> int:
+    version: Final = write_plugin(directory)
+    print(
+        f"wrote {directory / PACKAGE} and {directory / dist_info_name(version)}, "
+        f"brownout {version}"
+    )
+    return 0
 
 
 def _init_command(arguments: argparse.Namespace) -> int:
