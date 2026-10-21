@@ -2,13 +2,14 @@
 
 # LiteLLM Brownout
 
-**Move a LiteLLM team's chosen routes to cheaper models as its budget fills**
+**Move a LiteLLM team's chosen routes to cheaper models on budget tiers**
 
-Give a route a fallback and a percentage, and the gateway switches that route once the team's spend
-passes it.
+No budget runaway, no quick drain of a team budget. Give a route a fallback and a percentage,
+and the gateway switches that route once the team's spend passes it.
 
 <p align="center">
   <a href="https://pypi.org/project/litellm-brownout/"><img src="https://img.shields.io/pypi/v/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="PyPI version" /></a>
+  <a href="https://github.com/amirimi/litellm-brownout/blob/main/CONTRIBUTING.md#supported-litellm-releases"><img src="https://img.shields.io/badge/LiteLLM-1.101.6%20to%201.106-000000?style=flat&labelColor=000000" alt="LiteLLM 1.101.6 to 1.106" /></a>
   <a href="https://github.com/amirimi/litellm-brownout/blob/main/LICENSE"><img src="https://img.shields.io/github/license/amirimi/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="License" /></a>
 </p>
 
@@ -17,6 +18,8 @@ passes it.
 <p align="center">
   <img src="https://raw.githubusercontent.com/amirimi/litellm-brownout/main/.github/assets/litellm-brownout.gif" alt="Team-a's weekly budget fills toward $500. The gateway log announces the 75% and 90% tiers, then chat-qa switches to its fallback with x-brownout headers while code-review keeps its primary.">
 </p>
+
+## Example
 
 Take a team with $500 a week. Its Q&A route falls back to a smaller model at 90%, and its code review
 route has no fallback.
@@ -29,32 +32,42 @@ route has no fallback.
 | Too little left for the next request | Refused | Refused | LiteLLM's 429 |
 
 LiteLLM already reserves each request's cost, counts team spend across replicas and refuses requests
-past the budget. Brownout adds four things.
+past the budget. Brownout adds five things.
 
 - **Warnings at any percentage:** each team and route sets its own tiers, logged once per budget
   window across replicas. LiteLLM's own budget alerts fire at 85% and 95%.
 - **Downgrades on the team's total:** a route switches to its fallback at the percentage you set.
   LiteLLM's [budget fallbacks][litellm-budget-fallbacks] switch only when a key exhausts a per-model
   budget.
+- **Coding agents included:** chat, text completion, Anthropic's `/v1/messages`, OpenAI's
+  `/v1/responses` and Google's `generateContent` all downgrade, so a Claude Code or Codex session
+  carries on with the fallback mid-task.
 - **Checked fallbacks:** brownout switches only to a fallback the gateway serves and prices, and that
   the caller's key and team may call.
 - **Disclosure:** `x-brownout-*` headers and the spend logs name the model that answered and why.
 
-Downgrades cover chat, text completion, `/v1/messages`, `/v1/responses` and `generateContent`, so
-Claude Code and Codex sessions carry on with the fallback.
+## How it works
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/amirimi/litellm-brownout/main/.github/assets/how-it-works.svg" alt="A request for chat-qa passes LiteLLM's authentication and budget reservation. Brownout reads the team's spend from Redis, finds it past the 90% tier and routes the request to chat-qa-small. The response returns with x-brownout headers. The manifest brownout.yaml sets the policy." width="900">
+</p>
+
+One manifest, `brownout.yaml`, holds every team's budget, tiers and fallbacks. It lives in your repo
+next to the gateway config, so a policy change goes through code review, and `brownout check` runs
+it in CI. LiteLLM keeps enforcing the budget, and brownout picks the model that serves each
+request.
 
 ## Requirements
 
-Brownout governs every model call on the gateway. `init` checks each requirement and prints the fix.
+Brownout governs every model call on the gateway, so the gateway needs a few things in place. `init`
+checks each one and prints the fix.
 
-- **A team for every key:** brownout reads the team's budget, so every key belongs to a manifest
-  team.
-- **No key budgets:** a key budget is a second ceiling the manifest cannot see.
-- **Unified routes only:** provider pass-through routes, realtime, batches, fine-tuning and search
-  tools get a 503.
-- **Fail-closed budgets and Redis:** `fail_closed_budget_enforcement` is on and `coordination_redis`
-  is set.
-- **LiteLLM 1.101.6 to 1.106:** pin the image tag.
+- Every key that calls a model belongs to a team, and that team is in the manifest.
+- Budgets sit on teams, never on keys.
+- Clients use LiteLLM's unified routes. Provider pass-through routes, realtime, batches, fine-tuning
+  and search tools are refused.
+- `fail_closed_budget_enforcement` is on, and `coordination_redis` points at a Redis.
+- LiteLLM is 1.101.6 to 1.106, pinned by image tag.
 
 A gateway without Redis needs one that shares its `REDIS_PASSWORD`, such as this service.
 
@@ -68,13 +81,9 @@ services:
       - .env
 ```
 
-## Install
+## Get started
 
-You run `init` against your gateway, fix what it finds, let it write two files, then add the package
-to the gateway image.
-
-**1. Run `init`.** Paste the master key on the first line, which shows no prompt. The block creates
-a read-only `brownout-init` user for `init`.
+**1. Run `init` against your gateway.** Paste the master key on the first line.
 
 <!-- adoption: prepare -->
 ```bash
@@ -86,12 +95,7 @@ BROWNOUT_INIT_KEY=$(curl -sSf http://localhost:4000/user/new \
 uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
 ```
 
-`init` lists every request brownout would refuse with the fix for each. Rerun it until it exits `0`,
-then once more with `--write`. OpenRouter models need a price, which [one command][openrouter-prices]
-prints.
-
-**2. Check the files.** `--write` creates `brownout.yaml`, the manifest, and `brownout.config.yaml`,
-your config with brownout's settings. Check both, then delete the `brownout-init` user.
+**2. Fix what it lists, rerun it with `--write`, then check the files.**
 
 <!-- adoption: check -->
 ```bash
@@ -101,7 +105,7 @@ curl -sSf http://localhost:4000/user/delete \
   -d '{"user_ids": ["brownout-init"]}'
 ```
 
-**3. Add the package to the gateway image.**
+**3. Build the gateway image with brownout and run it on the new files.**
 
 <!-- adoption: install -->
 ```dockerfile
@@ -109,41 +113,53 @@ FROM docker.litellm.ai/berriai/litellm:v1.106.1
 RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
 ```
 
-Point the gateway at `brownout.config.yaml`, set `BROWNOUT_MANIFEST` to the path of `brownout.yaml`
-in the container, and restart it.
+```yaml
+services:
+  litellm:
+    build: .
+    command: ["--config", "/app/brownout.config.yaml", "--port", "4000"]
+    environment:
+      BROWNOUT_MANIFEST: /app/brownout.yaml
+    volumes:
+      - ./brownout.config.yaml:/app/brownout.config.yaml:ro
+      - ./brownout.yaml:/app/brownout.yaml:ro
+```
 
-**4. Confirm.** Send one request with a team's key. The master key belongs to no team, so brownout
-refuses it.
+**4. Send one request with a team's key.**
 
 <!-- adoption: confirm -->
 ```bash
 curl -s -i http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer <A TEAM KEY>" -H "Content-Type: application/json" \
-  -d '{"model": "<A MODEL>", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 20}' \
+  -H "Authorization: Bearer {team key}" -H "Content-Type: application/json" \
+  -d '{"model": "{model}", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 20}' \
   | grep -io '^x-brownout-[a-z-]*: [^[:cntrl:]]*\|"reason": *"[a-z_]*"'
 ```
 
-`x-brownout-route-served` names the model that answered. A refused request prints its reason, such
-as `"reason":"model_not_a_group"`.
+What happened:
 
-## Quickstart
+- `init` read the gateway as a read-only `brownout-init` user and listed every request brownout
+  would refuse, with the fix for each. OpenRouter models need a price, which
+  [one command][openrouter-prices] prints.
+- `--write` created `brownout.yaml`, the manifest, and `brownout.config.yaml`, your config with
+  brownout's settings. `check` validated both, and the `brownout-init` user was deleted.
+- The response names the model that answered in `x-brownout-route-served`. A refused request prints
+  its reason instead. The master key belongs to no team, so brownout refuses it.
 
-Give `chat-qa` a fallback that takes over at 90% of the team's budget.
+## Your first fallback
+
+Add a route under your team in `brownout.yaml`. Fill in each `{placeholder}`.
 
 <!-- adoption: fallback-manifest -->
 ```yaml
 teams:
-  team-a:
-    envelope_usd: 500.0
-    budget_duration: "7d"
-    warn_tiers: [75, 90]
+  "{team}":
     routes:
-      chat-qa:
-        fallback: chat-qa-small
+      "{route}":
+        fallback: "{fallback}"
         degrade_at: 90
 ```
 
-Add `chat-qa-small` to the team's model list in LiteLLM, run `brownout check` again and restart the
+Add `{fallback}` to the team's model list in LiteLLM, run `brownout check` again and restart the
 gateway. For models added in the admin UI, `check` reads the gateway with a viewer key.
 
 <!-- adoption: fallback-ui-check -->
@@ -158,12 +174,12 @@ curl -sSf http://localhost:4000/user/delete \
   -d '{"user_ids": ["brownout-init"]}'
 ```
 
-Past $450, every `chat-qa` response carries these headers.
+Once the team's spend passes 90%, every `{route}` response carries these headers.
 
 ```
-x-brownout-route-served: chat-qa-small
+x-brownout-route-served: {fallback}
 x-brownout-budget-tier: 90
-x-brownout-degraded-from: chat-qa
+x-brownout-degraded-from: {route}
 x-brownout-degradation-reason: degrade_tier_reached
 ```
 
