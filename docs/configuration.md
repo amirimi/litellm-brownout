@@ -1,19 +1,32 @@
 # Configuration
 
-A governed gateway needs the package in its image, the handler in its config, a manifest entry for
-each team, and each team's LiteLLM `max_budget` equal to its manifest envelope. `brownout check`
-runs the file rules in CI, and the handler runs the request rules on every governed request.
+A governed gateway needs the plugin mounted into LiteLLM's container, the handler in its config, a
+manifest entry for each team, and each team's LiteLLM `max_budget` equal to its manifest envelope.
+`brownout init` sets all of this up. `brownout check` runs the file rules in CI, and the handler runs
+the request rules on every governed request.
 
 ## Install
 
-```dockerfile
-FROM docker.litellm.ai/berriai/litellm:v1.106.1
-RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
-```
+The plugin runs from a folder mounted into LiteLLM's own image, which stays unchanged. The gateway
+needs three things.
+
+| In the container | Value |
+|---|---|
+| The plugin folder | `plugins/`, mounted read-only at `/app/plugins` |
+| `PYTHONPATH` | `/app/plugins` |
+| The manifest | `brownout.yaml`, mounted read-only at `/app/brownout.yaml`, or wherever `BROWNOUT_MANIFEST` points |
+
+`init --write` copies the plugin into `plugins/` and, on Compose, writes an override file that
+supplies all three. `brownout plugin --dir plugins` rewrites only the folder, which is how an upgrade
+works: run it from the new version, then restart the gateway. The startup line,
+`brownout loaded: version=... teams=...`, names the version the gateway loaded.
+
+Mount the folder anywhere except next to the gateway config. LiteLLM loads a callback it finds as
+`brownout/gateway.py` beside `config.yaml` by file path, which breaks the plugin's imports.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BROWNOUT_MANIFEST` | `config/manifest.yaml` | The manifest's path in the container |
+| `BROWNOUT_MANIFEST` | `brownout.yaml` in the working directory, `/app/brownout.yaml` in LiteLLM's image | The manifest's path in the container |
 
 The handler refuses to start below LiteLLM 1.101.6 and warns on a release newer than the tested
 1.106. Request facts reach the logging integrations the gateway already runs, and announcements go
@@ -22,27 +35,33 @@ describes.
 
 ## Prepare with `brownout init`
 
-`init` reads a running gateway with a read-only key, builds or reconciles the manifest, prepares the
+`init` reads a running gateway, builds or reconciles the manifest, adds brownout's settings to the
 gateway config, and lists what brownout would refuse. It issues only `GET` requests to
 `/team/list`, `/key/list` and `/model/info`, and never writes to LiteLLM.
 
 ```bash
-read -rs BROWNOUT_INIT_KEY && export BROWNOUT_INIT_KEY
+export BROWNOUT_INIT_KEY="{gateway key}"
 brownout init --gateway http://localhost:4000 --gateway-config config.yaml --write
 ```
 
 | Option | Default | Purpose |
 |---|---|---|
 | `--gateway` | required | The gateway's base URL |
-| `--gateway-config` | required | The config the gateway runs today. `init` reads it and never edits it |
+| `--gateway-config` | required | The config the gateway runs today |
 | `--manifest` | none | An existing manifest to reconcile. Its entries stay as written, and missing LiteLLM teams are appended |
 | `--manifest-out` | `brownout.yaml` | Where the manifest is written |
-| `--config-out` | `brownout.config.yaml` | Where the prepared gateway config is written, comments and key order kept |
-| `--write` | off | Write both files. Without it `init` prints the changes and the findings and writes nothing |
+| `--config-out` | the `--gateway-config` path | Where the prepared gateway config is written, comments and key order kept |
+| `--plugin-dir` | `plugins` | Where the plugin folder is written |
+| `--platform` | `compose` | `helm` writes only the manifest and prints the chart's settings and values. `pip` writes the config and manifest with nothing to mount |
+| `--service` | the one service running LiteLLM's image | The Compose service the override extends |
+| `--compose-file` | `compose.yaml` or `docker-compose.yml` in the current folder | The Compose file whose LiteLLM service the override extends |
+| `--redis-host` | none | Writes `coordination_redis` for this host when the config names no Redis |
+| `--write` | off | Write the files. Without it `init` prints the changes and the findings and writes nothing |
 
-A `proxy_admin_viewer` key is enough, and `init` reads it only from `BROWNOUT_INIT_KEY`. The
-commands `init` prints use `$LITELLM_MASTER_KEY`, so the master key stays in your shell. `init`
-never prints a value from the gateway config and never writes over an existing file.
+`init` reads its key only from `BROWNOUT_INIT_KEY`. Any key that can read teams, keys and models
+works, the master key included, because `init` only reads. The commands it prints use
+`$LITELLM_MASTER_KEY`. `init` never prints a value from the gateway config and never writes over an
+existing manifest or override file.
 
 Each finding prints as `rule-id<TAB>subject<TAB>detail`, followed by the command or YAML lines that
 fix it. A value only you can choose, such as a team's budget, is a placeholder in angle brackets.
@@ -51,21 +70,48 @@ fix it. A value only you can choose, such as a team's budget, is a placeholder i
 |---|---|
 | `0` | Ready. The only finding is the notice that the admin keys cannot make model calls |
 | `1` | Findings remain |
-| `2` | The gateway or an input could not be read, an input is invalid, or an output path is taken |
-
-An exit of `0` and a passing `brownout check` on the written files together mean that enabling the
-callback refuses nothing `init` did not list.
+| `2` | The gateway or an input could not be read, an input is invalid, or an output cannot be written as asked |
 
 ### What `--write` creates
 
-`--write` leaves the gateway's config as it was and creates two files.
+1. The gateway config gains the callback, `fail_closed_budget_enforcement`,
+   `budget_exceeded_status_code: 429`, and a `coordination_redis` taken from a Redis cache or from
+   `--redis-host`. Comments, key order and the file's permissions stay.
+2. `brownout.yaml` is the manifest. It has one entry per LiteLLM team with a budget, copies that
+   budget and window, warns at 75% and 90%, and declares no fallback yet.
+3. `plugins/` holds the plugin and its version.
+4. On Compose, `docker-compose.override.yml`, or `compose.override.yaml` next to a `compose.yaml`,
+   extends the LiteLLM service with `PYTHONPATH` and the two mounts. Compose merges it on every
+   `docker compose` command that runs without `-f`. A team that passes `-f` adds the override with a
+   second `-f`, which `init` prints.
+5. `init` runs `check` on the written files and prints the result.
 
-- `brownout.yaml` is the manifest. It has one entry per LiteLLM team with a budget, copies that
-  budget and window, warns at 75% and 90%, and declares no fallback yet. Pass `--manifest` to extend
-  an existing one.
-- `brownout.config.yaml` is the gateway config with comments kept. It adds the callback, turns on
-  `fail_closed_budget_enforcement`, sets `budget_exceeded_status_code: 429` and derives
-  `coordination_redis` from a Redis cache if there is one.
+The override keeps every other key of the service. A `PYTHONPATH` the service already sets, in
+`environment` or `env_file`, keeps its entries with `/app/plugins` appended. `init` writes nothing
+when it cannot tell which service runs LiteLLM, or when the service already mounts something at
+`/app/plugins` or `/app/brownout.yaml`. When an override file already exists, `init` writes the rest
+and prints the lines to merge into it. Without Docker on the machine, it prints the override instead
+of writing it, and without a compose file it prints the `docker run` flags.
+
+With `--platform helm`, `init` leaves the config alone, because LiteLLM's `litellm-helm` chart keeps
+it under `proxy_config`. It writes the manifest and prints the settings to paste there, then chart
+values for `extraInitContainers`, `volumes`, `volumeMounts` and `envVars`. The init container
+installs the plugin from PyPI with `pip install --target`, so a cluster without PyPI access points
+pip at its own mirror with `--index-url`. The last printed line creates the manifest's ConfigMap.
+
+### Kubernetes with litellm-helm
+
+1. Forward the gateway and save its config: `kubectl port-forward svc/litellm 4000:4000` and
+   `helm get values litellm -o yaml | yq '.proxy_config' > config.yaml`.
+2. Run `init` with `--platform helm --redis-host {redis service} --write`.
+3. Create the ConfigMap with the command `init` prints.
+4. Paste both printed blocks into your existing values file, then run `helm upgrade`. Add the
+   printed `volumes` and `volumeMounts` to the lists you already have, because Helm replaces a list
+   from a second values file.
+5. Run `kubectl logs deploy/litellm -c litellm | grep "brownout loaded"`.
+
+A manifest edit needs the ConfigMap updated, then `kubectl rollout restart deploy/litellm`. An
+upgrade changes the version in the init container's command.
 
 ### OpenRouter prices
 
@@ -215,7 +261,7 @@ downgrade rule runs only when a request wants a downgrade, and a failure serves 
 | `supported-litellm` | LiteLLM is 1.101.6 or newer | Load |
 
 ```bash
-brownout check --gateway-config brownout.config.yaml --manifest brownout.yaml
+brownout check --gateway-config config.yaml --manifest brownout.yaml
 ```
 
 `check` prints one line per violation and exits `1` when any rule fails, or `2` when an input cannot

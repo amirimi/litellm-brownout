@@ -28,19 +28,21 @@ from .yamlfile import StyledDocument, parse_snippet, read_styled
 
 README_GATEWAY: Final = "http://localhost:4000"
 README_UVX: Final = "uvx --from litellm-brownout "
-README_IMAGE: Final = "FROM docker.litellm.ai/berriai/litellm:v1.106.1"
-README_REQUIREMENT: Final = "litellm-brownout==0.1.0"
+README_GATEWAY_KEY: Final = "{gateway key}"
+README_RESTART: Final = "docker compose up -d"
 INIT_COMMAND: Final = "brownout init"
-CHECK_COMMAND: Final = "brownout check"
 CHECK_PASSED: Final = "brownout check passed"
+LOADED: Final = "brownout loaded"
+OVERRIDE_WRITTEN: Final = re.compile(
+    r"^wrote (?P<path>\S+), which adds the plugin to (?P<service>\S+)$", re.MULTILINE
+)
 SERVED_HEADER: Final = "x-brownout-route-served"
 DEGRADED_HEADER: Final = "x-brownout-degraded-from"
 REFUSAL_REASON: Final = re.compile(r'"reason": *"(?P<reason>[a-z_]+)"')
 TRACKED_VARIABLES: Final = ("LITELLM_MASTER_KEY", "BROWNOUT_INIT_KEY")
 GATEWAY_CONFIG: Final = "config.yaml"
-WRITTEN_CONFIG: Final = "brownout.config.yaml"
 WRITTEN_MANIFEST: Final = "brownout.yaml"
-INSTALL_OVERRIDE: Final = "compose.brownout.yml"
+BASE_COMPOSE_NAME: Final = "docker-compose.yml"
 SCENARIO_ONLY_FILES: Final = frozenset({"scenario.yaml", "compose.yml"})
 OFFLINE_TOOLS: Final = {"UV_OFFLINE": "1"}
 RESTART_INSTRUCTION: Final = "restart the gateway"
@@ -86,8 +88,6 @@ class Adoption:
         self.release: Final = release
         self.workdir: Final = workdir
         self.tool_wheel: Final = wheel
-        self.wheel: Final = workdir / wheel.name
-        shutil.copy(wheel, self.wheel)
         self.report: Final = Report()
         self.blocks: Final = readme_blocks(README.read_text(encoding="utf-8"))
         self.master_key: Final = f"sk-{secrets.token_hex(16)}"
@@ -100,7 +100,7 @@ class Adoption:
         self.shell: Final = ShellSession(workdir, OFFLINE_TOOLS, TRACKED_VARIABLES)
         self.seeded = Seeded()
         self.init_line = ""
-        self.check_line = ""
+        self.override = Path()
 
     def run(self) -> Report:
         try:
@@ -126,9 +126,14 @@ class Adoption:
         for source in self.scenario.directory.iterdir():
             if source.name not in SCENARIO_ONLY_FILES:
                 shutil.copy(source, self.workdir / source.name)
-        for compose_file in self.scenario.compose_files:
+        base, *extras = self.scenario.compose_files
+        shutil.copy(base, self.workdir / BASE_COMPOSE_NAME)
+        self.gateway.files.append(self.workdir / BASE_COMPOSE_NAME)
+        for compose_file in extras:
             self._add_compose_file(compose_file)
         (self.workdir / ".env").write_text(
+            f"LITELLM_TAG={self.release}\n"
+            f"GATEWAY_PORT={self.gateway.port}\n"
             f"LITELLM_MASTER_KEY={self.master_key}\n"
             f"POSTGRES_PASSWORD={secrets.token_hex(12)}\n"
             f"REDIS_PASSWORD={secrets.token_hex(12)}\n"
@@ -149,14 +154,20 @@ class Adoption:
             )
 
     def _prepare(self) -> None:
-        documented: Final = self._readme_block("prepare")
-        self.init_line = _line_with(documented, INIT_COMMAND)
-        if self.scenario.init_arguments:
-            self.init_line = f"{self.init_line} {self.scenario.init_arguments}"
+        documented: Final = adapt(
+            self._readme_block("prepare"), [(README_GATEWAY_KEY, self.master_key)]
+        )
+        self.init_line = _with_scenario_arguments(
+            _line_with(documented, INIT_COMMAND), self.scenario.init_arguments
+        )
         block: Final = documented.replace(
             _line_with(documented, INIT_COMMAND), self.init_line
         )
-        result = self.shell.run(block, stdin=f"{self.master_key}\n")
+        result = self.shell.run(
+            f"LITELLM_MASTER_KEY={self.master_key}\n"
+            "typeset +x LITELLM_MASTER_KEY\n"
+            f"{block}"
+        )
         applied: dict[tuple[str, str], PrintedFinding] = {}
         restarted = False
         for _ in range(MAX_INIT_ROUNDS):
@@ -290,56 +301,43 @@ class Adoption:
         return [main, *included]
 
     def _write_and_check(self) -> None:
-        written: Final = self.shell.run(f"{self.init_line} --write")
+        line: Final = _with_scenario_arguments(
+            _line_with(self._readme_block("write"), INIT_COMMAND),
+            self.scenario.init_arguments,
+        )
+        written: Final = self.shell.run(line)
         if written.returncode != 0:
             raise PathStop(
                 "write:failed",
-                f"init --write exited {written.returncode}: {_excerpt(written.stderr)}",
+                f"init --write exited {written.returncode}: "
+                f"{_excerpt(written.stderr + written.stdout)}",
             )
-        block: Final = self._readme_block("check")
-        self.check_line = _line_with(block, CHECK_COMMAND)
-        checked: Final = self.shell.run(block)
-        if CHECK_PASSED not in checked.stdout or checked.returncode != 0:
+        if CHECK_PASSED not in written.stdout:
             raise PathStop(
-                "check:failed",
-                f"the README's check block failed: {_excerpt(checked.stdout + checked.stderr)}",
+                "write:check-failed",
+                f"init --write printed no passing check: {_excerpt(written.stdout)}",
             )
+        override: Final = OVERRIDE_WRITTEN.search(written.stdout)
+        if override is None:
+            raise PathStop(
+                "write:no-override",
+                f"init --write wrote no Compose override: {_excerpt(written.stdout)}",
+            )
+        self.override = Path(override["path"])
 
     def _install(self) -> None:
-        dockerfile: Final = adapt(
-            self.blocks["install"],
-            [
-                (README_IMAGE, self._image_lines()),
-                (README_REQUIREMENT, f"/tmp/{self.wheel.name}"),
-            ],
-        )
-        (self.workdir / "Dockerfile").write_text(dockerfile, encoding="utf-8")
-        (self.workdir / ".dockerignore").write_text(
-            f"*\n!{self.wheel.name}\n", encoding="utf-8"
-        )
-        override: Final = {
-            "services": {
-                "litellm": {
-                    "image": f"{self.gateway.project}-gateway",
-                    "build": {"context": "."},
-                    "volumes": [
-                        f"./{WRITTEN_CONFIG}:/app/config.yaml",
-                        f"./{WRITTEN_MANIFEST}:/app/brownout.yaml",
-                    ],
-                    "environment": {"BROWNOUT_MANIFEST": "/app/brownout.yaml"},
-                }
-            }
-        }
-        rendered: Final = yaml.safe_dump(override, sort_keys=False)
-        (self.workdir / INSTALL_OVERRIDE).write_text(rendered, encoding="utf-8")
-        self.gateway.files.append(self.workdir / INSTALL_OVERRIDE)
-        self._gateway_step("install", lambda: self.gateway.up(True))
-
-    def _image_lines(self) -> str:
-        return (
-            f"FROM docker.litellm.ai/berriai/litellm:{self.release}\n"
-            f"COPY {self.wheel.name} /tmp/{self.wheel.name}"
-        )
+        if README_RESTART not in self.blocks["restart"]:
+            raise PathStop(
+                "readme:block-changed",
+                f"the restart block no longer runs {README_RESTART}",
+            )
+        self.gateway.files.append(self.override)
+        self._gateway_step("install", lambda: self.gateway.up(False))
+        if LOADED not in self.gateway.logs():
+            raise PathStop(
+                "install:not-loaded",
+                f"the gateway never logged {LOADED!r}: {_excerpt(self.gateway.logs())}",
+            )
 
     def _confirm(self) -> None:
         call: Final = self.scenario.confirm
@@ -379,15 +377,7 @@ class Adoption:
             ),
         }
         manifest_document.save()
-        file_groups: Final = {
-            deployment.get("model_name")
-            for document in self._config_documents(WRITTEN_CONFIG)
-            for deployment in document.data.get("model_list") or []
-        }
-        check_script = self.check_line
-        if not {plan.route, plan.fallback} <= file_groups:
-            check_script = self._readme_block("fallback-ui-check")
-        checked: Final = self.shell.run(check_script)
+        checked: Final = self.shell.run(self._readme_block("fallback-check"))
         if CHECK_PASSED not in checked.stdout:
             raise PathStop(
                 "fallback:check-failed",
@@ -475,6 +465,12 @@ def _uvx_replacement(block: str, wheel: Path) -> list[tuple[str, str]]:
     if README_UVX not in block:
         return []
     return [(README_UVX, f"uvx --from {wheel} ")]
+
+
+def _with_scenario_arguments(line: str, arguments: str) -> str:
+    if not arguments:
+        return line
+    return f"{line} {arguments}"
 
 
 def _line_with(block: str, command: str) -> str:

@@ -11,6 +11,8 @@ SETTINGS: Final = "tests/test_settings.py::"
 BRIDGE: Final = "tests/test_bridge.py::"
 SEAMS: Final = "tests/test_litellm_seams.py::"
 ONBOARDING: Final = "tests/test_onboarding.py::"
+PLUGIN: Final = "tests/test_plugin_folder.py::"
+COMPOSE: Final = "tests/test_compose_override.py::"
 
 
 COMMAND_ROWS: Final = (
@@ -27,6 +29,13 @@ COMMAND_ROWS: Final = (
             "flag:--manifest-out",
             "flag:--config-out",
             "flag:--write",
+            "flag:plugin",
+            "flag:--dir",
+            "flag:--plugin-dir",
+            "flag:--platform",
+            "flag:--service",
+            "flag:--compose-file",
+            "flag:--redis-host",
         ),
         cites=(),
         forms=(
@@ -60,6 +69,64 @@ COMMAND_ROWS: Final = (
                         f"{CLI}test_an_output_that_is_an_input_is_refused",
                     ),
                 ),
+            ),
+            Form(
+                "init --write with --plugin-dir",
+                "the plugin folder beside the manifest",
+                Supported(
+                    (f"{CLI}test_init_writes_the_plugin_folder_beside_the_manifest",)
+                ),
+            ),
+            Form(
+                "init --write with --plugin-dir naming the config's directory",
+                "refused",
+                Refused(
+                    stage="init",
+                    rule=None,
+                    tests=(
+                        f"{CLI}test_init_refuses_a_plugin_folder_in_the_configs_directory",
+                    ),
+                ),
+            ),
+            Form(
+                "init --write --platform helm",
+                "the manifest, with proxy_config settings and chart values printed",
+                Supported(
+                    (
+                        f"{CLI}test_for_helm_init_leaves_the_config_and_prints_the_chart_values",
+                    )
+                ),
+            ),
+            Form(
+                "init --write --platform pip",
+                "the config and manifest, with no plugin folder or override",
+                Supported(
+                    (
+                        f"{CLI}test_for_pip_init_writes_the_config_and_manifest_and_nothing_to_mount",
+                    )
+                ),
+            ),
+            Form(
+                "init --write with --service or --compose-file",
+                "the Compose override for that service and file",
+                Supported(
+                    (
+                        f"{COMPOSE}test_a_named_service_is_used_even_when_it_builds_its_own_image",
+                        f"{COMPOSE}test_a_base_file_compose_does_not_load_by_default_gets_the_flags_to_add",
+                    )
+                ),
+            ),
+            Form(
+                "init --write with --redis-host",
+                "general_settings.coordination_redis for that host",
+                Supported(
+                    (f"{CLI}test_a_named_redis_host_becomes_the_coordination_redis",)
+                ),
+            ),
+            Form(
+                "plugin with a folder",
+                "the plugin folder",
+                Supported((f"{CLI}test_the_plugin_command_writes_the_plugin_folder",)),
             ),
             Form(
                 "a command without its required flags",
@@ -97,6 +164,33 @@ COMMAND_ROWS: Final = (
                         f"{CLI}test_init_without_its_key_exits_two",
                         f"{CLI}test_check_with_a_gateway_needs_the_init_key",
                     ),
+                ),
+            ),
+        ),
+    ),
+    Input(
+        shape="brownout release",
+        source="release",
+        parser="plugin_folder.running_version",
+        reads=("distribution:litellm-brownout",),
+        cites=(),
+        forms=(
+            Form(
+                "installed, or copied into a plugin folder",
+                "the version in the startup line and the plugin folder",
+                Supported(
+                    (
+                        f"{PLUGIN}test_python_imports_the_plugin_and_its_version_from_the_folder",
+                    )
+                ),
+            ),
+            Form(
+                "absent, as in a source checkout mounted without metadata",
+                "unpackaged",
+                Supported(
+                    (
+                        f"{PLUGIN}test_a_copy_without_package_metadata_reports_itself_unpackaged",
+                    )
                 ),
             ),
         ),

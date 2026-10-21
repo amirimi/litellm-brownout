@@ -3,16 +3,39 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal, assert_never
 
 import httpx
+import yaml
 from litellm.proxy._types import hash_token
 
 from . import settings
 from .bridge import configured_groups, running_litellm
+from .compose_override import (
+    PLUGIN_MOUNT,
+    ComposeRunner,
+    ComposeUnavailable,
+    NoComposeFile,
+    Override,
+    OverrideRefused,
+    base_compose_file,
+    override_path,
+    override_text,
+    plan_override,
+    read_compose_project,
+    relative_to_project,
+    run_compose,
+)
+from .deployment import (
+    docker_run_flags,
+    helm_manifest_command,
+    helm_values,
+    proxy_config_settings,
+)
 from .gateway_api import (
     GatewayReadError,
     GatewaySnapshot,
@@ -54,6 +77,7 @@ from .onboarding_files import (
     new_manifest_document,
     unified_diff,
 )
+from .plugin_folder import PACKAGE, dist_info_name, running_version, write_plugin
 from .refusals import Violation
 from .rules import GatewayFile, ModelGroup, file_rules
 
@@ -62,6 +86,11 @@ NEW_FILE_MODE: Final = 0o666
 PERMISSION_BITS: Final = 0o777
 FINDINGS_PER_RULE: Final = 20
 UNREADY: Final = 2
+DEFAULT_PLUGIN_DIR: Final = "plugins"
+SERVICE_PLACEHOLDER: Final = "<YOUR LITELLM SERVICE>"
+
+Platform = Literal["compose", "helm", "pip"]
+Placement = Override | OverrideRefused | ComposeUnavailable | NoComposeFile | None
 
 
 @dataclass(frozen=True)
@@ -71,6 +100,12 @@ class InitOptions:
     manifest: Path | None
     manifest_out: Path
     config_out: Path
+    plugin_dir: Path
+    platform: Platform
+    service: str | None
+    compose_dir: Path
+    compose_file: Path | None
+    redis_host: str | None
     write: bool
 
 
@@ -81,12 +116,15 @@ class Prepared:
     manifest_text: str
     manifest_out_text: str | None
     findings: list[Finding]
+    groups: Mapping[str, ModelGroup]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments: Final = _parser().parse_args(argv)
     if arguments.command == "init":
         return _init_command(arguments)
+    if arguments.command == "plugin":
+        return _plugin_command(arguments.dir)
     return _check_command(arguments)
 
 
@@ -109,11 +147,32 @@ def _parser() -> argparse.ArgumentParser:
     init_command.add_argument(
         "--manifest-out", type=Path, default=Path("brownout.yaml")
     )
+    init_command.add_argument("--config-out", type=Path)
     init_command.add_argument(
-        "--config-out", type=Path, default=Path("brownout.config.yaml")
+        "--plugin-dir", type=Path, default=Path(DEFAULT_PLUGIN_DIR)
     )
+    init_command.add_argument(
+        "--platform", choices=("compose", "helm", "pip"), default="compose"
+    )
+    init_command.add_argument("--service")
+    init_command.add_argument("--compose-file", type=Path)
+    init_command.add_argument("--redis-host")
     init_command.add_argument("--write", action="store_true")
+    plugin_command: Final = commands.add_parser(
+        "plugin",
+        help="Write the gateway plugin into a folder to mount into LiteLLM's container",
+    )
+    plugin_command.add_argument("--dir", type=Path, default=Path(DEFAULT_PLUGIN_DIR))
     return parser
+
+
+def _plugin_command(directory: Path) -> int:
+    version: Final = write_plugin(directory)
+    print(
+        f"wrote {directory / PACKAGE} and {directory / dist_info_name(version)}, "
+        f"brownout {version}"
+    )
+    return 0
 
 
 def _init_command(arguments: argparse.Namespace) -> int:
@@ -125,12 +184,21 @@ def _init_command(arguments: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return UNREADY
+    config_out: Path = arguments.gateway_config
+    if arguments.config_out is not None:
+        config_out = arguments.config_out
     options: Final = InitOptions(
         gateway=arguments.gateway,
         gateway_config=arguments.gateway_config,
         manifest=arguments.manifest,
         manifest_out=arguments.manifest_out,
-        config_out=arguments.config_out,
+        config_out=config_out,
+        plugin_dir=arguments.plugin_dir,
+        platform=arguments.platform,
+        service=arguments.service,
+        compose_dir=Path.cwd(),
+        compose_file=arguments.compose_file,
+        redis_host=arguments.redis_host,
         write=arguments.write,
     )
     with httpx.Client(
@@ -141,7 +209,12 @@ def _init_command(arguments: argparse.Namespace) -> int:
         return init(options, client, hash_token(key))
 
 
-def init(options: InitOptions, client: httpx.Client, own_token: str) -> int:
+def init(
+    options: InitOptions,
+    client: httpx.Client,
+    own_token: str,
+    compose: ComposeRunner = run_compose,
+) -> int:
     taken: Final = _taken_outputs(options)
     if taken:
         for path in taken:
@@ -149,6 +222,18 @@ def init(options: InitOptions, client: httpx.Client, own_token: str) -> int:
                 f"{path} already exists or is an input, so init will not write it",
                 file=sys.stderr,
             )
+        return UNREADY
+    if _plugin_dir_beside_config(options):
+        print(
+            f"{options.plugin_dir} is the config's directory, where LiteLLM loads "
+            "brownout/gateway.py by file path and breaks its imports. Choose another "
+            "--plugin-dir",
+            file=sys.stderr,
+        )
+        return UNREADY
+    placement: Final = _placement(options, compose)
+    if isinstance(placement, OverrideRefused) and placement.text is None:
+        print(f"init writes nothing: {placement.reason}", file=sys.stderr)
         return UNREADY
     try:
         prepared = _prepare(options, client, own_token)
@@ -162,7 +247,7 @@ def init(options: InitOptions, client: httpx.Client, own_token: str) -> int:
         return UNREADY
     _report(options, prepared)
     if options.write:
-        _write(options, prepared)
+        _write(options, prepared, placement)
     return exit_code(prepared.findings)
 
 
@@ -211,11 +296,51 @@ def _taken_outputs(options: InitOptions) -> list[Path]:
     inputs: Final = {options.gateway_config.resolve()}
     if options.manifest is not None:
         inputs.add(options.manifest.resolve())
-    return [
-        path
-        for path in (options.manifest_out, options.config_out)
-        if path.exists() or path.resolve() in inputs
-    ]
+    taken: Final = [path for path in (options.manifest_out,) if _occupied(path, inputs)]
+    separate: Final = options.platform != "helm" and _separate_config(options)
+    if separate and _occupied(options.config_out, inputs):
+        taken.append(options.config_out)
+    return taken
+
+
+def _occupied(path: Path, inputs: set[Path]) -> bool:
+    return path.exists() or path.resolve() in inputs
+
+
+def _separate_config(options: InitOptions) -> bool:
+    return options.config_out.resolve() != options.gateway_config.resolve()
+
+
+def _plugin_dir_beside_config(options: InitOptions) -> bool:
+    if options.platform != "compose":
+        return False
+    return options.plugin_dir.resolve() == options.gateway_config.parent.resolve()
+
+
+def _placement(options: InitOptions, compose: ComposeRunner) -> Placement:
+    match options.platform:
+        case "helm" | "pip":
+            return None
+        case "compose":
+            return _compose_placement(options, compose)
+        case _:
+            assert_never(options.platform)
+
+
+def _compose_placement(
+    options: InitOptions, compose: ComposeRunner
+) -> Override | OverrideRefused | ComposeUnavailable | NoComposeFile:
+    base: Path | None = options.compose_file
+    if base is None:
+        base = base_compose_file(options.compose_dir)
+    if base is None:
+        return NoComposeFile(options.compose_dir)
+    project: Final = read_compose_project(base, compose)
+    if isinstance(project, ComposeUnavailable):
+        return project
+    return plan_override(
+        project, options.service, options.plugin_dir, options.manifest_out
+    )
 
 
 def _prepare(options: InitOptions, client: httpx.Client, own_token: str) -> Prepared:
@@ -227,7 +352,7 @@ def _prepare(options: InitOptions, client: httpx.Client, own_token: str) -> Prep
     )
     existing: Final = _existing_manifest(options.manifest)
     snapshot: Final = read_gateway(client, _key_page_progress)
-    changes: Final = config_plan(config)
+    changes: Final = config_plan(config, options.redis_host)
     apply_config_changes(config_document, changes)
     config_out_text: Final = dump_document(config_document)
     written_config: Final = read_config(
@@ -246,6 +371,7 @@ def _prepare(options: InitOptions, client: httpx.Client, own_token: str) -> Prep
         findings=_findings(
             options, existing, snapshot, written_config, manifest_out_text, own_token
         ),
+        groups=snapshot.groups,
     )
 
 
@@ -328,7 +454,7 @@ def _report(options: InitOptions, prepared: Prepared) -> None:
         )
     _print_findings(prepared.findings)
     if not options.write:
-        print("dry run: nothing written. Rerun with --write to write both files")
+        print("dry run: nothing written. Rerun with --write to write the files")
     blocking: Final = sum(1 for finding in prepared.findings if finding.blocking)
     if blocking:
         print(
@@ -336,17 +462,15 @@ def _report(options: InitOptions, prepared: Prepared) -> None:
             file=sys.stderr,
         )
     else:
-        print(
-            "ready: enable the callback once brownout check passes on the written files",
-            file=sys.stderr,
-        )
+        print("ready: no finding blocks brownout", file=sys.stderr)
 
 
 def _print_changes(options: InitOptions, changes: Sequence[ConfigChange]) -> None:
+    target: Final = _config_target(options)
     if not changes:
-        print(f"{options.config_out}: no changes")
+        print(f"{target}: no changes")
         return
-    print(f"{options.config_out} changes {options.gateway_config} as follows:")
+    print(f"{target} changes as follows:")
     for change in changes:
         print(f"  {describe_change(change)}")
 
@@ -372,13 +496,157 @@ def _print_findings(findings: Sequence[Finding]) -> None:
             print(f"{rule}\t...\tand {len(group) - FINDINGS_PER_RULE} more")
 
 
-def _write(options: InitOptions, prepared: Prepared) -> None:
-    source_mode: Final = options.gateway_config.stat().st_mode & PERMISSION_BITS
-    _write_new(options.config_out, prepared.config_out_text, source_mode)
-    print(f"wrote {options.config_out}")
+def _config_target(options: InitOptions) -> str:
+    match options.platform:
+        case "helm":
+            return "proxy_config"
+        case "compose" | "pip":
+            return str(options.config_out)
+        case _:
+            assert_never(options.platform)
+
+
+def _write(options: InitOptions, prepared: Prepared, placement: Placement) -> None:
+    match options.platform:
+        case "compose":
+            _write_for_compose(options, prepared, placement)
+        case "helm":
+            _write_manifest(options, prepared)
+            _print_helm(options, prepared)
+        case "pip":
+            _write_for_pip(options, prepared)
+        case _:
+            assert_never(options.platform)
+
+
+def _write_for_pip(options: InitOptions, prepared: Prepared) -> None:
+    _write_config(options, prepared)
+    _write_manifest(options, prepared)
     if prepared.manifest_out_text is not None:
-        _write_new(options.manifest_out, prepared.manifest_out_text, NEW_FILE_MODE)
-        print(f"wrote {options.manifest_out}")
+        _check_written(options, prepared)
+    print(
+        f"next: restart the proxy from {options.manifest_out.resolve().parent}, or set "
+        f"BROWNOUT_MANIFEST={options.manifest_out.resolve()}"
+    )
+
+
+def _write_config(options: InitOptions, prepared: Prepared) -> None:
+    if prepared.changes or _separate_config(options):
+        source_mode = options.gateway_config.stat().st_mode & PERMISSION_BITS
+        _replace_file(options.config_out, prepared.config_out_text, source_mode)
+        print(f"wrote {options.config_out}")
+
+
+def _write_for_compose(
+    options: InitOptions, prepared: Prepared, placement: Placement
+) -> None:
+    _write_config(options, prepared)
+    _write_manifest(options, prepared)
+    version: Final = write_plugin(options.plugin_dir)
+    print(
+        f"wrote {options.plugin_dir / PACKAGE} and "
+        f"{options.plugin_dir / dist_info_name(version)}, brownout {version}"
+    )
+    _place(options, placement)
+    if prepared.manifest_out_text is not None:
+        _check_written(options, prepared)
+
+
+def _write_manifest(options: InitOptions, prepared: Prepared) -> None:
+    if prepared.manifest_out_text is None:
+        return
+    _write_new(options.manifest_out, prepared.manifest_out_text, NEW_FILE_MODE)
+    print(f"wrote {options.manifest_out}")
+
+
+def _place(options: InitOptions, placement: Placement) -> None:
+    match placement:
+        case Override():
+            _write_new(placement.path, placement.text, NEW_FILE_MODE)
+            print(
+                f"wrote {placement.path}, which adds the plugin to {placement.service}"
+            )
+            flags = ""
+            if placement.load_flags is not None:
+                flags = f"{placement.load_flags} "
+            print(f"next: docker compose {flags}up -d")
+            print(
+                f"then: docker compose {flags}logs {placement.service} | "
+                'grep "brownout loaded"'
+            )
+        case OverrideRefused():
+            print(placement.reason, file=sys.stderr)
+            print(placement.text or "", end="")
+        case ComposeUnavailable():
+            _print_unread_override(options, placement)
+        case NoComposeFile():
+            print(
+                "no compose file here, so add these flags to the gateway's docker run: "
+                f"{docker_run_flags(options.plugin_dir, options.manifest_out)}"
+            )
+        case None:
+            return
+        case _:
+            assert_never(placement)
+
+
+def _print_unread_override(options: InitOptions, placement: ComposeUnavailable) -> None:
+    directory: Final = placement.base_file.parent
+    service: Final = options.service or SERVICE_PLACEHOLDER
+    print(
+        f"{placement.reason}, so save these lines as "
+        f"{override_path(placement.base_file)}. If the service already sets "
+        f"PYTHONPATH, append :{PLUGIN_MOUNT} to its value",
+        file=sys.stderr,
+    )
+    print(
+        override_text(
+            service,
+            PLUGIN_MOUNT,
+            relative_to_project(options.plugin_dir, directory),
+            relative_to_project(options.manifest_out, directory),
+        ),
+        end="",
+    )
+
+
+def _check_written(options: InitOptions, prepared: Prepared) -> None:
+    violations: Final = check(options.config_out, options.manifest_out, prepared.groups)
+    for violation in violations:
+        print(f"{violation.rule}\t{violation.subject}\t{violation.message}")
+    if violations:
+        print(f"{len(violations)} rule violation(s)", file=sys.stderr)
+        return
+    print(f"brownout check passed on LiteLLM {running_litellm()}")
+
+
+def _print_helm(options: InitOptions, prepared: Prepared) -> None:
+    settings_text, removals = proxy_config_settings(
+        prepared.changes, yaml.safe_load(prepared.config_out_text)
+    )
+    if settings_text:
+        print("paste these settings under proxy_config in your litellm-helm values:")
+        print(settings_text, end="")
+    for removal in removals:
+        print(f"remove proxy_config.{removal}")
+    print("add these to the same values file:")
+    print(
+        helm_values(running_version(), options.manifest_out.name),
+        end="",
+    )
+    print(f"then: {helm_manifest_command(options.manifest_out)}")
+
+
+def _replace_file(path: Path, text: str, mode: int) -> None:
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with open(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _write_new(path: Path, text: str, mode: int) -> None:

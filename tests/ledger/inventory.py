@@ -5,6 +5,7 @@ from typing import Final
 
 from .api_rows import API_ROWS
 from .command_rows import COMMAND_ROWS
+from .compose_rows import COMPOSE_ROWS
 from .config_rows import CONFIG_ROWS
 from .litellm_rows import LITELLM_ROWS
 from .manifest_rows import MANIFEST_ROWS
@@ -35,6 +36,7 @@ LEDGER: Final[tuple[Input, ...]] = (
     *API_ROWS,
     *REQUEST_ROWS,
     *COMMAND_ROWS,
+    *COMPOSE_ROWS,
     *LITELLM_ROWS,
     *PRINTED_ROWS,
 )

@@ -469,10 +469,10 @@ MANIFEST_ROWS: Final = (
             ),
             Form(
                 "unset",
-                "config/manifest.yaml under the working directory",
+                "brownout.yaml in the working directory",
                 Supported(
                     (
-                        f"{SETTINGS}test_the_manifest_path_defaults_to_the_config_directory",
+                        f"{SETTINGS}test_the_manifest_path_defaults_to_the_gateways_working_directory",
                     )
                 ),
             ),

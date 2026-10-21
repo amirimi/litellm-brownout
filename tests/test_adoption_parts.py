@@ -46,15 +46,16 @@ def test_every_marked_readme_block_is_found():
 
     assert set(blocks) == {
         "prepare",
-        "check",
-        "install",
+        "write",
+        "restart",
         "confirm",
         "fallback-manifest",
         "redis-service",
-        "fallback-ui-check",
+        "fallback-check",
     }
     assert "brownout init" in blocks["prepare"]
-    assert blocks["install"].startswith("FROM ")
+    assert "--write" in blocks["write"]
+    assert "docker compose up -d" in blocks["restart"]
 
 
 def test_a_marker_without_a_fenced_block_is_refused():

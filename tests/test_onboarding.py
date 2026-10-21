@@ -216,7 +216,7 @@ def test_a_team_that_allows_every_model_allows_its_fallbacks(models):
 
 
 def test_a_ready_config_needs_no_change():
-    assert config_plan(planned(READY_CONFIG)) == ()
+    assert config_plan(planned(READY_CONFIG), None) == ()
 
 
 def test_a_vanilla_config_gets_every_mechanical_fix():
@@ -237,7 +237,7 @@ def test_a_vanilla_config_gets_every_mechanical_fix():
         },
     }
 
-    changes = config_plan(planned(config))
+    changes = config_plan(planned(config), None)
 
     assert [type(change) for change in changes] == [
         AppendSetting,
@@ -279,7 +279,7 @@ def test_init_leaves_alerting_as_written(alerting):
         "general_settings": {**READY_CONFIG["general_settings"], **alerting},
     }
 
-    assert config_plan(planned(config)) == ()
+    assert config_plan(planned(config), None) == ()
 
 
 @pytest.mark.parametrize(
@@ -296,7 +296,7 @@ def test_no_coordination_redis_is_derived_without_a_redis_target(cache_params):
         },
     }
 
-    assert config_plan(planned(config)) == ()
+    assert config_plan(planned(config), None) == ()
 
 
 def test_a_missing_redis_violation_carries_the_block_to_add():
@@ -442,3 +442,27 @@ def test_a_member_budget_inside_a_team_is_a_finding_with_its_clearing_command():
         .resolution[0]
         .startswith(f"curl -X POST {GATEWAY}/team/member_update ")
     )
+
+
+def test_a_named_redis_host_is_written_when_the_config_names_no_redis():
+    config = {
+        "general_settings": {"fail_closed_budget_enforcement": True},
+        "litellm_settings": {
+            "callbacks": ["brownout.gateway.handler"],
+            "budget_exceeded_status_code": 429,
+        },
+    }
+
+    changes = config_plan(planned(config), "redis")
+
+    assert [(change.section, change.key, change.value) for change in changes] == [
+        (
+            "general_settings",
+            "coordination_redis",
+            {"host": "redis", "port": 6379, "password": "os.environ/REDIS_PASSWORD"},
+        )
+    ]
+
+
+def test_a_named_redis_host_leaves_a_configured_coordination_redis_alone():
+    assert config_plan(planned(READY_CONFIG), "elsewhere") == ()

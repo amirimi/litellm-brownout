@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_MANIFEST_PATH = "config/manifest.yaml"
+DEFAULT_MANIFEST_PATH = "brownout.yaml"
 
 
 def manifest_path() -> str:

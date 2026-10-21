@@ -8,7 +8,7 @@ from litellm.caching.dual_cache import DualCache
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy._types import UserAPIKeyAuth
 
-from . import bridge, log_output, settings, transitions
+from . import bridge, log_output, plugin_folder, settings, transitions
 from .bridge import CallKind
 from .events import EventLog
 from .manifest import Manifest, RoutePolicy, TeamPolicy
@@ -111,7 +111,11 @@ class BrownoutHandler(CustomLogger):
             claims=bridge.RedisClaimStore(bridge.live_spend_counter_redis),
             events=EventLog(),
         )
-        logger.info("brownout loaded: teams=%s", ",".join(manifest.team_ids))
+        logger.info(
+            "brownout loaded: version=%s teams=%s",
+            plugin_folder.running_version(),
+            ",".join(manifest.team_ids),
+        )
         return handler
 
     async def async_pre_call_hook(

@@ -9,10 +9,10 @@ def test_the_manifest_path_comes_from_the_environment(monkeypatch):
     assert settings.manifest_path() == "/etc/brownout/manifest.yaml"
 
 
-def test_the_manifest_path_defaults_to_the_config_directory(monkeypatch):
+def test_the_manifest_path_defaults_to_the_gateways_working_directory(monkeypatch):
     monkeypatch.delenv("BROWNOUT_MANIFEST", raising=False)
 
-    assert settings.manifest_path() == "config/manifest.yaml"
+    assert settings.manifest_path() == "brownout.yaml"
 
 
 def test_the_init_key_comes_from_the_environment(monkeypatch):
