@@ -37,7 +37,7 @@ built it.
 
 ```bash
 uvx pypi-attestations verify pypi --repository https://github.com/amirimi/litellm-brownout \
-  pypi:litellm_brownout-0.1.0-py3-none-any.whl
+  pypi:litellm_brownout-0.1.1-py3-none-any.whl
 ```
 
 The documented install line pins an exact version, and PyPI never lets a published file be replaced.
