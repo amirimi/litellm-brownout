@@ -24,6 +24,14 @@ NAME_NOT_A_GROUP: Final = Refused(
     ),
 )
 BUDGETS_BEFORE_TIERS: Final = Open("budgets-before-tiers")
+UNREAD_MODEL_LIST: Final = Documented(
+    unseen_because=(
+        "the authenticated caller carries only the project, user and customer ids, "
+        "and the lists live in LiteLLM's database"
+    ),
+    docs="docs/limits.md",
+    phrase="Project, team member and customer model lists are never read",
+)
 
 
 LITELLM_ROWS: Final = (
@@ -35,9 +43,9 @@ LITELLM_ROWS: Final = (
         cites=(
             "litellm/proxy/common_request_processing.py:1899@1.101.6",
             "litellm/proxy/litellm_pre_call_utils.py:2558@1.101.6",
-            "litellm/proxy/common_request_processing.py:2060@1.104.3",
-            "litellm/proxy/common_request_processing.py:2076@1.105.1",
-            "litellm/proxy/common_utils/http_parsing_utils.py:61@1.105.1",
+            "litellm/proxy/common_request_processing.py:2081@1.104.4",
+            "litellm/proxy/common_request_processing.py:2097@1.105.2",
+            "litellm/proxy/common_utils/http_parsing_utils.py:61@1.105.2",
         ),
         forms=(
             Form(
@@ -74,7 +82,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/proxy/common_request_processing.py:2126@1.104.3",),
+        cites=("litellm/proxy/common_request_processing.py:2147@1.104.4",),
         forms=(
             Form(
                 "an alias",
@@ -117,7 +125,7 @@ LITELLM_ROWS: Final = (
         source="litellm",
         parser=None,
         reads=(),
-        cites=("litellm/router.py:11711@1.104.3",),
+        cites=("litellm/router.py:11711@1.104.4",),
         forms=(
             Form(
                 "a request for a routing group's name",
@@ -288,13 +296,41 @@ LITELLM_ROWS: Final = (
         ),
     ),
     Input(
+        shape="LiteLLM model lists other than the key's and team's",
+        source="litellm",
+        parser=None,
+        reads=(),
+        cites=(
+            "litellm/proxy/auth/auth_checks.py:637@1.101.6",
+            "litellm/proxy/auth/auth_checks.py:926@1.101.6",
+            "litellm/proxy/auth/auth_checks.py:1164@1.106.1",
+        ),
+        forms=(
+            Form(
+                "a project's model list",
+                "not read, so a downgrade can serve a fallback it excludes",
+                UNREAD_MODEL_LIST,
+            ),
+            Form(
+                "a team member's model list",
+                "not read, so a downgrade can serve a fallback it excludes",
+                UNREAD_MODEL_LIST,
+            ),
+            Form(
+                "a customer's model list, from 1.106",
+                "not read, so a downgrade can serve a fallback it excludes",
+                UNREAD_MODEL_LIST,
+            ),
+        ),
+    ),
+    Input(
         shape="LiteLLM budgets other than the team's",
         source="litellm",
         parser=None,
         reads=(),
         cites=(
             "litellm/proxy/auth/auth_checks.py:834@1.101.6",
-            "litellm/proxy/auth/auth_checks.py:932@1.104.3",
+            "litellm/proxy/auth/auth_checks.py:932@1.104.4",
         ),
         forms=(
             Form(

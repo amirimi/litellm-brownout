@@ -51,7 +51,7 @@ from .rules import (
 logger: Final = logging.getLogger("brownout")
 
 SUPPORTED_FLOOR: Final = (1, 101, 6)
-TESTED_CEILING: Final = (1, 105)
+TESTED_CEILING: Final = (1, 106)
 
 SPEND_LOGS_METADATA_KEY: Final = "spend_logs_metadata"
 ENVIRONMENT_KEY: Final = "supported_environments"

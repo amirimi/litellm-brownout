@@ -58,7 +58,7 @@ checks each one and prints the fix.
 - **Fail-closed budgets and Redis:** `fail_closed_budget_enforcement` is on and `coordination_redis`
   is configured. LiteLLM keeps each team's spend counter in that Redis, and brownout records its
   announcements there.
-- **LiteLLM 1.101.6 to 1.105, pinned by image tag:** brownout imports three private LiteLLM helpers,
+- **LiteLLM 1.101.6 to 1.106, pinned by image tag:** brownout imports three private LiteLLM helpers,
   so upgrade only to a release the weekly `litellm matrix` workflow has passed.
 
 If your gateway has no Redis, add one before running `init` and give the gateway the same
@@ -116,7 +116,7 @@ bootstraps it first.
 
 <!-- adoption: install -->
 ```dockerfile
-FROM docker.litellm.ai/berriai/litellm:v1.105.1
+FROM docker.litellm.ai/berriai/litellm:v1.106.1
 RUN python -m ensurepip --upgrade && python -m pip install --no-deps litellm-brownout==0.1.0
 ```
 
@@ -197,6 +197,9 @@ drain without spending anything, run the [lab][lab].
   models gets a 503.
 - **No router fallbacks:** a provider error on the chosen model reaches the caller. Failover between
   deployments of one model group still works.
+- **Only key and team model lists are checked:** brownout never reads project, team member or
+  customer model lists. If you use them, give a route a fallback only when every list that admits
+  the primary also admits the fallback.
 - **The reservation comes first:** LiteLLM reserves each request's worst case on the model the
   caller asked for. Set `max_tokens`, or a large request near the ceiling gets LiteLLM's 429 before
   the downgrade.

@@ -9,7 +9,7 @@ Source = Literal["brownout", "litellm", "release", "printed"]
 Stage = Literal["check", "init", "start", "request"]
 
 FIRST_MINOR: Final = 101
-LAST_MINOR: Final = 105
+LAST_MINOR: Final = 106
 
 
 @dataclass(frozen=True)

@@ -457,9 +457,9 @@ REQUEST_ROWS: Final = (
         parser="bridge.parse_caller",
         reads=("member:agent_id",),
         cites=(
-            "litellm/proxy/auth/auth_checks.py:4480@1.104.3",
-            "litellm/proxy/auth/auth_checks.py:4517@1.104.3",
-            "litellm/proxy/auth/auth_checks.py:1062@1.105.1",
+            "litellm/proxy/auth/auth_checks.py:4510@1.104.4",
+            "litellm/proxy/auth/auth_checks.py:4547@1.104.4",
+            "litellm/proxy/auth/auth_checks.py:1062@1.105.2",
         ),
         forms=(
             Form(

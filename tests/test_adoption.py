@@ -12,7 +12,7 @@ from .adoption.scenario import gaps_match, load_scenario, scenario_names
 from .support import REPO_ROOT
 
 ENABLED: Final = os.getenv("BROWNOUT_ADOPTION", "").lower() in {"1", "true", "yes"}
-RELEASES: Final = tuple(os.getenv("BROWNOUT_ADOPTION_RELEASES", "v1.105.1").split(","))
+RELEASES: Final = tuple(os.getenv("BROWNOUT_ADOPTION_RELEASES", "v1.106.1").split(","))
 SELECTED: Final = frozenset(
     name for name in os.getenv("BROWNOUT_ADOPTION_SCENARIOS", "").split(",") if name
 )

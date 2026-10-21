@@ -11,7 +11,7 @@ validates the manifest when it loads and runs the request rules on every governe
 ```yaml
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:v1.105.1
+    image: docker.litellm.ai/berriai/litellm:v1.106.1
     environment:
       PYTHONPATH: /app/plugins
       BROWNOUT_MANIFEST: /app/config/manifest.yaml
@@ -25,7 +25,7 @@ The plugin imports `pyyaml`, `fastapi` and `litellm`, all present in the image. 
 its LiteLLM imports are private helpers (`_can_object_call_model`,
 `_resolve_key_models_for_auth_check` and `_check_and_merge_model_level_guardrails`), and all of
 them live in `src/brownout/bridge.py`. The handler refuses to start on LiteLLM below 1.101.6,
-and it logs a warning on a release newer than the tested 1.105. CI runs both this mount and the
+and it logs a warning on a release newer than the tested 1.106. CI runs both this mount and the
 README's wheel install.
 
 | Variable | Default | Purpose |
@@ -334,7 +334,9 @@ may call the fallback. It runs only when the decision wants a downgrade, so a re
 event carry the outcome, and a `brownout_fallback_rejected` event names the route, the target and
 the rejection on its own claim per route and rejection per window. A check that raises anything
 other than LiteLLM's `ProxyException` is a platform fault, so the plugin serves the primary and
-raises an `entitlement_check_unavailable` incident alongside the rejection event.
+raises an `entitlement_check_unavailable` incident alongside the rejection event. The check reads
+no project, team member or customer model list, and [limits](limits.md) gives the rule for a gateway
+that uses them.
 
 ## Data classes
 
