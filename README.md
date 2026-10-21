@@ -49,7 +49,7 @@ past the budget. Brownout adds five things.
 ## How it works
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/amirimi/litellm-brownout/main/.github/assets/how-it-works.svg" alt="A request for chat-qa passes LiteLLM's authentication and budget reservation. Brownout reads the team's spend from Redis, finds it past the 90% tier and routes the request to chat-qa-small. The response returns with x-brownout headers. The manifest brownout.yaml sets the policy." width="900">
+  <img src="https://raw.githubusercontent.com/amirimi/litellm-brownout/main/.github/assets/how-it-works.svg" alt="A request passes LiteLLM's authentication and budget reservation. Brownout reads the team's spend from Redis, finds it past the route's tier and serves the fallback. The response returns with x-brownout headers. The manifest brownout.yaml sets the policy." width="900">
 </p>
 
 One manifest, `brownout.yaml`, holds every team's budget, tiers and fallbacks. It lives in your repo
