@@ -138,9 +138,10 @@ Alert on `component` and `event`, never on the message text.
 | CloudWatch Logs | `{ $.component = "brownout" && $.event = "brownout_route_degraded" }` |
 | Elastic | `component:"brownout" and event:"brownout_route_degraded"` |
 
-Without `JSON_LOGS`, the line takes LiteLLM's plain format and ends with the payload as JSON. Records
-also reach handlers on the root logger, so an OpenTelemetry or ddtrace log exporter receives them. A
-stream handler on the root logger prints each announcement a second time.
+Without `JSON_LOGS`, the line takes LiteLLM's plain format and ends with the payload as JSON. A
+backend that reads severity from the stream then shows team events as INFO and incidents as ERROR.
+Records also reach handlers on the root logger, so an OpenTelemetry or ddtrace log exporter receives
+them. A stream handler on the root logger prints each announcement a second time.
 
 Each payload is one of these.
 
