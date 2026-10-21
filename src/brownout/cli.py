@@ -519,7 +519,10 @@ def _write(options: InitOptions, prepared: Prepared, placement: Placement) -> No
 def _write_for_compose(
     options: InitOptions, prepared: Prepared, placement: Placement
 ) -> None:
-    if prepared.changes:
+    config_elsewhere: Final = (
+        options.config_out.resolve() != options.gateway_config.resolve()
+    )
+    if prepared.changes or config_elsewhere:
         source_mode = options.gateway_config.stat().st_mode & PERMISSION_BITS
         _replace_file(options.config_out, prepared.config_out_text, source_mode)
         print(f"wrote {options.config_out}")

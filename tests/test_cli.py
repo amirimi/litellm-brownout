@@ -411,6 +411,16 @@ def test_init_edits_the_config_in_place_and_keeps_its_comments(tmp_path, capsys)
     assert "brownout check passed on LiteLLM" in capsys.readouterr().out
 
 
+def test_a_separate_config_out_is_written_even_without_changes(tmp_path):
+    chosen = options(tmp_path, config_out=tmp_path / "copy.yaml")
+
+    init(chosen, fake_gateway(), INIT_TOKEN)
+
+    assert chosen.config_out.read_text(encoding="utf-8") == LAB_CONFIG.read_text(
+        encoding="utf-8"
+    )
+
+
 def test_init_writes_the_plugin_folder_beside_the_manifest(tmp_path, capsys):
     chosen = options(tmp_path)
 
