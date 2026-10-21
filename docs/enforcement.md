@@ -94,7 +94,7 @@ once on the gateway log.
 | Kind | Channel | Read by |
 |---|---|---|
 | A fact about one request | `spend_logs_metadata.brownout` in the request's metadata | Every LiteLLM logging integration, the spend logs and the response headers |
-| An announcement about a team's window | The `brownout` logger on gateway stdout | Whoever reads the gateway's logs, which is where platform alerts belong |
+| An announcement about a team's window | The `brownout` logger, in the gateway's log format | Whoever reads the gateway's logs, which is where platform alerts belong |
 
 ### Request facts
 
@@ -118,8 +118,31 @@ team dashboards on the entry and platform alerts on announcements.
 
 ### Announcements
 
-Each transition is one JSON line on the `brownout` logger, team events at warning and incidents at
-error. Match alerts on the logger name, never on the text.
+Each transition is one record on the `brownout` logger, printed in the gateway's own log format.
+Team events print at WARNING on stdout, and incidents print at ERROR on stderr. Run the gateway with
+`JSON_LOGS=true`, so LiteLLM writes each announcement as one JSON line with `component` set to
+`brownout` and every payload key as a top-level field.
+
+```json
+{"level": "WARNING", "timestamp": "2026-09-21T14:02:11.418027", "component": "brownout",
+ "event": "brownout_tier_crossed", "team_id": "team-a", "tier": 75, "outcome": "served",
+ "spend_usd": 376.2, "envelope_usd": 500.0, "message": "{...}", "logger": "events.py:136"}
+```
+
+Alert on `component` and `event`, never on the message text.
+
+| Backend | Filter for a downgrade |
+|---|---|
+| Datadog | `@component:brownout @event:brownout_route_degraded` |
+| Grafana Loki | `{container="litellm"} \| json \| component="brownout" \| event="brownout_route_degraded"` |
+| CloudWatch Logs | `{ $.component = "brownout" && $.event = "brownout_route_degraded" }` |
+| Elastic | `component:"brownout" and event:"brownout_route_degraded"` |
+
+Without `JSON_LOGS`, the line takes LiteLLM's plain format and ends with the payload as JSON. Records
+also reach handlers on the root logger, so an OpenTelemetry or ddtrace log exporter receives them. A
+stream handler on the root logger prints each announcement a second time.
+
+Each payload is one of these.
 
 ```json
 {"event": "brownout_tier_crossed", "owner": "team", "team_id": "team-a",

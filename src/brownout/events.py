@@ -133,8 +133,8 @@ class EventLog:
 def _log(event: Event, line: str) -> None:
     match event:
         case IncidentEvent():
-            logger.error("brownout %s", line)
+            logger.error("%s", line)
         case TierEvent() | RouteDegradedEvent() | FallbackRejectedEvent():
-            logger.warning("brownout %s", line)
+            logger.warning("%s", line)
         case _:
             assert_never(event)

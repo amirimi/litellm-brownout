@@ -39,7 +39,7 @@ MAX_TOKENS: Final = 40
 MAX_REQUESTS: Final = 80
 BUDGET_REFUSAL_STATUSES: Final = frozenset({422, 429})
 BUDGET_REFUSAL_MESSAGE: Final = "Budget has been exceeded"
-ANNOUNCEMENT_LINE: Final = re.compile(r"brownout (\{.*\})\s*$")
+BROWNOUT_COMPONENT: Final = "brownout"
 FINDING_LINE: Final = re.compile(r"^([a-z-]+)\t([^\t]+)\t")
 LAB_CONFIG: Final = REPO_ROOT / "config" / "config.yaml"
 LAB_MANIFEST: Final = REPO_ROOT / "config" / "manifest.yaml"
@@ -349,10 +349,22 @@ def _read_announcements(since: str) -> list[dict[str, Any]]:
         pytest.fail(f"could not read the gateway log: {result.stderr}")
     found = []
     for line in result.stdout.splitlines():
-        match = ANNOUNCEMENT_LINE.search(line)
-        if match is not None:
-            found.append(json.loads(match.group(1)))
+        announcement = _announcement(line)
+        if announcement is not None:
+            found.append(announcement)
     return found
+
+
+def _announcement(line: str) -> dict[str, Any] | None:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(record, dict):
+        return None
+    if record.get("component") != BROWNOUT_COMPONENT or "event" not in record:
+        return None
+    return record
 
 
 def _field_in_spend_logs(response_id: str) -> dict[str, Any]:

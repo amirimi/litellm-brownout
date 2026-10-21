@@ -8,7 +8,7 @@ from litellm.caching.dual_cache import DualCache
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy._types import UserAPIKeyAuth
 
-from . import bridge, settings, transitions
+from . import bridge, log_output, settings, transitions
 from .bridge import CallKind
 from .events import EventLog
 from .manifest import Manifest, RoutePolicy, TeamPolicy
@@ -96,6 +96,7 @@ class BrownoutHandler(CustomLogger):
 
     @classmethod
     def from_environment(cls) -> BrownoutHandler:
+        log_output.install(logger, logging.getLogger(log_output.LITELLM_PROXY_LOGGER))
         bridge.require_supported_litellm(bridge.running_litellm())
         manifest: Final = Manifest.from_file(settings.manifest_path())
         handler = cls(

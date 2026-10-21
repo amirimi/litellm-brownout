@@ -19,6 +19,7 @@ services:
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       PYTHONPATH: /app/plugins
       BROWNOUT_MANIFEST: /app/config/manifest.yaml
+      JSON_LOGS: "true"
     volumes:
       - ./src/brownout:/app/plugins/brownout:ro
       - ./config:/app/config:ro
