@@ -25,9 +25,14 @@ Each limit says what it means for your gateway. Refusals, headers and events are
 
 ## Running
 
-- **Redis is on the request path:** while LiteLLM cannot reach Redis, and for 60 seconds after it
-  returns, LiteLLM refuses every budgeted request. Run Redis with failover, persistence and
-  `noeviction`, because a flush or an eviction repeats the window's announcements.
+- **Without Redis, one LiteLLM process only:** several replicas or workers without a Redis that
+  LiteLLM uses are unsupported, because each process would count only its own spend. Brownout
+  cannot count processes, so the gateway logs its mode on its first governed request. A restart
+  without Redis repeats the window's announcements once, and every governed admit reads the spend
+  recorded in the database, which LiteLLM caches for 5 seconds.
+- **With Redis, Redis is on the request path:** while LiteLLM cannot reach Redis, and for 60 seconds
+  after it returns, LiteLLM refuses every budgeted request. Run Redis with failover, persistence
+  and `noeviction`, because a flush or an eviction repeats the window's announcements.
 - **A LiteLLM upgrade can stop startup:** brownout imports private LiteLLM helpers, so upgrade only
   to a release the `litellm matrix` workflow has passed.
 - **The fallback gets everything the route sends:** tools, images and long prompts included. With

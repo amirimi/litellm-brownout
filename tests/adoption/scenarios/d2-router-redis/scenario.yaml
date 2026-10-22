@@ -1,6 +1,6 @@
 description: >
   Redis already coordinates LiteLLM's replicas through router_settings, the setup LiteLLM documents
-  for load balancing across instances. init does not derive coordination_redis from it.
+  for load balancing across instances. init derives coordination_redis from it.
 seed:
   teams:
     - alias: search
@@ -10,11 +10,6 @@ seed:
   keys:
     - alias: search-app
       team: search
-choices:
-  - rule: redis-configured
-    subject: general_settings.coordination_redis
-    values:
-      "<YOUR REDIS HOST>": redis
 confirm:
   key: search-app
   model: chat

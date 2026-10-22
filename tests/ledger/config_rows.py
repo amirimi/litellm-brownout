@@ -448,20 +448,42 @@ CONFIG_ROWS: Final = (
             ),
             Form(
                 "absent or empty, including one saved only through the admin UI",
-                "refused",
-                Refused(
-                    stage="check",
-                    rule=RuleId.REDIS_CONFIGURED,
-                    tests=(
-                        f"{RULES}test_a_missing_redis_is_a_file_violation",
-                        f"{ONBOARDING}test_a_missing_redis_violation_carries_the_block_to_add",
-                    ),
+                "a notice, because LiteLLM can still take Redis from its cache or REDIS_*",
+                Supported(
+                    (
+                        f"{RULES}test_a_missing_redis_is_a_notice_and_never_a_violation",
+                        f"{ONBOARDING}test_a_missing_redis_notice_carries_the_block_to_add_and_never_blocks",
+                    )
                 ),
             ),
             Form(
                 "not a mapping",
                 "unreadable",
                 _unreadable(f"{MALFORMED}[coordination-redis]"),
+            ),
+        ),
+    ),
+    Input(
+        shape="router_settings Redis connection",
+        source="brownout",
+        parser="gateway_config._router_redis",
+        reads=("key:redis_host", "key:redis_url"),
+        cites=(),
+        forms=(
+            Form(
+                "a redis_host or redis_url, with any port and password",
+                "init copies it into coordination_redis when no cache Redis exists",
+                Supported(
+                    (
+                        f"{CONFIG}test_a_router_redis_offers_its_connection",
+                        f"{ONBOARDING}test_a_router_redis_becomes_the_coordination_redis",
+                    )
+                ),
+            ),
+            Form(
+                "neither",
+                "nothing to copy",
+                Supported((f"{CONFIG}test_a_router_redis_offers_its_connection",)),
             ),
         ),
     ),

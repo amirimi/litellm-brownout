@@ -87,6 +87,7 @@ class BrownoutHandler(CustomLogger):
         super().__init__()
         self._manifest: Final = manifest
         self._spend_counter: Final = spend_counter
+        self._counter_mode_named = False
         self._permissions: Final = permissions
         self._schedule: Final = schedule
         self._guardrails: Final = guardrails
@@ -309,6 +310,7 @@ class BrownoutHandler(CustomLogger):
         refusal: Final = self._model_refusal(model, team, kind)
         if refusal is not None:
             return self._refused(refusal, team.budget_duration)
+        self._name_counter_mode()
         try:
             counter = await self._spend_counter.read(
                 team_id=team.team_id,
@@ -325,6 +327,19 @@ class BrownoutHandler(CustomLogger):
             route=_route(team, model, kind),
             spend_usd=max(0.0, counter - caller.own_hold_usd),
             window=transitions.window_id(self._schedule, team.budget_duration),
+        )
+
+    def _name_counter_mode(self) -> None:
+        if self._counter_mode_named:
+            return
+        self._counter_mode_named = True
+        if self._spend_counter.shared():
+            logger.info("brownout spend counter: shared through Redis")
+            return
+        logger.warning(
+            "brownout spend counter: per process, because LiteLLM has no Redis. "
+            "Brownout supports this on one LiteLLM process only: one replica with "
+            "one worker"
         )
 
     def _refused(self, refusal: Refusal, budget_duration: str) -> Refused:

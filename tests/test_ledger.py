@@ -9,6 +9,7 @@ from typing import Final, assert_never
 import yaml
 
 from brownout.refusals import RefusalReason, RuleId
+from brownout.rules import NOTICE_RULES
 
 from .ledger.inventory import LEDGER, OPEN_FINDINGS, WALKED_RELEASES
 from .ledger.model import (
@@ -99,7 +100,12 @@ def test_every_supported_or_refused_form_names_an_existing_test() -> None:
 
 def test_every_rule_refuses_some_form() -> None:
     rules: Final = {refusal.rule for refusal in _refusals() if refusal.rule is not None}
-    assert set(RuleId) - rules == set()
+    assert set(RuleId) - NOTICE_RULES - rules == set()
+
+
+def test_a_notice_rule_refuses_nothing() -> None:
+    rules: Final = {refusal.rule for refusal in _refusals() if refusal.rule is not None}
+    assert NOTICE_RULES & rules == set()
 
 
 def test_every_refusal_reason_refuses_some_form() -> None:

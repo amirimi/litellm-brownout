@@ -11,6 +11,14 @@ from .rules import GatewaySettings
 
 GENERAL_SETTINGS: Final = "general_settings"
 LITELLM_SETTINGS: Final = "litellm_settings"
+ROUTER_SETTINGS: Final = "router_settings"
+ROUTER_REDIS_FIELDS: Final = (
+    ("redis_host", "host"),
+    ("redis_port", "port"),
+    ("redis_password", "password"),
+    ("redis_url", "url"),
+)
+ROUTER_REDIS_TARGETS: Final = ("redis_host", "redis_url")
 REDIS_CACHE_TYPE: Final = "redis"
 PRICE_KEYS: Final = ("input_cost_per_token", "output_cost_per_token")
 REDIS_TARGETS: Final = ("host", "url", "startup_nodes", "sentinel_nodes")
@@ -36,6 +44,7 @@ class GatewayConfig:
     settings: GatewaySettings
     coordination_redis: bool
     cache_redis: Mapping[str, Any] | None
+    router_redis: Mapping[str, Any] | None
     callbacks: tuple[str, ...]
     budget_exceeded_status_code: bool
 
@@ -57,6 +66,7 @@ def read_gateway_config(source: Path, config: Mapping[str, Any]) -> GatewayConfi
                 source, "cache_params", litellm_settings.get("cache_params")
             )
         ),
+        router_redis=_router_redis(_section(source, config, ROUTER_SETTINGS)),
         callbacks=_callbacks(source, litellm_settings.get("callbacks")),
         budget_exceeded_status_code="budget_exceeded_status_code" in litellm_settings,
     )
@@ -153,6 +163,16 @@ def _callbacks(source: Path, value: Any) -> tuple[str, ...]:
             f"{source} litellm_settings.callbacks must be a list of callback names"
         )
     return tuple(value)
+
+
+def _router_redis(router_settings: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    if not any(router_settings.get(target) for target in ROUTER_REDIS_TARGETS):
+        return None
+    return {
+        field: router_settings[key]
+        for key, field in ROUTER_REDIS_FIELDS
+        if key in router_settings
+    }
 
 
 def _cache_redis(cache_params: Mapping[str, Any]) -> Mapping[str, Any] | None:

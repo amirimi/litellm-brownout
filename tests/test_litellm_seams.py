@@ -18,6 +18,7 @@ from litellm.litellm_core_utils import litellm_logging
 from litellm.litellm_core_utils.core_helpers import (
     get_metadata_variable_name_from_kwargs,
 )
+from litellm.proxy import proxy_server
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.auth import auth_checks
 from litellm.proxy.common_request_processing import ProxyRouteType
@@ -656,3 +657,47 @@ def test_seam_json_logs_lift_a_json_message_into_top_level_fields():
     assert line["level"] == "WARNING"
     assert line["event"] == "brownout_tier_crossed"
     assert line["tier"] == 75
+
+
+def test_seam_an_explicit_coordination_redis_is_tried_before_the_environment():
+    source = inspect.getsource(proxy_server.ProxyConfig)
+
+    explicit = source.index("self._init_coordination_redis(config=config)")
+    environment = source.index("self._init_coordination_redis_env_fallback(")
+
+    assert explicit < environment
+
+
+async def test_seam_without_redis_the_spend_counter_is_read_from_memory(monkeypatch):
+    key = "spend:team:seam-memory"
+    monkeypatch.setattr(proxy_server.spend_counter_cache, "redis_cache", None)
+    proxy_server.spend_counter_cache.in_memory_cache.set_cache(key=key, value=0.3)
+
+    try:
+        spend = await proxy_server.get_current_spend(
+            counter_key=key, fallback_spend=0.0
+        )
+    finally:
+        proxy_server.spend_counter_cache.in_memory_cache.delete_cache(key=key)
+
+    assert spend == 0.3
+
+
+async def test_seam_fail_closed_refuses_a_memory_read_the_database_cannot_confirm(
+    monkeypatch,
+):
+    key = "spend:team:seam-unverified"
+    monkeypatch.setattr(proxy_server.spend_counter_cache, "redis_cache", None)
+    monkeypatch.setattr(proxy_server, "prisma_client", None)
+    monkeypatch.setitem(
+        proxy_server.general_settings, "fail_closed_budget_enforcement", True
+    )
+    proxy_server.spend_counter_cache.in_memory_cache.set_cache(key=key, value=0.3)
+
+    try:
+        with pytest.raises(Exception, match="(?i)budget"):
+            await proxy_server.get_current_spend(
+                counter_key=key, fallback_spend=0.0, max_budget=10.0
+            )
+    finally:
+        proxy_server.spend_counter_cache.in_memory_cache.delete_cache(key=key)

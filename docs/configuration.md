@@ -55,7 +55,7 @@ brownout init --gateway http://localhost:4000 --gateway-config config.yaml --wri
 | `--platform` | `compose` | `helm` writes only the manifest and prints the chart's settings and values. `pip` writes the config and manifest with nothing to mount |
 | `--service` | the one service running LiteLLM's image | The Compose service the override extends |
 | `--compose-file` | `compose.yaml` or `docker-compose.yml` in the current folder | The Compose file whose LiteLLM service the override extends |
-| `--redis-host` | none | Writes `coordination_redis` for this host when the config names no Redis |
+| `--redis-host` | none | Writes `coordination_redis` for this host when the config has no `coordination_redis` block |
 | `--write` | off | Write the files. Without it `init` prints the changes and the findings and writes nothing |
 
 `init` reads its key only from `BROWNOUT_INIT_KEY`. Any key that can read teams, keys and models
@@ -75,8 +75,8 @@ fix it. A value only you can choose, such as a team's budget, is a placeholder i
 ### What `--write` creates
 
 1. The gateway config gains the callback, `fail_closed_budget_enforcement`,
-   `budget_exceeded_status_code: 429`, and a `coordination_redis` taken from a Redis cache or from
-   `--redis-host`. Comments, key order and the file's permissions stay.
+   `budget_exceeded_status_code: 429`, and a `coordination_redis` taken from `--redis-host`, a Redis
+   cache or `router_settings`. Comments, key order and the file's permissions stay.
 2. `brownout.yaml` is the manifest. It has one entry per LiteLLM team with a budget, copies that
    budget and window, warns at 75% and 90%, and declares no fallback yet.
 3. `plugins/` holds the plugin and its version.
@@ -165,7 +165,7 @@ model_list:
 | Setting | What it does for brownout |
 |---|---|
 | `fail_closed_budget_enforcement: true` | LiteLLM refuses a request whose worst case does not fit the remaining budget, so spend stops at the envelope. Rule `fail-closed-on` |
-| `coordination_redis` | Holds the team spend counter and brownout's announcement claims, so one crossing is one announcement across replicas. A Redis `cache_params` block alone fails rule `redis-configured`, and `init` writes `coordination_redis` from it |
+| `coordination_redis` | Shares the team spend counter and brownout's announcement claims across processes, so one crossing is one announcement. LiteLLM also takes Redis from a Redis cache or `REDIS_*` variables. Without any, brownout supports one LiteLLM process only, and rule `redis-configured` gives notice |
 | `callbacks` | Loads the handler |
 | `budget_exceeded_status_code: 429` | Keeps LiteLLM's budget refusal a 429 instead of the 422 that 1.104 made the default |
 | `input_cost_per_token`, `output_cost_per_token` | The prices LiteLLM reserves and bills against, in `litellm_params` or `model_info`. Rules `route-priced` and `model-priced` refuse a group with an unpriced deployment |
@@ -245,7 +245,7 @@ downgrade rule runs only when a request wants a downgrade, and a failure serves 
 | `fallback-data-class` | With `data_class_order` declared, a fallback is at least as restricted as its route | Check, downgrade |
 | `fail-closed-on` | `fail_closed_budget_enforcement` is `true` | Check, request |
 | `reservation-on` | `disable_budget_reservation` is absent or `false` | Check, request |
-| `redis-configured` | `coordination_redis` is set | Check |
+| `redis-configured` | `coordination_redis` is set. A notice, never a failure | Check |
 | `no-caller-routing` | The caller sent no fallback list | Request |
 | `team-in-manifest` | The key's team is in the manifest | Request |
 | `key-has-no-budget` | The key carries no `max_budget`, `model_max_budget` or `budget_limits` of its own | Request |

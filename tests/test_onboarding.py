@@ -22,10 +22,10 @@ from brownout.onboarding import (
     key_findings,
     model_findings,
     nothing_to_govern,
+    notice_findings,
     reconcile_findings,
     team_entries,
     team_findings,
-    violation_findings,
 )
 from brownout.refusals import RuleId, Violation
 from brownout.rules import ModelGroup
@@ -299,19 +299,66 @@ def test_no_coordination_redis_is_derived_without_a_redis_target(cache_params):
     assert config_plan(planned(config), None) == ()
 
 
-def test_a_missing_redis_violation_carries_the_block_to_add():
-    findings = violation_findings(
+def test_a_missing_redis_notice_carries_the_block_to_add_and_never_blocks():
+    findings = notice_findings(
         [
             Violation(
                 RuleId.REDIS_CONFIGURED,
                 "general_settings.coordination_redis",
-                "is unset",
+                "names no Redis",
             )
         ]
     )
 
-    assert findings[0].blocking is True
+    assert findings[0].blocking is False
     assert any("<YOUR REDIS HOST>" in line for line in findings[0].resolution)
+
+
+ROUTER_REDIS: Final = {
+    "redis_host": "os.environ/REDIS_HOST",
+    "redis_port": "os.environ/REDIS_PORT",
+    "redis_password": "os.environ/REDIS_PASSWORD",
+}
+
+
+def test_a_router_redis_becomes_the_coordination_redis():
+    config = {
+        "general_settings": {"fail_closed_budget_enforcement": True},
+        "litellm_settings": {
+            "callbacks": ["brownout.gateway.handler"],
+            "budget_exceeded_status_code": 429,
+        },
+        "router_settings": ROUTER_REDIS,
+    }
+
+    changes = config_plan(planned(config), None)
+
+    assert [(change.key, change.value) for change in changes] == [
+        (
+            "coordination_redis",
+            {
+                "host": "os.environ/REDIS_HOST",
+                "port": "os.environ/REDIS_PORT",
+                "password": "os.environ/REDIS_PASSWORD",
+            },
+        )
+    ]
+
+
+def test_a_named_redis_host_wins_over_a_redis_the_config_already_names():
+    config = {
+        "general_settings": {"fail_closed_budget_enforcement": True},
+        "litellm_settings": {
+            "callbacks": ["brownout.gateway.handler"],
+            "budget_exceeded_status_code": 429,
+            "cache_params": {"type": "redis", "host": "cache-redis"},
+        },
+        "router_settings": ROUTER_REDIS,
+    }
+
+    changes = config_plan(planned(config), "chosen-redis")
+
+    assert [change.value["host"] for change in changes] == ["chosen-redis"]
 
 
 def test_only_the_admin_keys_notice_leaves_init_ready():

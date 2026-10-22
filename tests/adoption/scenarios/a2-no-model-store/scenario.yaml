@@ -28,10 +28,6 @@ choices:
     values:
       "<YOUR INPUT PRICE PER TOKEN>": "0.00005"
       "<YOUR OUTPUT PRICE PER TOKEN>": "0.0005"
-provisions:
-  "<YOUR REDIS HOST>":
-    readme: redis-service
-    value: redis
 confirm:
   key: search-app
   model: chat

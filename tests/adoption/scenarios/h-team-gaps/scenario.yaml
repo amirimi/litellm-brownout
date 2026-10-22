@@ -24,10 +24,6 @@ choices:
     subject: "{team:ops}"
     values:
       "<YOUR DURATION, SUCH AS 7d>": 1d
-provisions:
-  "<YOUR REDIS HOST>":
-    readme: redis-service
-    value: redis
 confirm:
   key: search-app
   model: chat

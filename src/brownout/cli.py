@@ -63,6 +63,7 @@ from .onboarding import (
     key_findings,
     model_findings,
     nothing_to_govern,
+    notice_findings,
     reconcile_findings,
     team_entries,
     team_findings,
@@ -79,7 +80,7 @@ from .onboarding_files import (
 )
 from .plugin_folder import PACKAGE, dist_info_name, running_version, write_plugin
 from .refusals import Violation
-from .rules import GatewayFile, ModelGroup, file_rules
+from .rules import GatewayFile, ModelGroup, file_notices, file_rules
 
 GATEWAY_TIMEOUT_SECONDS: Final = 30.0
 NEW_FILE_MODE: Final = 0o666
@@ -269,11 +270,14 @@ def _check_command(arguments: argparse.Namespace) -> int:
             return UNREADY
     try:
         violations = check(arguments.gateway_config, arguments.manifest, live_groups)
+        notices = check_notices(arguments.gateway_config)
     except DocumentError as error:
         print(error, file=sys.stderr)
         return UNREADY
     for violation in violations:
         print(f"{violation.rule}\t{violation.subject}\t{violation.message}")
+    for notice in notices:
+        print(f"notice: {notice.rule}\t{notice.subject}\t{notice.message}")
     if violations:
         print(f"{len(violations)} rule violation(s)", file=sys.stderr)
         return 1
@@ -418,14 +422,11 @@ def _findings(
             str(options.manifest_out),
             load_yaml_text(options.manifest_out, manifest_out_text),
         )
-        findings.extend(
-            violation_findings(
-                file_rules(
-                    written,
-                    with_live_groups(gateway_file(written_config), snapshot.groups),
-                )
-            )
+        written_gateway = with_live_groups(
+            gateway_file(written_config), snapshot.groups
         )
+        findings.extend(violation_findings(file_rules(written, written_gateway)))
+        findings.extend(notice_findings(file_notices(written_gateway)))
     findings.append(admin_keys_notice(_own_key_teamless(snapshot, own_token)))
     return findings
 
@@ -666,6 +667,11 @@ def check(
         return [Violation(error.rule, str(manifest_path), str(error))]
     config: Final = read_config(gateway_config, load_yaml(gateway_config))
     return file_rules(manifest, with_live_groups(gateway_file(config), live_groups))
+
+
+def check_notices(gateway_config: Path) -> list[Violation]:
+    config: Final = read_config(gateway_config, load_yaml(gateway_config))
+    return file_notices(gateway_file(config))
 
 
 def read_config(path: Path, document: object) -> GatewayConfig:

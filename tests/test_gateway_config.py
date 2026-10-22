@@ -336,6 +336,22 @@ def test_coordination_redis_counts_when_it_names_a_connection(value, configured)
     )
 
 
+@pytest.mark.parametrize(
+    ("router_settings", "expected"),
+    [
+        (
+            {"redis_host": "redis", "redis_port": 6380, "redis_password": "p"},
+            {"host": "redis", "port": 6380, "password": "p"},
+        ),
+        ({"redis_url": "redis://redis:6379"}, {"url": "redis://redis:6379"}),
+        ({"redis_port": 6379}, None),
+        ({"routing_strategy": "simple-shuffle"}, None),
+    ],
+)
+def test_a_router_redis_offers_its_connection(router_settings, expected):
+    assert read({"router_settings": router_settings}).router_redis == expected
+
+
 def test_a_status_code_counts_when_it_is_set():
     config = read({"litellm_settings": {"budget_exceeded_status_code": 422}})
 

@@ -27,10 +27,6 @@ seed:
   keys:
     - alias: search-app
       team: search
-provisions:
-  "<YOUR REDIS HOST>":
-    readme: redis-service
-    value: redis
 confirm:
   key: search-app
   model: chat
