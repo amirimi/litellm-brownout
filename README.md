@@ -15,6 +15,13 @@ and the gateway switches that route once the team's spend passes it.
 </p>
 
 <p align="center">
+  <a href="https://github.com/amirimi/litellm-brownout/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/amirimi/litellm-brownout/ci.yml?branch=main&label=tests&style=flat&labelColor=000000&color=000000" alt="Tests" /></a>
+  <a href="https://github.com/amirimi/litellm-brownout/actions/workflows/litellm-matrix.yml"><img src="https://img.shields.io/github/actions/workflow/status/amirimi/litellm-brownout/litellm-matrix.yml?branch=main&label=LiteLLM%20matrix&style=flat&labelColor=000000&color=000000" alt="LiteLLM matrix" /></a>
+  <a href="https://github.com/amirimi/litellm-brownout/actions/workflows/adoption.yml"><img src="https://img.shields.io/github/actions/workflow/status/amirimi/litellm-brownout/adoption.yml?branch=main&label=install%20tested&style=flat&labelColor=000000&color=000000" alt="Install tested" /></a>
+  <a href="https://pypi.org/project/litellm-brownout/"><img src="https://img.shields.io/pypi/pyversions/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="Python versions" /></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/amirimi/litellm-brownout#get-started"><img src="https://img.shields.io/badge/Docker%20Compose-000000?style=flat&logo=docker&logoColor=white" alt="Docker Compose" /></a>
   <a href="https://github.com/amirimi/litellm-brownout/blob/main/docs/configuration.md#kubernetes-with-litellm-helm"><img src="https://img.shields.io/badge/Kubernetes%20with%20Helm-000000?style=flat&logo=kubernetes&logoColor=white" alt="Kubernetes with Helm" /></a>
   <a href="https://github.com/amirimi/litellm-brownout#other-ways-to-run-litellm"><img src="https://img.shields.io/badge/pip%20or%20uv-000000?style=flat&logo=python&logoColor=white" alt="pip or uv" /></a>
