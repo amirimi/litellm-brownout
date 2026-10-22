@@ -72,28 +72,15 @@ checks each one and prints the fix.
 - Budgets sit on teams, never on keys.
 - Clients use LiteLLM's unified routes. Provider pass-through routes, realtime, batches, fine-tuning
   and search tools are refused.
-- `fail_closed_budget_enforcement` is on, which `init` sets.
-- One LiteLLM process runs without Redis. More than one replica or worker needs a Redis that
-  LiteLLM uses: `coordination_redis`, a Redis response cache, or `REDIS_*` variables.
-- LiteLLM is 1.101.6 to 1.106. Pin its image by digest as well as tag, because floating tags such as
-  `main-stable` have pointed at a compromised LiteLLM release.
-
-A gateway that adds Redis can use this service, which shares its `REDIS_PASSWORD`.
-
-<!-- adoption: redis-service -->
-```yaml
-services:
-  redis:
-    image: redis:7
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory-policy noeviction"]
-    env_file:
-      - .env
-```
+- LiteLLM is 1.101.6 to 1.106, with its image pinned by digest.
+- One LiteLLM process needs nothing more. [More than one](#more-than-one-litellm-process) needs
+  Redis.
 
 ## Get started
 
-Run these from the folder with your compose file. `init` reads the gateway with GET requests only,
-so any key that can read teams, keys and models works, the master key included.
+Brownout is configuration as code. Its manifest, its gateway settings and its Compose override are
+files in your repo, reviewed like any other change. One command writes all of them from your running
+gateway, so run it from the folder with your compose file.
 
 **1. Run `init` and fix what it lists.**
 
@@ -103,9 +90,8 @@ export BROWNOUT_INIT_KEY="{gateway key}"
 uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gateway-config config.yaml
 ```
 
-Each finding prints its fix, and a fix that calls LiteLLM's API uses `$LITELLM_MASTER_KEY` from your
-shell. A `redis-configured` notice is expected on one LiteLLM process. A gateway with more adds the
-service above and passes `--redis-host redis` in the next step.
+`{gateway key}` is any key that can read the gateway, the master key included, because `init` only
+reads. Each finding prints its fix, and a fix that calls LiteLLM's API uses `$LITELLM_MASTER_KEY`.
 
 **2. Write the files.**
 
@@ -124,17 +110,14 @@ docker compose logs litellm | grep "brownout loaded"
 
 What happened:
 
-- `init` added brownout's settings to `config.yaml` and wrote `brownout.yaml`, the manifest. It
-  checked both before it finished.
-- It copied the plugin into `plugins/`, at the version you ran.
-- It wrote `docker-compose.override.yml`. Compose merges it into your LiteLLM service, which gains
-  `PYTHONPATH` and read-only mounts of `plugins/` and `brownout.yaml`. Your compose file and
-  LiteLLM's image stay as they were.
-- The log line names the plugin version and the teams it governs. If your service has another name,
-  `init` found it by its LiteLLM image, and `--service` names it when there are several.
+- `init` added brownout's settings to `config.yaml`, wrote the manifest `brownout.yaml`, and checked
+  both.
+- It copied the plugin into `plugins/` and wrote `docker-compose.override.yml`, which mounts it into
+  your LiteLLM service. Your compose file and LiteLLM's image stay as they were.
+- The log line names the plugin version and the teams it governs.
 
-To see the headers, send one request with a team's key. A refused request prints its reason
-instead, and the master key belongs to no team, so brownout refuses it.
+**Optional:** send one request with a team's key to see the headers. The master key belongs to no
+team, so brownout refuses it.
 
 <!-- adoption: confirm -->
 ```bash
@@ -160,6 +143,23 @@ manifest at `/app/brownout.yaml` and `PYTHONPATH=/app/plugins`.
 
 To upgrade, run `uvx --from litellm-brownout=={version} brownout plugin --dir plugins` and restart the
 gateway.
+
+### More than one LiteLLM process
+
+Several replicas or workers share their spend through Redis. Brownout uses the Redis LiteLLM already
+has, whether it comes from `coordination_redis`, a Redis response cache, `router_settings` or
+`REDIS_*` variables. A gateway without one adds this service and passes `--redis-host redis` to
+`init --write`.
+
+<!-- adoption: redis-service -->
+```yaml
+services:
+  redis:
+    image: redis:7
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory-policy noeviction"]
+    env_file:
+      - .env
+```
 
 ## Your first fallback
 
