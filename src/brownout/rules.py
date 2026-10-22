@@ -126,19 +126,26 @@ def settings_rules(settings: GatewaySettings) -> list[Violation]:
     return violations
 
 
+NOTICE_RULES: Final = frozenset({RuleId.REDIS_CONFIGURED})
+
+
+def file_notices(gateway: GatewayFile) -> list[Violation]:
+    if gateway.redis_configured:
+        return []
+    return [
+        Violation(
+            RuleId.REDIS_CONFIGURED,
+            "general_settings.coordination_redis",
+            "names no Redis. LiteLLM also takes one from a Redis response cache or from "
+            "REDIS_* environment variables, which this check cannot see. Without any of "
+            "them, brownout supports one LiteLLM process only: one replica with one "
+            "worker. The gateway logs which applies on its first governed request",
+        )
+    ]
+
+
 def file_rules(manifest: Manifest, gateway: GatewayFile) -> list[Violation]:
     violations = settings_rules(gateway.settings)
-    if not gateway.redis_configured:
-        violations.append(
-            Violation(
-                RuleId.REDIS_CONFIGURED,
-                "general_settings.coordination_redis",
-                "is unset. The spend counter and the plugin's claims need it. A Redis cache "
-                "does not count, because only coordination_redis is verified to carry the "
-                "counter on every supported LiteLLM release. A gateway without Redis needs "
-                "one first, as the README's Requirements show",
-            )
-        )
     for team in manifest.teams:
         for policy in team.routes.values():
             violations.extend(

@@ -10,6 +10,7 @@ from brownout.rules import (
     GatewayFile,
     GatewaySettings,
     ModelGroup,
+    file_notices,
     file_rules,
     group_from_deployments,
     is_priced,
@@ -190,13 +191,21 @@ def test_safe_settings_pass():
     assert settings_rules(SAFE_SETTINGS) == []
 
 
-def test_a_missing_redis_is_a_file_violation():
+def test_a_missing_redis_is_a_notice_and_never_a_violation():
     gateway = GatewayFile(groups={}, settings=SAFE_SETTINGS, redis_configured=False)
 
-    violations = file_rules(manifest(), gateway)
+    notices = file_notices(gateway)
 
-    assert [violation.rule for violation in violations] == [RuleId.REDIS_CONFIGURED]
-    assert "Redis cache" in violations[0].message
+    assert file_rules(manifest(), gateway) == []
+    assert [notice.rule for notice in notices] == [RuleId.REDIS_CONFIGURED]
+    assert "REDIS_*" in notices[0].message
+    assert "one LiteLLM process" in notices[0].message
+
+
+def test_a_configured_redis_raises_no_notice():
+    gateway = GatewayFile(groups={}, settings=SAFE_SETTINGS, redis_configured=True)
+
+    assert file_notices(gateway) == []
 
 
 @pytest.mark.parametrize(

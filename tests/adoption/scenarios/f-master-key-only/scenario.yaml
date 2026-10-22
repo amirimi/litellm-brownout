@@ -9,10 +9,6 @@ choices:
       "<YOUR TEAM ID>": search
       "<YOUR BUDGET>": "1.0"
       "<YOUR DURATION, SUCH AS 7d>": 7d
-provisions:
-  "<YOUR REDIS HOST>":
-    readme: redis-service
-    value: redis
 confirm:
   key: printed-key
   model: chat

@@ -72,11 +72,13 @@ checks each one and prints the fix.
 - Budgets sit on teams, never on keys.
 - Clients use LiteLLM's unified routes. Provider pass-through routes, realtime, batches, fine-tuning
   and search tools are refused.
-- `fail_closed_budget_enforcement` is on, and `coordination_redis` points at a Redis.
+- `fail_closed_budget_enforcement` is on, which `init` sets.
+- One LiteLLM process runs without Redis. More than one replica or worker needs a Redis that
+  LiteLLM uses: `coordination_redis`, a Redis response cache, or `REDIS_*` variables.
 - LiteLLM is 1.101.6 to 1.106. Pin its image by digest as well as tag, because floating tags such as
   `main-stable` have pointed at a compromised LiteLLM release.
 
-A gateway without Redis needs one that shares its `REDIS_PASSWORD`, such as this service.
+A gateway that adds Redis can use this service, which shares its `REDIS_PASSWORD`.
 
 <!-- adoption: redis-service -->
 ```yaml
@@ -102,8 +104,8 @@ uvx --from litellm-brownout brownout init --gateway http://localhost:4000 --gate
 ```
 
 Each finding prints its fix, and a fix that calls LiteLLM's API uses `$LITELLM_MASTER_KEY` from your
-shell. If `init` reports no Redis, add the service above and pass `--redis-host redis` in the next
-step.
+shell. A `redis-configured` notice is expected on one LiteLLM process. A gateway with more adds the
+service above and passes `--redis-host redis` in the next step.
 
 **2. Write the files.**
 
@@ -205,8 +207,10 @@ setup][agents]. The [lab][lab] drains a budget without spending anything.
 - **The reservation comes first:** LiteLLM reserves each request's worst case on the model the
   caller asked for. Set `max_tokens`, or a large request near the ceiling gets LiteLLM's 429 before
   the downgrade.
-- **Redis is on the request path:** while LiteLLM cannot reach Redis it refuses every budgeted
-  request.
+- **Without Redis, one process only:** several replicas or workers without Redis are unsupported.
+  The gateway logs its mode on its first governed request.
+- **With Redis, Redis is on the request path:** while LiteLLM cannot reach Redis it refuses every
+  budgeted request.
 
 The [full list][limits] covers the rest. If you run brownout on a real workload, [open an
 issue][issues] with the model pair, budget window, threshold and LiteLLM version, and say whether

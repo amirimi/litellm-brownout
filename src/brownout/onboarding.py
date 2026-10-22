@@ -234,6 +234,19 @@ def config_plan(
     return tuple(changes)
 
 
+def notice_findings(notices: Iterable[Violation]) -> list[Finding]:
+    return [
+        Finding(
+            notice.rule,
+            notice.subject,
+            notice.message,
+            _violation_resolution(notice.rule),
+            False,
+        )
+        for notice in notices
+    ]
+
+
 def violation_findings(violations: Iterable[Violation]) -> list[Finding]:
     return [
         Finding(
@@ -495,7 +508,7 @@ def _coordination_redis(
 ) -> list[ConfigChange]:
     if config.coordination_redis:
         return []
-    if config.cache_redis is None and redis_host is not None:
+    if redis_host is not None:
         return [
             SetSetting(
                 "general_settings",
@@ -506,6 +519,16 @@ def _coordination_redis(
                     "password": REDIS_PASSWORD_REFERENCE,
                 },
                 "points at the Redis host named with --redis-host",
+            )
+        ]
+    if config.cache_redis is None and config.router_redis is not None:
+        return [
+            SetSetting(
+                "general_settings",
+                "coordination_redis",
+                dict(config.router_redis),
+                "reuses the Redis that router_settings names, so LiteLLM also counts "
+                "spend across pods through it",
             )
         ]
     if config.cache_redis is None:

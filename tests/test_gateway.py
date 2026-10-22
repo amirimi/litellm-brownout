@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -1366,3 +1367,27 @@ async def test_the_filter_leaves_an_empty_candidate_list_to_litellm(team, call_t
 
     assert await filtered(handler, applied, cooled_down, None) is cooled_down
     assert sink.incidents == []
+
+
+@pytest.mark.parametrize(
+    ("shared", "level", "phrase"),
+    [
+        (True, "INFO", "shared through Redis"),
+        (False, "WARNING", "one LiteLLM process"),
+    ],
+)
+async def test_the_first_governed_request_names_the_counter_mode_once(
+    team, caplog, shared, level, phrase
+):
+    caplog.set_level(logging.INFO, logger="brownout")
+    handler = build_handler(team, RecordingSink(), spend=0.0, counter_shared=shared)
+    route = next(iter(team.routes))
+
+    await request(handler, make_auth(team), route)
+    await request(handler, make_auth(team), route)
+
+    named = [
+        record for record in caplog.records if "spend counter" in record.getMessage()
+    ]
+    assert [record.levelname for record in named] == [level]
+    assert phrase in named[0].getMessage()

@@ -212,6 +212,9 @@ def team_counter_key(team_id: str) -> str:
 
 
 class LiteLLMSpendCounter:
+    def shared(self) -> bool:
+        return live_spend_counter_redis() is not None
+
     async def read(
         self, team_id: str, fallback_spend: float, max_budget: float
     ) -> float:

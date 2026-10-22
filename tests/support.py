@@ -108,9 +108,13 @@ def gateway_file_of(config: Mapping[str, Any]) -> GatewayFile:
 
 
 class FakeSpendCounter:
-    def __init__(self, spend: float | Exception) -> None:
+    def __init__(self, spend: float | Exception, shared: bool = True) -> None:
         self._spend: Final = spend
+        self._shared: Final = shared
         self.calls: list[dict[str, Any]] = []
+
+    def shared(self) -> bool:
+        return self._shared
 
     async def read(
         self, team_id: str, fallback_spend: float, max_budget: float
@@ -271,6 +275,7 @@ def build_handler(
     permissions: Permissions | None = None,
     guardrails: Guardrails | None = None,
     data_class_order: tuple[str, ...] = DATA_CLASS_ORDER,
+    counter_shared: bool = True,
 ) -> BrownoutHandler:
     if store is None:
         store = FakeStore()
@@ -284,7 +289,7 @@ def build_handler(
         guardrails = bridge.LiteLLMGuardrails(lambda: None)
     return BrownoutHandler(
         manifest=manifest_for(team, data_class_order),
-        spend_counter=FakeSpendCounter(spend),
+        spend_counter=FakeSpendCounter(spend, counter_shared),
         permissions=permissions,
         schedule=schedule,
         guardrails=guardrails,

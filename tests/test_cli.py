@@ -462,6 +462,34 @@ def test_a_named_redis_host_becomes_the_coordination_redis(tmp_path):
     }
 
 
+def config_without_redis(directory: Path) -> Path:
+    config = lab_gateway_config()
+    config["general_settings"].pop("coordination_redis", None)
+    config.get("litellm_settings", {}).pop("cache_params", None)
+    return write(directory / "config.yaml", config)
+
+
+def test_without_redis_init_exits_zero_and_prints_the_notice(tmp_path, capsys):
+    chosen = options(tmp_path, gateway_config=config_without_redis(tmp_path))
+
+    exit_code = init(chosen, fake_gateway(), INIT_TOKEN)
+
+    printed = capsys.readouterr().out
+    assert exit_code == 0
+    assert "redis-configured\tgeneral_settings.coordination_redis\t" in printed
+    assert "one LiteLLM process" in printed
+    assert "brownout check passed on LiteLLM" in printed
+
+
+def test_without_redis_check_passes_and_prints_the_notice(tmp_path, capsys):
+    exit_code = check_files(config_without_redis(tmp_path), LAB_MANIFEST)
+
+    printed = capsys.readouterr().out
+    assert exit_code == 0
+    assert "notice: redis-configured\t" in printed
+    assert "brownout check passed on LiteLLM" in printed
+
+
 def test_init_writes_the_override_for_the_litellm_service(tmp_path, capsys):
     (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
     chosen = options(tmp_path)

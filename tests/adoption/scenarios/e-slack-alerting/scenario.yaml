@@ -12,10 +12,6 @@ seed:
       team: search
 environment:
   SLACK_WEBHOOK_URL: http://127.0.0.1:9/slack
-provisions:
-  "<YOUR REDIS HOST>":
-    readme: redis-service
-    value: redis
 confirm:
   key: search-app
   model: chat
