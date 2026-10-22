@@ -137,7 +137,7 @@ def file_notices(gateway: GatewayFile) -> list[Violation]:
             RuleId.REDIS_CONFIGURED,
             "general_settings.coordination_redis",
             "names no Redis. LiteLLM also takes one from a Redis response cache or from "
-            "REDIS_* environment variables, which this check cannot see. Without any of "
+            "REDIS_* environment variables, which brownout cannot see. Without any of "
             "them, brownout supports one LiteLLM process only: one replica with one "
             "worker. The gateway logs which applies on its first governed request",
         )
