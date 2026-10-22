@@ -229,7 +229,7 @@ the fallback stayed useful.
 - [Security][security]: what brownout reads and writes, and how to verify a release.
 - [Contributing][contributing]: the tests, the supported LiteLLM releases and releasing.
 
-If you find brownout useful, please star the repo. It helps other LiteLLM operators find it.
+**If you find brownout useful, please star the repo.** It helps other LiteLLM operators find it.
 
 ## License
 
