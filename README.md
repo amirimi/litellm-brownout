@@ -11,6 +11,7 @@ and the gateway switches that route once the team's spend passes it.
   <a href="https://pypi.org/project/litellm-brownout/"><img src="https://img.shields.io/pypi/v/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="PyPI version" /></a>
   <a href="https://github.com/amirimi/litellm-brownout/blob/main/CONTRIBUTING.md#supported-litellm-releases"><img src="https://img.shields.io/badge/LiteLLM-1.101.6%20to%201.106-000000?style=flat&labelColor=000000" alt="LiteLLM 1.101.6 to 1.106" /></a>
   <a href="https://github.com/amirimi/litellm-brownout/blob/main/LICENSE"><img src="https://img.shields.io/github/license/amirimi/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="License" /></a>
+  <a href="https://socket.dev/pypi/package/litellm-brownout"><img src="https://socket.dev/api/badge/pypi/package/litellm-brownout" alt="Socket score" /></a>
 </p>
 
 <p align="center">
