@@ -22,11 +22,10 @@ from brownout.onboarding import (
     key_findings,
     model_findings,
     nothing_to_govern,
+    notice_findings,
     reconcile_findings,
     team_entries,
     team_findings,
-    notice_findings,
-    violation_findings,
 )
 from brownout.refusals import RuleId, Violation
 from brownout.rules import ModelGroup
