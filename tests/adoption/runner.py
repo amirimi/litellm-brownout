@@ -11,6 +11,8 @@ from typing import Final
 import httpx
 import yaml
 
+from brownout.rules import NOTICE_RULES
+
 from .findings import PrintedFinding, parse_findings
 from .gateway import ComposeGateway, free_port
 from .readme import README, adapt, readme_blocks
@@ -54,6 +56,7 @@ DRIVE_MAX_TOKENS: Final = 40
 REQUEST_TIMEOUT_SECONDS: Final = 60.0
 BUDGET_REFUSALS: Final = frozenset({422, 429})
 EXCERPT: Final = 1200
+NOTICES: Final = frozenset(str(rule) for rule in NOTICE_RULES)
 
 
 class PathStop(Exception):
@@ -188,7 +191,9 @@ class Adoption:
             pending = [
                 finding
                 for finding in findings
-                if kind_of(finding) != "none" and not finding.truncated
+                if kind_of(finding) != "none"
+                and not finding.truncated
+                and finding.rule not in NOTICES
             ]
             if not pending:
                 raise PathStop(
