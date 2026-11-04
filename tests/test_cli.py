@@ -31,6 +31,13 @@ def write(path: Path, document: Any) -> Path:
     return path
 
 
+def test_version_prints_package_version_and_exits_zero(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--version"])
+    assert excinfo.value.code == 0
+    assert capsys.readouterr().out.strip() == f"brownout {plugin_folder.running_version()}"
+
+
 def test_the_lab_passes_the_check(capsys):
     assert (
         main(
