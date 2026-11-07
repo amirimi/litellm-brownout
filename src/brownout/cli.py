@@ -131,9 +131,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser: Final = argparse.ArgumentParser(prog="brownout")
-    # Version source follows the repo's existing practice: the installed
-    # distribution version, or "unpackaged" when run from a checkout.
-    parser.add_argument("--version", action="version", version=f"brownout {running_version()}")
+    parser.add_argument(
+        "--version", action="version", version=f"brownout {running_version()}"
+    )
     commands: Final = parser.add_subparsers(dest="command", required=True)
     check_command: Final = commands.add_parser(
         "check", help="Check a gateway config and a manifest against brownout's rules"
