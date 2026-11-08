@@ -36,8 +36,7 @@ def test_version_prints_package_version_and_exits_zero(capsys):
         main(["--version"])
     assert excinfo.value.code == 0
     assert (
-        capsys.readouterr().out.strip()
-        == f"brownout {plugin_folder.running_version()}"
+        capsys.readouterr().out.strip() == f"brownout {plugin_folder.running_version()}"
     )
 
 

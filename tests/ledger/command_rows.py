@@ -21,7 +21,7 @@ COMMAND_ROWS: Final = (
         source="brownout",
         parser="cli._parser",
         reads=(
-                "flag:--version",
+            "flag:--version",
             "flag:check",
             "flag:init",
             "flag:--gateway-config",
@@ -40,13 +40,13 @@ COMMAND_ROWS: Final = (
         ),
         cites=(),
         forms=(
-                Form(
-                    "--version",
-                    "the package version, then exit 0",
-                    Supported(
-                        (f"{CLI}test_version_prints_package_version_and_exits_zero",)
-                    ),
+            Form(
+                "--version",
+                "the package version, then exit 0",
+                Supported(
+                    (f"{CLI}test_version_prints_package_version_and_exits_zero",)
                 ),
+            ),
             Form(
                 "check with a gateway config and a manifest",
                 "check",
