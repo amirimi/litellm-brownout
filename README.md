@@ -9,7 +9,7 @@ and the gateway switches that route once the team's spend passes it.
 
 <p align="center">
   <a href="https://pypi.org/project/litellm-brownout/"><img src="https://img.shields.io/pypi/v/litellm-brownout?style=flat&labelColor=000000&color=000000" alt="PyPI version" /></a>
-  <a href="https://github.com/amirimi/litellm-brownout/blob/main/CONTRIBUTING.md#supported-litellm-releases"><img src="https://img.shields.io/badge/LiteLLM-1.101.6%20to%201.106-000000?style=flat&labelColor=000000" alt="LiteLLM 1.101.6 to 1.106" /></a>
+  <a href="https://github.com/amirimi/litellm-brownout/blob/main/CONTRIBUTING.md#supported-litellm-releases"><img src="https://img.shields.io/badge/LiteLLM-1.101.6%20to%201.108-000000?style=flat&labelColor=000000" alt="LiteLLM 1.101.6 to 1.108" /></a>
   <a href="https://socket.dev/pypi/package/litellm-brownout"><img src="https://socket.dev/api/badge/pypi/package/litellm-brownout" alt="Socket score" /></a>
   <a href="https://github.com/amirimi/litellm-brownout/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/amirimi/litellm-brownout/ci.yml?branch=main&label=tests&style=flat&labelColor=000000" alt="Tests" /></a>
   <a href="https://github.com/amirimi/litellm-brownout/actions/workflows/litellm-matrix.yml"><img src="https://img.shields.io/github/actions/workflow/status/amirimi/litellm-brownout/litellm-matrix.yml?branch=main&label=LiteLLM%20matrix&style=flat&labelColor=000000" alt="LiteLLM matrix" /></a>
@@ -75,7 +75,7 @@ checks each one and prints the fix.
 - Budgets sit on teams, never on keys.
 - Clients use LiteLLM's unified routes. Provider pass-through routes, realtime, batches, fine-tuning
   and search tools are refused.
-- LiteLLM is 1.101.6 to 1.106, with its image pinned by digest.
+- LiteLLM is 1.101.6 to 1.108, with its image pinned by digest.
 - One LiteLLM process needs nothing more. [More than one](#more-than-one-litellm-process) needs
   Redis.
 

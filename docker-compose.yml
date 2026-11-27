@@ -1,6 +1,6 @@
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.106.1}
+    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.108.8}
     restart: unless-stopped
     ports:
       - "127.0.0.1:4000:4000"
@@ -39,7 +39,7 @@ services:
         condition: service_healthy
 
   lab-tools:
-    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.106.1}
+    image: docker.litellm.ai/berriai/litellm:${LITELLM_TAG:-v1.108.8}
     restart: unless-stopped
     entrypoint: ["python", "/app/lab/lab_tools.py"]
     ports:
