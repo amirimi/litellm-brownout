@@ -10,7 +10,7 @@ Source = Literal["brownout", "litellm", "release", "printed", "compose"]
 Stage = Literal["check", "init", "start", "request"]
 
 FIRST_MINOR: Final = 101
-LAST_MINOR: Final = 106
+LAST_MINOR: Final = 108
 SKIPPED_MINORS: Final[Mapping[int, str]] = {
     107: "no final release: 1.107.0 was compromised and withdrawn, and release "
     "candidates load without the untested warning because the ceiling compares minors",

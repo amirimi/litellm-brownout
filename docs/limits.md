@@ -59,6 +59,9 @@ Each limit says what it means for your gateway. Refusals, headers and events are
   access group or a team alias keeps the primary.
   Project, team member and customer model lists are never read, so a downgrade can serve a fallback
   one of them excludes.
+  PTU shares and per-user provider credentials are never read either. A downgrade into a group
+  whose deployments are shared only with other teams, or need the caller's own GitHub OAuth token,
+  fails after brownout chose it.
 - **An agent key is never downgraded:** LiteLLM limits an agent's models in ways the key and team
   lists do not show, so the request keeps its primary and the owner gets
   `brownout_fallback_rejected` with `agent_key`.

@@ -20,12 +20,14 @@ WALKED_RELEASES: Final = (
     "1.104.4",
     "1.105.2",
     "1.106.1",
+    "1.108.8",
 )
 
 OPEN_FINDINGS: Final[Mapping[str, str]] = {
     "budgets-before-tiers": (
         "organization, tag, end-user, global proxy, budget_limits, access group, late "
-        "member, default key and opted-in user budgets can refuse before the tiers, and "
+        "member, member per-model, default key and opted-in user budgets can refuse "
+        "before the tiers, and "
         "init or check can see each of them"
     ),
 }
