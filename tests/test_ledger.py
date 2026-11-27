@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import tomllib
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Final, assert_never
 
@@ -15,6 +16,7 @@ from .ledger.inventory import LEDGER, OPEN_FINDINGS, WALKED_RELEASES
 from .ledger.model import (
     FIRST_MINOR,
     LAST_MINOR,
+    SKIPPED_MINORS,
     Disposition,
     Documented,
     Form,
@@ -175,8 +177,25 @@ def test_the_readme_commands_run_on_every_walked_release() -> None:
 
 def test_raising_the_litellm_bound_needs_a_new_walk() -> None:
     walked_minors: Final = [_minor(release) for release in WALKED_RELEASES]
-    assert walked_minors == list(range(FIRST_MINOR, LAST_MINOR + 1))
+    assert walked_minors == _expected_minors(SKIPPED_MINORS)
     assert _upper_bound_minor() == LAST_MINOR + 1
+
+
+def test_a_skipped_minor_has_no_walked_release_and_names_a_reason() -> None:
+    walked_minors: Final = {_minor(release) for release in WALKED_RELEASES}
+    for minor, reason in SKIPPED_MINORS.items():
+        assert minor > FIRST_MINOR
+        assert minor not in walked_minors
+        assert reason.strip()
+
+
+def test_a_gap_the_skip_list_does_not_name_fails_the_walk_check() -> None:
+    gap: Final = FIRST_MINOR + 1
+    walked_minors: Final = [
+        _minor(release) for release in WALKED_RELEASES if _minor(release) != gap
+    ]
+    assert walked_minors != _expected_minors(SKIPPED_MINORS)
+    assert walked_minors == _expected_minors({**SKIPPED_MINORS, gap: "a test gap"})
 
 
 def _claims() -> dict[tuple[str, str], list[str]]:
@@ -236,6 +255,12 @@ def _cites_walked_release(cite: str) -> bool:
     if match_ is None:
         return False
     return match_["release"] in WALKED_RELEASES
+
+
+def _expected_minors(skipped: Mapping[int, str]) -> list[int]:
+    return [
+        minor for minor in range(FIRST_MINOR, LAST_MINOR + 1) if minor not in skipped
+    ]
 
 
 def _minor(release: str) -> int:

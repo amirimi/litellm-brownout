@@ -84,7 +84,7 @@ wheel for the PyPI package, and the LiteLLM image tag. Every step's command and 
 The README marks the blocks the runner runs with `<!-- adoption: name -->` comments, so a marker
 moves with its block. A scenario directory holds `scenario.yaml`, the gateway's `config.yaml`, and
 optionally a `compose.yml` overlay and any file the config includes. The `adoption` workflow runs
-every scenario on 1.101.6 and 1.106.1 weekly and on pull requests that touch `init`, `check`, the
+every scenario on 1.101.6 and 1.108.8 weekly and on pull requests that touch `init`, `check`, the
 README or the docs. It also runs `a-config-models` and `b-ui-models` on every supported release line,
 because those two run the README's commands against LiteLLM's API.
 
@@ -114,7 +114,9 @@ Brownout supports LiteLLM 1.101.6 and newer. `SUPPORTED_FLOOR` and `TESTED_CEILI
 `src/brownout/bridge.py` hold the range. Below the floor the handler refuses to start, and past the
 ceiling it warns that the release is untested. The floor moves only by a decision recorded in the
 pull request that moves it. Releases before 1.101 shrink an over-budget reservation to the remaining
-headroom instead of refusing it, so a window could close above the envelope.
+headroom instead of refusing it, so a window could close above the envelope. LiteLLM 1.107 had no
+final release, so no workflow runs it, and `SKIPPED_MINORS` in `tests/ledger/model.py` names the
+gap.
 
 `pyproject.toml` pins the floor, so the ci workflow runs the unit and seam suites on it. The
 `litellm matrix` workflow runs every suite against the latest patch of each supported release line,
@@ -123,9 +125,9 @@ follow the release under test. To run one release line by hand, install it into 
 environment and point the lab at the matching image.
 
 ```bash
-uv pip install --no-config "litellm[proxy]==1.106.1"
+uv pip install --no-config "litellm[proxy]==1.108.8"
 uv run --no-sync pytest -m "not e2e"
-LITELLM_TAG=v1.106.1 docker compose up -d --wait
+LITELLM_TAG=v1.108.8 docker compose up -d --wait
 LAB_REQUIRE_STACK=1 uv run --no-sync pytest -m e2e
 ```
 

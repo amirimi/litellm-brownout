@@ -32,6 +32,14 @@ UNREAD_MODEL_LIST: Final = Documented(
     docs="docs/limits.md",
     phrase="Project, team member and customer model lists are never read",
 )
+UNSERVABLE_DOWNGRADE: Final = Documented(
+    unseen_because=(
+        "the router decides after the hook which caller a deployment serves, and LiteLLM "
+        "loads a user's provider token before the hook for the requested model only"
+    ),
+    docs="docs/limits.md",
+    phrase="PTU shares and per-user provider credentials are never read",
+)
 
 
 LITELLM_ROWS: Final = (
@@ -324,6 +332,30 @@ LITELLM_ROWS: Final = (
         ),
     ),
     Input(
+        shape="deployments LiteLLM serves to some callers only",
+        source="litellm",
+        parser=None,
+        reads=(),
+        cites=(
+            "litellm/router.py:14032@1.108.8",
+            "litellm/proxy/litellm_pre_call_utils.py:3098@1.108.8",
+        ),
+        forms=(
+            Form(
+                "a group whose deployments model_info.ptu_shares reserves for other "
+                "teams, from 1.108",
+                "not read, so the router refuses a downgrade into it with a 400",
+                UNSERVABLE_DOWNGRADE,
+            ),
+            Form(
+                "a group whose deployments use per-user GitHub OAuth credentials, "
+                "from 1.108",
+                "not read, so a downgrade into it fails with a 401",
+                UNSERVABLE_DOWNGRADE,
+            ),
+        ),
+    ),
+    Input(
         shape="LiteLLM budgets other than the team's",
         source="litellm",
         parser=None,
@@ -331,6 +363,7 @@ LITELLM_ROWS: Final = (
         cites=(
             "litellm/proxy/auth/auth_checks.py:834@1.101.6",
             "litellm/proxy/auth/auth_checks.py:932@1.104.4",
+            "litellm/proxy/auth/user_api_key_auth.py:758@1.108.8",
         ),
         forms=(
             Form(
@@ -362,6 +395,12 @@ LITELLM_ROWS: Final = (
             Form(
                 "a budget LiteLLM gives new keys through default_key_generate_params",
                 "refused per request by key-has-no-budget",
+                BUDGETS_BEFORE_TIERS,
+            ),
+            Form(
+                "a team member's per-model budget, from 1.108",
+                "refuses before the tiers, or moves the request to a router fallback the "
+                "member can still afford",
                 BUDGETS_BEFORE_TIERS,
             ),
             Form(

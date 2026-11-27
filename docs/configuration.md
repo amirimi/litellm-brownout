@@ -29,7 +29,7 @@ Mount the folder anywhere except next to the gateway config. LiteLLM loads a cal
 | `BROWNOUT_MANIFEST` | `brownout.yaml` in the working directory, `/app/brownout.yaml` in LiteLLM's image | The manifest's path in the container |
 
 The handler refuses to start below LiteLLM 1.101.6 and warns on a release newer than the tested
-1.106. Request facts reach the logging integrations the gateway already runs, and announcements go
+1.108. Request facts reach the logging integrations the gateway already runs, and announcements go
 to the gateway log, as [the enforcement reference](enforcement.md#request-facts-and-announcements)
 describes.
 
