@@ -2,6 +2,32 @@
 
 All notable changes to litellm-brownout are listed here. Versions follow semantic versioning.
 
+## 0.1.2 - 2026-11-27
+
+Brownout now installs next to LiteLLM 1.108, and `brownout --version` names the installed release.
+
+### Added
+
+- `brownout --version` prints the package version and exits. Thanks to @zheng-guannan577 for
+  #46, the project's first outside contribution.
+
+### Changed
+
+- **LiteLLM 1.108 is supported.** The handler no longer warns on 1.108, and the package installs
+  next to it. 1.108.8 was walked and tested on every suite. LiteLLM 1.107 had no final release,
+  because 1.107.0 was compromised and withdrawn, so brownout was never tested on it.
+- **Two downgrade limits are documented.** A downgrade into a group whose deployments
+  `model_info.ptu_shares` reserves for other teams, or that needs the caller's own GitHub OAuth
+  token, fails after brownout chose it. Both arrive with LiteLLM 1.108, and
+  [the limits](docs/limits.md) list them.
+
+### Supported
+
+- LiteLLM 1.101.6 to 1.108. Pin its image by digest as well as tag.
+- One LiteLLM process without Redis, or any number of processes with a Redis that LiteLLM uses.
+  Several processes without Redis are unsupported.
+- Python 3.12 and newer.
+
 ## 0.1.1 - 2026-10-22
 
 Brownout now installs into LiteLLM's own image without a rebuild, runs on one LiteLLM process
